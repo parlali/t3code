@@ -249,7 +249,9 @@ const resolveStartupBrowserTarget = Effect.gen(function* () {
       ? `http://${formatHostForUrl(serverConfig.host)}:${serverConfig.port}`
       : localUrl;
   const baseTarget = serverConfig.devUrl?.toString() ?? bindUrl;
-  return yield* Effect.succeed(serverConfig.mode === "desktop" ? baseTarget : undefined).pipe(
+  return yield* Effect.succeed(
+    serverConfig.mode === "desktop" || serverConfig.unsafeNoAuth ? baseTarget : undefined,
+  ).pipe(
     Effect.flatMap((target) =>
       target ? Effect.succeed(target) : serverAuth.issueStartupPairingUrl(baseTarget),
     ),
@@ -442,9 +444,15 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
         yield* Effect.logDebug("startup phase: browser open check");
         const startupBrowserTarget = yield* resolveStartupBrowserTarget;
         if (serverConfig.mode !== "desktop") {
-          yield* Effect.logInfo(
-            "Authentication required. Open T3 Code using the pairing URL.",
-          ).pipe(Effect.annotateLogs({ pairingUrl: startupBrowserTarget }));
+          if (serverConfig.unsafeNoAuth) {
+            yield* Effect.logWarning(
+              "Authentication disabled. Open T3 Code using the access URL.",
+            ).pipe(Effect.annotateLogs({ accessUrl: startupBrowserTarget }));
+          } else {
+            yield* Effect.logInfo(
+              "Authentication required. Open T3 Code using the pairing URL.",
+            ).pipe(Effect.annotateLogs({ pairingUrl: startupBrowserTarget }));
+          }
         }
         yield* runStartupPhase("browser.open", maybeOpenBrowser(startupBrowserTarget));
       }

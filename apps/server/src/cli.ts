@@ -75,6 +75,7 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   t3Home: Schema.optional(Schema.String),
   devUrl: Schema.optional(Schema.URLFromString),
   noBrowser: Schema.optional(Schema.Boolean),
+  unsafeNoAuth: Schema.optional(Schema.Boolean),
   desktopBootstrapToken: Schema.optional(Schema.String),
   autoBootstrapProjectFromCwd: Schema.optional(Schema.Boolean),
   logWebSocketEvents: Schema.optional(Schema.Boolean),
@@ -106,6 +107,12 @@ const devUrlFlag = Flag.string("dev-url").pipe(
 );
 const noBrowserFlag = Flag.boolean("no-browser").pipe(
   Flag.withDescription("Disable automatic browser opening."),
+  Flag.optional,
+);
+const unsafeNoAuthFlag = Flag.boolean("unsafe-no-auth").pipe(
+  Flag.withDescription(
+    "Disable server authentication. Unsafe: only use behind trusted private networking.",
+  ),
   Flag.optional,
 );
 const bootstrapFdFlag = Flag.integer("bootstrap-fd").pipe(
@@ -162,6 +169,10 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  unsafeNoAuth: Config.boolean("T3CODE_UNSAFE_NO_AUTH").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   bootstrapFd: Config.int("T3CODE_BOOTSTRAP_FD").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -184,6 +195,7 @@ interface CliServerFlags {
   readonly cwd: Option.Option<string>;
   readonly devUrl: Option.Option<URL>;
   readonly noBrowser: Option.Option<boolean>;
+  readonly unsafeNoAuth: Option.Option<boolean>;
   readonly bootstrapFd: Option.Option<number>;
   readonly autoBootstrapProjectFromCwd: Option.Option<boolean>;
   readonly logWebSocketEvents: Option.Option<boolean>;
@@ -230,6 +242,7 @@ export const resolveServerConfig = (
       cwd: flags.cwd ?? Option.none(),
       devUrl: flags.devUrl ?? Option.none(),
       noBrowser: flags.noBrowser ?? Option.none(),
+      unsafeNoAuth: flags.unsafeNoAuth ?? Option.none(),
       bootstrapFd: flags.bootstrapFd ?? Option.none(),
       autoBootstrapProjectFromCwd: flags.autoBootstrapProjectFromCwd ?? Option.none(),
       logWebSocketEvents: flags.logWebSocketEvents ?? Option.none(),
@@ -305,6 +318,14 @@ export const resolveServerConfig = (
       () => mode === "desktop",
     );
     const desktopBootstrapToken = bootstrap?.desktopBootstrapToken;
+    const unsafeNoAuth = Option.getOrElse(
+      resolveOptionPrecedence(
+        normalizedFlags.unsafeNoAuth,
+        Option.fromUndefinedOr(env.unsafeNoAuth),
+        Option.fromUndefinedOr(bootstrap?.unsafeNoAuth),
+      ),
+      () => false,
+    );
     const autoBootstrapProjectFromCwd = Option.getOrElse(
       resolveOptionPrecedence(
         Option.fromUndefinedOr(options?.forceAutoBootstrapProjectFromCwd),
@@ -361,6 +382,7 @@ export const resolveServerConfig = (
       staticDir,
       devUrl,
       noBrowser,
+      unsafeNoAuth,
       startupPresentation,
       desktopBootstrapToken,
       autoBootstrapProjectFromCwd,
@@ -383,6 +405,7 @@ const resolveCliAuthConfig = (
       cwd: Option.none(),
       devUrl: flags.devUrl ?? Option.none(),
       noBrowser: Option.none(),
+      unsafeNoAuth: Option.none(),
       bootstrapFd: Option.none(),
       autoBootstrapProjectFromCwd: Option.none(),
       logWebSocketEvents: Option.none(),
@@ -763,6 +786,7 @@ const sharedServerCommandFlags = {
   ),
   devUrl: devUrlFlag,
   noBrowser: noBrowserFlag,
+  unsafeNoAuth: unsafeNoAuthFlag,
   bootstrapFd: bootstrapFdFlag,
   autoBootstrapProjectFromCwd: autoBootstrapProjectFromCwdFlag,
   logWebSocketEvents: logWebSocketEventsFlag,

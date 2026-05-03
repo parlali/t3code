@@ -39,6 +39,12 @@ const makeCookieRequest = (
     headers: {},
   }) as unknown as Parameters<ServerAuthShape["authenticateHttpRequest"]>[0];
 
+const makeEmptyRequest = (): Parameters<ServerAuthShape["authenticateHttpRequest"]>[0] =>
+  ({
+    cookies: {},
+    headers: {},
+  }) as unknown as Parameters<ServerAuthShape["authenticateHttpRequest"]>[0];
+
 const requestMetadata = {
   deviceType: "desktop" as const,
   os: "macOS",
@@ -93,6 +99,34 @@ it.layer(NodeServices.layer)("ServerAuthLive", (it) => {
       expect(verified.role).toBe("client");
       expect(verified.subject).toBe("one-time-token");
     }).pipe(Effect.provide(makeServerAuthLayer())),
+  );
+
+  it.effect("authenticates every request when unsafe no-auth is enabled", () =>
+    Effect.gen(function* () {
+      const serverAuth = yield* ServerAuth;
+      const request = makeEmptyRequest();
+
+      const descriptor = yield* serverAuth.getDescriptor();
+      const sessionState = yield* serverAuth.getSessionState(request);
+      const httpSession = yield* serverAuth.authenticateHttpRequest(request);
+      const websocketSession = yield* serverAuth.authenticateWebSocketUpgrade(request);
+
+      expect(descriptor.policy).toBe("unsafe-no-auth");
+      expect(descriptor.bootstrapMethods).toEqual([]);
+      expect(descriptor.sessionMethods).toEqual([]);
+      expect(sessionState.authenticated).toBe(true);
+      expect(sessionState.auth.policy).toBe("unsafe-no-auth");
+      expect(sessionState.role).toBe("owner");
+      expect(httpSession.role).toBe("owner");
+      expect(websocketSession.role).toBe("owner");
+    }).pipe(
+      Effect.provide(
+        makeServerAuthLayer({
+          host: "0.0.0.0",
+          unsafeNoAuth: true,
+        }),
+      ),
+    ),
   );
 
   it.effect("issues startup pairing URLs that bootstrap owner sessions", () =>

@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
+import type * as NodeHttp from "node:http";
 
 import { ServerConfig } from "./config.ts";
 import {
@@ -111,13 +112,49 @@ const HttpServerLive = Layer.unwrap(
         Effect.promise(() => import("@effect/platform-node/NodeHttpServer")),
         Effect.promise(() => import("node:http")),
       ]);
-      return NodeHttpServer.layer(NodeHttp.createServer, {
+      return NodeHttpServer.layer(() => createResilientNodeHttpServer(NodeHttp.createServer), {
         host: config.host,
         port: config.port,
       });
     }
   }),
 );
+
+const expectedClientSocketErrorCodes = new Set(["ECONNRESET", "EPIPE", "ETIMEDOUT"]);
+
+function clientSocketErrorCode(cause: unknown): string | null {
+  if (typeof cause !== "object" || cause === null || !("code" in cause)) {
+    return null;
+  }
+  const code = cause.code;
+  return typeof code === "string" ? code : null;
+}
+
+export function createResilientNodeHttpServer(
+  createServer: typeof NodeHttp.createServer,
+): NodeHttp.Server {
+  const server = createServer();
+
+  server.on("connection", (socket) => {
+    socket.on("error", (cause) => {
+      const code = clientSocketErrorCode(cause);
+      if (code === null || !expectedClientSocketErrorCodes.has(code)) {
+        console.warn(
+          `[server] Ignoring client socket error: ${
+            code ?? (cause instanceof Error ? cause.message : "unknown")
+          }`,
+        );
+      }
+      socket.destroy();
+    });
+  });
+
+  server.on("clientError", (_cause, socket) => {
+    socket.destroy();
+  });
+
+  return server;
+}
 
 const PlatformServicesLive = Layer.unwrap(
   Effect.gen(function* () {

@@ -50,13 +50,15 @@ import {
 import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
+import * as NodeHttp from "node:http";
+import * as NodeNet from "node:net";
 import { vi } from "vitest";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
 import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
-import { makeRoutesLayer } from "./server.ts";
+import { createResilientNodeHttpServer, makeRoutesLayer } from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import {
   CheckpointDiffQuery,
@@ -369,6 +371,7 @@ const buildAppUnderTest = (options?: {
       staticDir: undefined,
       devUrl,
       noBrowser: true,
+      unsafeNoAuth: false,
       startupPresentation: "browser",
       desktopBootstrapToken: defaultDesktopBootstrapToken,
       autoBootstrapProjectFromCwd: false,
@@ -834,6 +837,52 @@ const getWsServerUrl = (
     );
   });
 
+it("keeps the Node HTTP server alive after a client socket reset", async () => {
+  const server = createResilientNodeHttpServer(NodeHttp.createServer);
+
+  await new Promise<void>((resolve, reject) => {
+    const onError = (cause: Error) => {
+      server.off("listening", onListening);
+      reject(cause);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      resolve();
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(0, "127.0.0.1");
+  });
+
+  try {
+    const address = server.address();
+    if (typeof address === "string" || address === null) {
+      throw new Error("Expected a TCP listen address.");
+    }
+
+    await new Promise<void>((resolve) => {
+      server.once("connection", (socket) => {
+        socket.emit("error", Object.assign(new Error("reset"), { code: "ECONNRESET" }));
+        resolve();
+      });
+
+      const client = NodeNet.createConnection({
+        host: "127.0.0.1",
+        port: address.port,
+      });
+      client.on("error", () => {});
+      client.on("close", () => client.destroy());
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.isTrue(server.listening);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((cause) => (cause ? reject(cause) : resolve()));
+    });
+  }
+});
+
 it.layer(NodeServices.layer)("server router seam", (it) => {
   it.effect("serves static index content for GET / when staticDir is configured", () =>
     Effect.gen(function* () {
@@ -963,6 +1012,38 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         "bearer-session-token",
       ]);
       assert.isTrue(body.auth.sessionCookieName.startsWith("t3_session_"));
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("reports authenticated session state when unsafe no-auth is enabled", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        config: {
+          host: "0.0.0.0",
+          unsafeNoAuth: true,
+        },
+      });
+
+      const url = yield* getHttpServerUrl("/api/auth/session");
+      const response = yield* Effect.promise(() => fetch(url));
+      const body = (yield* Effect.promise(() => response.json())) as {
+        readonly authenticated: boolean;
+        readonly role?: string;
+        readonly sessionMethod?: string;
+        readonly auth: {
+          readonly policy: string;
+          readonly bootstrapMethods: ReadonlyArray<string>;
+          readonly sessionMethods: ReadonlyArray<string>;
+        };
+      };
+
+      assert.equal(response.status, 200);
+      assert.equal(body.authenticated, true);
+      assert.equal(body.role, "owner");
+      assert.notProperty(body, "sessionMethod");
+      assert.equal(body.auth.policy, "unsafe-no-auth");
+      assert.deepEqual(body.auth.bootstrapMethods, []);
+      assert.deepEqual(body.auth.sessionMethods, []);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

@@ -1,4 +1,5 @@
 import {
+  AuthSessionId,
   type AuthBearerBootstrapResult,
   type AuthClientSession,
   type AuthBootstrapResult,
@@ -33,6 +34,12 @@ type BootstrapExchangeResult = {
 
 const AUTHORIZATION_PREFIX = "Bearer ";
 const WEBSOCKET_TOKEN_QUERY_PARAM = "wsToken";
+const unsafeNoAuthSession: AuthenticatedSession = {
+  sessionId: AuthSessionId.make("unsafe-no-auth"),
+  subject: "unsafe-no-auth",
+  method: "bearer-session-token",
+  role: "owner",
+};
 
 export function toBootstrapExchangeAuthError(cause: BootstrapCredentialError): AuthError {
   if (cause.status === 500) {
@@ -65,6 +72,7 @@ export const makeServerAuth = Effect.gen(function* () {
   const authControlPlane = yield* AuthControlPlane;
   const sessions = yield* SessionCredentialService;
   const descriptor = yield* policy.getDescriptor();
+  const isUnsafeNoAuth = descriptor.policy === "unsafe-no-auth";
 
   const authenticateToken = (token: string): Effect.Effect<AuthenticatedSession, AuthError> =>
     sessions.verify(token).pipe(
@@ -93,6 +101,10 @@ export const makeServerAuth = Effect.gen(function* () {
     );
 
   const authenticateRequest = (request: HttpServerRequest.HttpServerRequest) => {
+    if (isUnsafeNoAuth) {
+      return Effect.succeed(unsafeNoAuthSession);
+    }
+
     const cookieToken = request.cookies[sessions.cookieName];
     const bearerToken = parseBearerToken(request);
     const credential = cookieToken ?? bearerToken;
@@ -108,24 +120,30 @@ export const makeServerAuth = Effect.gen(function* () {
   };
 
   const getSessionState: ServerAuthShape["getSessionState"] = (request) =>
-    authenticateRequest(request).pipe(
-      Effect.map(
-        (session) =>
-          ({
-            authenticated: true,
-            auth: descriptor,
-            role: session.role,
-            sessionMethod: session.method,
-            ...(session.expiresAt ? { expiresAt: DateTime.toUtc(session.expiresAt) } : {}),
-          }) satisfies AuthSessionState,
-      ),
-      Effect.catchTag("AuthError", () =>
-        Effect.succeed({
-          authenticated: false,
+    isUnsafeNoAuth
+      ? Effect.succeed({
+          authenticated: true,
           auth: descriptor,
-        } satisfies AuthSessionState),
-      ),
-    );
+          role: unsafeNoAuthSession.role,
+        } satisfies AuthSessionState)
+      : authenticateRequest(request).pipe(
+          Effect.map(
+            (session) =>
+              ({
+                authenticated: true,
+                auth: descriptor,
+                role: session.role,
+                sessionMethod: session.method,
+                ...(session.expiresAt ? { expiresAt: DateTime.toUtc(session.expiresAt) } : {}),
+              }) satisfies AuthSessionState,
+          ),
+          Effect.catchTag("AuthError", () =>
+            Effect.succeed({
+              authenticated: false,
+              auth: descriptor,
+            } satisfies AuthSessionState),
+          ),
+        );
 
   const exchangeBootstrapCredential: ServerAuthShape["exchangeBootstrapCredential"] = (
     credential,
@@ -343,6 +361,10 @@ export const makeServerAuth = Effect.gen(function* () {
 
   const authenticateWebSocketUpgrade: ServerAuthShape["authenticateWebSocketUpgrade"] = (request) =>
     Effect.gen(function* () {
+      if (isUnsafeNoAuth) {
+        return unsafeNoAuthSession;
+      }
+
       const requestUrl = HttpServerRequest.toURL(request);
       if (Option.isSome(requestUrl)) {
         const websocketToken = requestUrl.value.searchParams.get(WEBSOCKET_TOKEN_QUERY_PARAM);
