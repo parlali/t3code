@@ -1,6 +1,7 @@
 import {
   type EnvironmentId,
   isProviderDriverKind,
+  type MessageId,
   ProjectId,
   type ModelSelection,
   type ProviderDriverKind,
@@ -8,10 +9,17 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
-import { type ChatMessage, type SessionPhase, type Thread, type ThreadSession } from "../types";
+import {
+  type ChatMessage,
+  type SessionPhase,
+  type Thread,
+  type ThreadSession,
+  type TurnDiffSummary,
+} from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import { Schema } from "effect";
 import { selectThreadByRef, useStore } from "../store";
+import { type TimelineEntry } from "../session-logic";
 import {
   filterTerminalContextsWithText,
   stripInlineTerminalContextPlaceholders,
@@ -120,6 +128,138 @@ export function revokeUserMessagePreviewUrls(message: ChatMessage): void {
     }
     revokeBlobPreviewUrl(attachment.previewUrl);
   }
+}
+
+export async function cloneUserMessageAttachmentsForComposer(
+  message: ChatMessage,
+): Promise<ComposerImageAttachment[]> {
+  if (message.role !== "user" || !message.attachments || message.attachments.length === 0) {
+    return [];
+  }
+
+  const clonedImages: ComposerImageAttachment[] = [];
+  try {
+    for (const attachment of message.attachments) {
+      if (attachment.type !== "image") {
+        continue;
+      }
+      if (!attachment.previewUrl) {
+        throw new Error(`Could not restore image attachment '${attachment.name}'.`);
+      }
+
+      const response = await fetch(attachment.previewUrl, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error(`Could not restore image attachment '${attachment.name}'.`);
+      }
+
+      const blob = await response.blob();
+      const mimeType = blob.type || attachment.mimeType;
+      const file = new File([blob], attachment.name, { type: mimeType });
+      const previewUrl =
+        typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
+          ? URL.createObjectURL(file)
+          : attachment.previewUrl;
+
+      clonedImages.push({
+        type: "image",
+        id: attachment.id,
+        name: attachment.name,
+        mimeType,
+        sizeBytes: file.size || attachment.sizeBytes,
+        previewUrl,
+        file,
+      });
+    }
+  } catch (error) {
+    for (const image of clonedImages) {
+      revokeBlobPreviewUrl(image.previewUrl);
+    }
+    throw error;
+  }
+
+  return clonedImages;
+}
+
+function resolveTurnDiffSummaryTurnCount(
+  summary: TurnDiffSummary,
+  inferredCheckpointTurnCountByTurnId: Readonly<Record<TurnId, number>>,
+): number | undefined {
+  return summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId];
+}
+
+function resolveRevertTurnCount(
+  summary: TurnDiffSummary,
+  inferredCheckpointTurnCountByTurnId: Readonly<Record<TurnId, number>>,
+): number | undefined {
+  const turnCount = resolveTurnDiffSummaryTurnCount(summary, inferredCheckpointTurnCountByTurnId);
+  return typeof turnCount === "number" ? Math.max(0, turnCount - 1) : undefined;
+}
+
+export function deriveRevertTurnCountByUserMessageId(input: {
+  timelineEntries: ReadonlyArray<TimelineEntry>;
+  turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
+  turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
+  inferredCheckpointTurnCountByTurnId: Readonly<Record<TurnId, number>>;
+}): Map<MessageId, number> {
+  const byUserMessageId = new Map<MessageId, number>();
+  const summariesByCompletedAt = [...input.turnDiffSummaries].toSorted(
+    (left, right) =>
+      left.completedAt.localeCompare(right.completedAt) || left.turnId.localeCompare(right.turnId),
+  );
+
+  for (let index = 0; index < input.timelineEntries.length; index += 1) {
+    const entry = input.timelineEntries[index];
+    if (!entry || entry.kind !== "message" || entry.message.role !== "user") {
+      continue;
+    }
+
+    let nextUserCreatedAt: string | null = null;
+    for (let nextIndex = index + 1; nextIndex < input.timelineEntries.length; nextIndex += 1) {
+      const nextEntry = input.timelineEntries[nextIndex];
+      if (!nextEntry || nextEntry.kind !== "message") {
+        continue;
+      }
+      if (nextEntry.message.role === "user") {
+        nextUserCreatedAt = nextEntry.message.createdAt;
+        break;
+      }
+      const summary = input.turnDiffSummaryByAssistantMessageId.get(nextEntry.message.id);
+      if (!summary) {
+        continue;
+      }
+      const revertTurnCount = resolveRevertTurnCount(
+        summary,
+        input.inferredCheckpointTurnCountByTurnId,
+      );
+      if (typeof revertTurnCount === "number") {
+        byUserMessageId.set(entry.message.id, revertTurnCount);
+      }
+      break;
+    }
+
+    if (byUserMessageId.has(entry.message.id)) {
+      continue;
+    }
+
+    const fallbackSummary = summariesByCompletedAt.find((summary) => {
+      if (summary.completedAt < entry.message.createdAt) {
+        return false;
+      }
+      return nextUserCreatedAt === null || summary.completedAt < nextUserCreatedAt;
+    });
+    if (!fallbackSummary) {
+      continue;
+    }
+    const revertTurnCount = resolveRevertTurnCount(
+      fallbackSummary,
+      input.inferredCheckpointTurnCountByTurnId,
+    );
+    if (typeof revertTurnCount === "number") {
+      byUserMessageId.set(entry.message.id, revertTurnCount);
+    }
+  }
+
+  return byUserMessageId;
 }
 
 export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[] {

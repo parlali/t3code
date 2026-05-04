@@ -82,6 +82,7 @@ interface TimelineRowSharedState {
   workspaceRoot: string | undefined;
   activeThreadEnvironmentId: EnvironmentId;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onEditUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }
@@ -106,6 +107,7 @@ interface MessagesTimelineProps {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onEditUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   activeThreadEnvironmentId: EnvironmentId;
@@ -134,6 +136,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
+  onEditUserMessage,
   isRevertingCheckpoint,
   onImageExpand,
   activeThreadEnvironmentId,
@@ -205,6 +208,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      onEditUserMessage,
       onImageExpand,
       onOpenTurnDiff,
     }),
@@ -221,6 +225,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      onEditUserMessage,
       onImageExpand,
       onOpenTurnDiff,
     ],
@@ -353,6 +358,18 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
                     {displayedUserMessage.copyText && (
                       <MessageCopyButton text={displayedUserMessage.copyText} />
+                    )}
+                    {canRevertAgentWork && (
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        disabled={ctx.isRevertingCheckpoint || ctx.isWorking}
+                        onClick={() => ctx.onEditUserMessage(row.message.id)}
+                        title="Edit from here"
+                      >
+                        <SquarePenIcon className="size-3" />
+                      </Button>
                     )}
                     {canRevertAgentWork && (
                       <Button

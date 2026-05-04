@@ -491,6 +491,52 @@ describe("CheckpointReactor", () => {
     expect(gitStatusRefreshCalls).toEqual([harness.cwd]);
   });
 
+  it("captures a checkpoint when a provider reports an aborted turn", async () => {
+    const harness = await createHarness({ seedFilesystemCheckpoints: false });
+
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-turn-started-aborted"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-04-15T10:00:00.000Z",
+      threadId: ThreadId.make("thread-1"),
+      turnId: asTurnId("turn-aborted"),
+    });
+    await waitForGitRefExists(
+      harness.cwd,
+      checkpointRefForThreadTurn(ThreadId.make("thread-1"), 0),
+    );
+
+    fs.writeFileSync(path.join(harness.cwd, "README.md"), "v2\n", "utf8");
+    harness.provider.emit({
+      type: "turn.aborted",
+      eventId: EventId.make("evt-turn-aborted"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-04-15T10:00:03.000Z",
+      threadId: ThreadId.make("thread-1"),
+      turnId: asTurnId("turn-aborted"),
+      payload: { reason: "Turn aborted" },
+    });
+
+    await waitForEvent(harness.engine, (event) => event.type === "thread.turn-diff-completed");
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.latestTurn?.turnId === "turn-aborted" && entry.checkpoints.length === 1,
+    );
+    expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1);
+    expect(
+      gitShowFileAtRef(
+        harness.cwd,
+        checkpointRefForThreadTurn(ThreadId.make("thread-1"), 1),
+        "README.md",
+      ),
+    ).toBe("v2\n");
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readThread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(readThread?.checkpoints[0]?.status).toBe("missing");
+  });
+
   it("ignores auxiliary thread turn completion while primary turn is active", async () => {
     const harness = await createHarness({ seedFilesystemCheckpoints: false });
     const createdAt = new Date().toISOString();

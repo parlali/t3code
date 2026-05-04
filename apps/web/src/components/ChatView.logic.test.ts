@@ -1,6 +1,7 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import {
   EnvironmentId,
+  MessageId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -14,8 +15,10 @@ import { type Thread } from "../types";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
+  cloneUserMessageAttachmentsForComposer,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
+  deriveRevertTurnCountByUserMessageId,
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
@@ -24,6 +27,223 @@ import {
 } from "./ChatView.logic";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("deriveRevertTurnCountByUserMessageId", () => {
+  it("uses the following assistant message checkpoint when it is available", () => {
+    const userMessageId = MessageId.make("user-1");
+    const assistantMessageId = MessageId.make("assistant-1");
+    const turnId = TurnId.make("turn-1");
+    const summary = {
+      turnId,
+      completedAt: "2026-04-15T10:00:10.000Z",
+      checkpointTurnCount: 2,
+      assistantMessageId,
+      files: [],
+    };
+
+    const result = deriveRevertTurnCountByUserMessageId({
+      timelineEntries: [
+        {
+          id: "message:user-1",
+          kind: "message",
+          createdAt: "2026-04-15T10:00:00.000Z",
+          message: {
+            id: userMessageId,
+            role: "user",
+            text: "change it",
+            createdAt: "2026-04-15T10:00:00.000Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "message:assistant-1",
+          kind: "message",
+          createdAt: "2026-04-15T10:00:05.000Z",
+          message: {
+            id: assistantMessageId,
+            role: "assistant",
+            text: "done",
+            turnId,
+            createdAt: "2026-04-15T10:00:05.000Z",
+            streaming: false,
+          },
+        },
+      ],
+      turnDiffSummaries: [summary],
+      turnDiffSummaryByAssistantMessageId: new Map([[assistantMessageId, summary]]),
+      inferredCheckpointTurnCountByTurnId: {},
+    });
+
+    expect(result.get(userMessageId)).toBe(1);
+  });
+
+  it("falls back to the next checkpoint when an interrupted turn has no assistant message", () => {
+    const userMessageId = MessageId.make("user-interrupted");
+    const turnId = TurnId.make("turn-interrupted");
+    const summary = {
+      turnId,
+      completedAt: "2026-04-15T10:00:03.000Z",
+      checkpointTurnCount: 1,
+      assistantMessageId: MessageId.make("assistant:turn-interrupted"),
+      status: "missing",
+      files: [],
+    };
+
+    const result = deriveRevertTurnCountByUserMessageId({
+      timelineEntries: [
+        {
+          id: "message:user-interrupted",
+          kind: "message",
+          createdAt: "2026-04-15T10:00:00.000Z",
+          message: {
+            id: userMessageId,
+            role: "user",
+            text: "start then stop",
+            createdAt: "2026-04-15T10:00:00.000Z",
+            streaming: false,
+          },
+        },
+      ],
+      turnDiffSummaries: [summary],
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      inferredCheckpointTurnCountByTurnId: {},
+    });
+
+    expect(result.get(userMessageId)).toBe(0);
+  });
+
+  it("does not attach a later user's checkpoint to an earlier user message", () => {
+    const firstUserMessageId = MessageId.make("user-1");
+    const secondUserMessageId = MessageId.make("user-2");
+    const turnId = TurnId.make("turn-2");
+    const summary = {
+      turnId,
+      completedAt: "2026-04-15T10:00:12.000Z",
+      checkpointTurnCount: 1,
+      assistantMessageId: MessageId.make("assistant:turn-2"),
+      files: [],
+    };
+
+    const result = deriveRevertTurnCountByUserMessageId({
+      timelineEntries: [
+        {
+          id: "message:user-1",
+          kind: "message",
+          createdAt: "2026-04-15T10:00:00.000Z",
+          message: {
+            id: firstUserMessageId,
+            role: "user",
+            text: "first",
+            createdAt: "2026-04-15T10:00:00.000Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "message:user-2",
+          kind: "message",
+          createdAt: "2026-04-15T10:00:10.000Z",
+          message: {
+            id: secondUserMessageId,
+            role: "user",
+            text: "second",
+            createdAt: "2026-04-15T10:00:10.000Z",
+            streaming: false,
+          },
+        },
+      ],
+      turnDiffSummaries: [summary],
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      inferredCheckpointTurnCountByTurnId: {},
+    });
+
+    expect(result.has(firstUserMessageId)).toBe(false);
+    expect(result.get(secondUserMessageId)).toBe(0);
+  });
+});
+
+describe("cloneUserMessageAttachmentsForComposer", () => {
+  it("hydrates message image previews into composer files", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(new Blob(["image-bytes"], { type: "image/png" }))),
+    );
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:cloned-preview");
+
+    const images = await cloneUserMessageAttachmentsForComposer({
+      id: MessageId.make("user-with-image"),
+      role: "user",
+      text: "use this image",
+      createdAt: "2026-04-15T10:00:00.000Z",
+      streaming: false,
+      attachments: [
+        {
+          type: "image",
+          id: "image-1",
+          name: "source.png",
+          mimeType: "image/png",
+          sizeBytes: 11,
+          previewUrl: "https://example.test/attachments/image-1",
+        },
+      ],
+    });
+
+    expect(fetch).toHaveBeenCalledWith("https://example.test/attachments/image-1", {
+      credentials: "include",
+    });
+    expect(images).toHaveLength(1);
+    expect(images[0]).toMatchObject({
+      type: "image",
+      id: "image-1",
+      name: "source.png",
+      mimeType: "image/png",
+      sizeBytes: 11,
+      previewUrl: "blob:cloned-preview",
+    });
+    expect(images[0]?.file).toBeInstanceOf(File);
+  });
+
+  it("does not leave cloned preview URLs behind when a later attachment fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response(new Blob(["ok"], { type: "image/png" })))
+        .mockResolvedValueOnce(new Response("missing", { status: 404 })),
+    );
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:partial-preview");
+    const revokeSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+    await expect(
+      cloneUserMessageAttachmentsForComposer({
+        id: MessageId.make("user-with-failing-image"),
+        role: "user",
+        text: "use these images",
+        createdAt: "2026-04-15T10:00:00.000Z",
+        streaming: false,
+        attachments: [
+          {
+            type: "image",
+            id: "image-ok",
+            name: "ok.png",
+            mimeType: "image/png",
+            sizeBytes: 2,
+            previewUrl: "https://example.test/attachments/image-ok",
+          },
+          {
+            type: "image",
+            id: "image-missing",
+            name: "missing.png",
+            mimeType: "image/png",
+            sizeBytes: 2,
+            previewUrl: "https://example.test/attachments/image-missing",
+          },
+        ],
+      }),
+    ).rejects.toThrow("Could not restore image attachment 'missing.png'.");
+
+    expect(revokeSpy).toHaveBeenCalledWith("blob:partial-preview");
+  });
+});
 
 describe("deriveComposerSendState", () => {
   it("treats expired terminal pills as non-sendable content", () => {
@@ -358,6 +578,7 @@ function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) 
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   setStoreThreads([]);
 });
 

@@ -134,6 +134,7 @@ import {
 } from "../composerDraftStore";
 import {
   appendTerminalContextsToPrompt,
+  deriveDisplayedUserMessageState,
   formatTerminalContextLabel,
   type TerminalContextDraft,
   type TerminalContextSelection,
@@ -154,9 +155,11 @@ import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
+  cloneUserMessageAttachmentsForComposer,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
+  deriveRevertTurnCountByUserMessageId,
   hasServerAcknowledgedLocalDispatch,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
@@ -200,6 +203,14 @@ type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly connectionState: "connecting" | "disconnected" | "error";
+};
+
+type PendingEditComposerPrefill = {
+  readonly threadId: ThreadId;
+  readonly messageId: MessageId;
+  readonly turnCount: number;
+  readonly prompt: string;
+  readonly images: ComposerImageAttachment[];
 };
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
@@ -728,6 +739,8 @@ export default function ChatView(props: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
+  const pendingEditPrefillRef = useRef<PendingEditComposerPrefill | null>(null);
+  const pendingEditPrefillTimeoutRef = useRef<number | null>(null);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
 
   const terminalState = useTerminalStateStore((state) =>
@@ -1556,6 +1569,8 @@ export default function ChatView(props: ChatViewProps) {
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
+  const timelineMessagesRef = useRef<ChatMessage[]>([]);
+  timelineMessagesRef.current = timelineMessages;
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
@@ -1572,37 +1587,31 @@ export default function ChatView(props: ChatViewProps) {
     return byMessageId;
   }, [turnDiffSummaries]);
   const revertTurnCountByUserMessageId = useMemo(() => {
-    const byUserMessageId = new Map<MessageId, number>();
-    for (let index = 0; index < timelineEntries.length; index += 1) {
-      const entry = timelineEntries[index];
-      if (!entry || entry.kind !== "message" || entry.message.role !== "user") {
-        continue;
-      }
-
-      for (let nextIndex = index + 1; nextIndex < timelineEntries.length; nextIndex += 1) {
-        const nextEntry = timelineEntries[nextIndex];
-        if (!nextEntry || nextEntry.kind !== "message") {
-          continue;
-        }
-        if (nextEntry.message.role === "user") {
-          break;
-        }
-        const summary = turnDiffSummaryByAssistantMessageId.get(nextEntry.message.id);
-        if (!summary) {
-          continue;
-        }
-        const turnCount =
+    return deriveRevertTurnCountByUserMessageId({
+      timelineEntries,
+      turnDiffSummaries,
+      turnDiffSummaryByAssistantMessageId,
+      inferredCheckpointTurnCountByTurnId,
+    });
+  }, [
+    inferredCheckpointTurnCountByTurnId,
+    timelineEntries,
+    turnDiffSummaries,
+    turnDiffSummaryByAssistantMessageId,
+  ]);
+  const hasCodeChangesAfterTurnCount = useCallback(
+    (turnCount: number) =>
+      turnDiffSummaries.some((summary) => {
+        const checkpointTurnCount =
           summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId];
-        if (typeof turnCount !== "number") {
-          break;
-        }
-        byUserMessageId.set(entry.message.id, Math.max(0, turnCount - 1));
-        break;
-      }
-    }
-
-    return byUserMessageId;
-  }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
+        return (
+          typeof checkpointTurnCount === "number" &&
+          checkpointTurnCount > turnCount &&
+          summary.files.length > 0
+        );
+      }),
+    [inferredCheckpointTurnCountByTurnId, turnDiffSummaries],
+  );
 
   const completionSummary = useMemo(() => {
     if (!latestTurnSettled) return null;
@@ -1786,6 +1795,91 @@ export default function ChatView(props: ChatViewProps) {
       focusComposer();
     });
   }, [focusComposer]);
+  const clearPendingEditPrefill = useCallback((options?: { revokeImages?: boolean }) => {
+    if (pendingEditPrefillTimeoutRef.current !== null) {
+      window.clearTimeout(pendingEditPrefillTimeoutRef.current);
+      pendingEditPrefillTimeoutRef.current = null;
+    }
+
+    const pending = pendingEditPrefillRef.current;
+    pendingEditPrefillRef.current = null;
+    if (!options?.revokeImages || !pending) {
+      return;
+    }
+
+    for (const image of pending.images) {
+      revokeBlobPreviewUrl(image.previewUrl);
+    }
+  }, []);
+  const stagePendingEditPrefill = useCallback(
+    (prefill: PendingEditComposerPrefill) => {
+      clearPendingEditPrefill({ revokeImages: true });
+      pendingEditPrefillRef.current = prefill;
+      pendingEditPrefillTimeoutRef.current = window.setTimeout(() => {
+        if (pendingEditPrefillRef.current?.messageId !== prefill.messageId) {
+          return;
+        }
+        clearPendingEditPrefill({ revokeImages: true });
+        setThreadError(
+          prefill.threadId,
+          "Timed out waiting for the checkpoint revert before editing this message.",
+        );
+      }, 30_000);
+    },
+    [clearPendingEditPrefill, setThreadError],
+  );
+  const applyPendingEditPrefill = useCallback(
+    (prefill: PendingEditComposerPrefill) => {
+      clearPendingEditPrefill();
+      promptRef.current = prefill.prompt;
+      composerImagesRef.current = prefill.images;
+      composerTerminalContextsRef.current = [];
+      clearComposerDraftContent(composerDraftTarget);
+      setComposerDraftPrompt(composerDraftTarget, prefill.prompt);
+      addComposerDraftImages(composerDraftTarget, prefill.images);
+      setComposerDraftTerminalContexts(composerDraftTarget, []);
+      composerRef.current?.resetCursorState({
+        cursor: collapseExpandedComposerCursor(prefill.prompt, prefill.prompt.length),
+        prompt: prefill.prompt,
+        detectTrigger: true,
+      });
+      scheduleComposerFocus();
+    },
+    [
+      addComposerDraftImages,
+      clearComposerDraftContent,
+      clearPendingEditPrefill,
+      composerDraftTarget,
+      composerRef,
+      scheduleComposerFocus,
+      setComposerDraftPrompt,
+      setComposerDraftTerminalContexts,
+    ],
+  );
+  useEffect(() => {
+    const pending = pendingEditPrefillRef.current;
+    if (!pending || !activeThread || activeThread.id !== pending.threadId) {
+      return;
+    }
+    if (activeThread.messages.some((message) => message.id === pending.messageId)) {
+      return;
+    }
+    const hasNewerCheckpoint = turnDiffSummaries.some((summary) => {
+      const checkpointTurnCount =
+        summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId];
+      return typeof checkpointTurnCount === "number" && checkpointTurnCount > pending.turnCount;
+    });
+    if (hasNewerCheckpoint) {
+      return;
+    }
+
+    applyPendingEditPrefill(pending);
+  }, [
+    activeThread,
+    applyPendingEditPrefill,
+    inferredCheckpointTurnCountByTurnId,
+    turnDiffSummaries,
+  ]);
   const addTerminalContextToDraft = useCallback((selection: TerminalContextSelection) => {
     composerRef.current?.addTerminalContext(selection);
   }, []);
@@ -2259,7 +2353,14 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     setIsRevertingCheckpoint(false);
-  }, [activeThread?.id]);
+    clearPendingEditPrefill({ revokeImages: true });
+  }, [activeThread?.id, clearPendingEditPrefill]);
+
+  useEffect(() => {
+    return () => {
+      clearPendingEditPrefill({ revokeImages: true });
+    };
+  }, [clearPendingEditPrefill]);
 
   useEffect(() => {
     if (!activeThread?.id || terminalState.terminalOpen) return;
@@ -2549,36 +2650,48 @@ export default function ChatView(props: ChatViewProps) {
   ]);
 
   const onRevertToTurnCount = useCallback(
-    async (turnCount: number) => {
+    async (
+      turnCount: number,
+      options?: {
+        confirmationLines?: string[];
+        beforeDispatch?: () => Promise<void> | void;
+      },
+    ): Promise<boolean> => {
       const api = readEnvironmentApi(environmentId);
       const localApi = readLocalApi();
-      if (!api || !localApi || !activeThread || isRevertingCheckpoint) return;
+      if (!api || !localApi || !activeThread || isRevertingCheckpoint) return false;
 
       if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
         setThreadError(
           activeThread.id,
           `Reconnect ${activeEnvironmentUnavailableLabel} before reverting checkpoints.`,
         );
-        return;
+        return false;
       }
       if (phase === "running" || isSendBusy || isConnecting) {
         setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
-        return;
+        return false;
       }
+      const hasCodeChanges = hasCodeChangesAfterTurnCount(turnCount);
       const confirmed = await localApi.dialogs.confirm(
-        [
-          `Revert this thread to checkpoint ${turnCount}?`,
-          "This will discard newer messages and turn diffs in this thread.",
-          "This action cannot be undone.",
-        ].join("\n"),
+        (
+          options?.confirmationLines ?? [
+            `Revert this thread to checkpoint ${turnCount}?`,
+            hasCodeChanges
+              ? `This will revert code changes made after checkpoint ${turnCount} and discard newer messages and turn diffs.`
+              : "This will discard newer messages and turn diffs in this thread.",
+            "This action cannot be undone.",
+          ]
+        ).join("\n"),
       );
       if (!confirmed) {
-        return;
+        return false;
       }
 
       setIsRevertingCheckpoint(true);
       setThreadError(activeThread.id, null);
       try {
+        await options?.beforeDispatch?.();
         await api.orchestration.dispatchCommand({
           type: "thread.checkpoint.revert",
           commandId: newCommandId(),
@@ -2586,19 +2699,23 @@ export default function ChatView(props: ChatViewProps) {
           turnCount,
           createdAt: new Date().toISOString(),
         });
+        return true;
       } catch (err) {
         setThreadError(
           activeThread.id,
           err instanceof Error ? err.message : "Failed to revert thread state.",
         );
+        return false;
+      } finally {
+        setIsRevertingCheckpoint(false);
       }
-      setIsRevertingCheckpoint(false);
     },
     [
       activeThread,
       activeEnvironmentUnavailable,
       activeEnvironmentUnavailableLabel,
       environmentId,
+      hasCodeChangesAfterTurnCount,
       isConnecting,
       isRevertingCheckpoint,
       isSendBusy,
@@ -3489,6 +3606,59 @@ export default function ChatView(props: ChatViewProps) {
     }
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
+  const onEditUserMessageInternal = useCallback(
+    async (messageId: MessageId) => {
+      if (!activeThread) {
+        return;
+      }
+      const targetTurnCount = revertTurnCountRef.current.get(messageId);
+      if (typeof targetTurnCount !== "number") {
+        return;
+      }
+      const message = timelineMessagesRef.current.find(
+        (entry) => entry.id === messageId && entry.role === "user",
+      );
+      if (!message) {
+        return;
+      }
+
+      const displayedMessage = deriveDisplayedUserMessageState(message.text);
+      const editablePrompt =
+        displayedMessage.visibleText === IMAGE_ONLY_BOOTSTRAP_PROMPT
+          ? ""
+          : displayedMessage.visibleText;
+      const hasCodeChanges = hasCodeChangesAfterTurnCount(targetTurnCount);
+      const dispatched = await onRevertToTurnCountRef.current(targetTurnCount, {
+        confirmationLines: [
+          "Edit this message?",
+          hasCodeChanges
+            ? "This will revert code changes made after this message and discard newer messages and turn diffs."
+            : "This will discard this message and newer messages and turn diffs.",
+          "The selected message contents will be put back in the composer.",
+          "This action cannot be undone.",
+        ],
+        beforeDispatch: async () => {
+          const images = await cloneUserMessageAttachmentsForComposer(message);
+          stagePendingEditPrefill({
+            threadId: activeThread.id,
+            messageId,
+            turnCount: targetTurnCount,
+            prompt: editablePrompt,
+            images,
+          });
+        },
+      });
+      if (!dispatched && pendingEditPrefillRef.current?.messageId === messageId) {
+        clearPendingEditPrefill({ revokeImages: true });
+      }
+    },
+    [activeThread, clearPendingEditPrefill, hasCodeChangesAfterTurnCount, stagePendingEditPrefill],
+  );
+  const onEditUserMessageRef = useRef(onEditUserMessageInternal);
+  onEditUserMessageRef.current = onEditUserMessageInternal;
+  const onEditUserMessage = useCallback((messageId: MessageId) => {
+    void onEditUserMessageRef.current(messageId);
+  }, []);
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -3568,6 +3738,7 @@ export default function ChatView(props: ChatViewProps) {
               onOpenTurnDiff={onOpenTurnDiff}
               revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
               onRevertUserMessage={onRevertUserMessage}
+              onEditUserMessage={onEditUserMessage}
               isRevertingCheckpoint={isRevertingCheckpoint}
               onImageExpand={onExpandTimelineImage}
               markdownCwd={gitCwd ?? undefined}

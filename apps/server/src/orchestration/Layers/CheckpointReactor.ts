@@ -36,6 +36,10 @@ type ReactorInput =
       readonly source: "domain";
       readonly event: OrchestrationEvent;
     };
+type RuntimeTurnFinishedEvent = Extract<
+  ProviderRuntimeEvent,
+  { type: "turn.aborted" | "turn.completed" }
+>;
 
 function toTurnId(value: string | undefined): TurnId | null {
   return value === undefined ? null : TurnId.make(String(value));
@@ -59,6 +63,14 @@ function checkpointStatusFromRuntime(status: string | undefined): "ready" | "mis
     default:
       return "ready";
   }
+}
+
+function checkpointStatusFromRuntimeTurnFinished(
+  event: RuntimeTurnFinishedEvent,
+): "ready" | "missing" | "error" {
+  return event.type === "turn.aborted"
+    ? "missing"
+    : checkpointStatusFromRuntime(event.payload.state);
 }
 
 const serverCommandId = (tag: string): CommandId =>
@@ -325,7 +337,7 @@ const make = Effect.gen(function* () {
 
   // Captures a real git checkpoint when a turn completes via a runtime event.
   const captureCheckpointFromTurnCompletion = Effect.fn("captureCheckpointFromTurnCompletion")(
-    function* (event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>) {
+    function* (event: RuntimeTurnFinishedEvent) {
       const turnId = toTurnId(event.turnId);
       if (!turnId) {
         return;
@@ -382,7 +394,7 @@ const make = Effect.gen(function* () {
         thread,
         cwd: checkpointCwd,
         turnCount: nextTurnCount,
-        status: checkpointStatusFromRuntime(event.payload.state),
+        status: checkpointStatusFromRuntimeTurnFinished(event),
         assistantMessageId: undefined,
         createdAt: event.createdAt,
       });
@@ -400,10 +412,11 @@ const make = Effect.gen(function* () {
   const captureCheckpointFromPlaceholder = Effect.fn("captureCheckpointFromPlaceholder")(function* (
     event: Extract<OrchestrationEvent, { type: "thread.turn-diff-completed" }>,
   ) {
-    const { threadId, turnId, checkpointTurnCount, status } = event.payload;
+    const { threadId, turnId, checkpointRef, checkpointTurnCount, status } = event.payload;
 
-    // Only replace placeholders; skip events from our own real captures.
-    if (status !== "missing") {
+    // Only replace provider-diff placeholders. Interrupted/cancelled real git
+    // captures can also carry status "missing" to preserve turn state.
+    if (status !== "missing" || !String(checkpointRef).startsWith("provider-diff:")) {
       return;
     }
 
@@ -503,7 +516,7 @@ const make = Effect.gen(function* () {
 
   const refreshLocalGitStatusFromTurnCompletion = Effect.fn(
     "refreshLocalGitStatusFromTurnCompletion",
-  )(function* (event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>) {
+  )(function* (event: RuntimeTurnFinishedEvent) {
     const sessionRuntime = yield* resolveSessionRuntimeForThread(event.threadId);
     if (Option.isNone(sessionRuntime)) {
       return;
@@ -757,7 +770,7 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    if (event.type === "turn.completed") {
+    if (event.type === "turn.completed" || event.type === "turn.aborted") {
       const turnId = toTurnId(event.turnId);
       yield* refreshLocalGitStatusFromTurnCompletion(event);
       yield* captureCheckpointFromTurnCompletion(event).pipe(
@@ -812,7 +825,11 @@ const make = Effect.gen(function* () {
 
     yield* Effect.forkScoped(
       Stream.runForEach(providerService.streamEvents, (event) => {
-        if (event.type !== "turn.started" && event.type !== "turn.completed") {
+        if (
+          event.type !== "turn.started" &&
+          event.type !== "turn.completed" &&
+          event.type !== "turn.aborted"
+        ) {
           return Effect.void;
         }
         return worker.enqueue({ source: "runtime", event });
