@@ -76,6 +76,10 @@ function createTestClient() {
         terminalListeners.add(listener);
         return () => terminalListeners.delete(listener);
       },
+      onSessionEvent: (_input: unknown, listener: (event: any) => void) => {
+        terminalListeners.add(listener);
+        return () => terminalListeners.delete(listener);
+      },
     },
     projects: {
       searchEntries: vi.fn(async () => []),

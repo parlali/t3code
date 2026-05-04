@@ -63,6 +63,7 @@ export interface WsRpcClient {
     readonly restart: RpcUnaryMethod<typeof WS_METHODS.terminalRestart>;
     readonly close: RpcUnaryMethod<typeof WS_METHODS.terminalClose>;
     readonly onEvent: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
+    readonly onSessionEvent: RpcInputStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
   };
   readonly projects: {
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
@@ -155,10 +156,23 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       restart: (input) => transport.request((client) => client[WS_METHODS.terminalRestart](input)),
       close: (input) => transport.request((client) => client[WS_METHODS.terminalClose](input)),
       onEvent: (listener, options) =>
-        transport.subscribe((client) => client[WS_METHODS.subscribeTerminalEvents]({}), listener, {
-          ...options,
-          tag: WS_METHODS.subscribeTerminalEvents,
-        }),
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeTerminalEvents]({ includeOutput: false }),
+          listener,
+          {
+            ...options,
+            tag: WS_METHODS.subscribeTerminalEvents,
+          },
+        ),
+      onSessionEvent: (input, listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeTerminalEvents](input),
+          listener,
+          {
+            ...options,
+            tag: WS_METHODS.subscribeTerminalEvents,
+          },
+        ),
     },
     projects: {
       searchEntries: (input) =>

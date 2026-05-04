@@ -66,6 +66,7 @@ import {
   TerminalResizeInput,
   TerminalRestartInput,
   TerminalSessionSnapshot,
+  TerminalSubscribeInput,
   TerminalWriteInput,
 } from "./terminal.ts";
 import {
@@ -388,7 +389,7 @@ export const WsOrchestrationSubscribeThreadRpc = Rpc.make(
 );
 
 export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
-  payload: Schema.Struct({}),
+  payload: TerminalSubscribeInput,
   success: TerminalEvent,
   stream: true,
 });

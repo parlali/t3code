@@ -48,6 +48,9 @@ const rpcClientMock = {
     onEvent: vi.fn((listener: (event: TerminalEvent) => void) =>
       registerListener(terminalEventListeners, listener),
     ),
+    onSessionEvent: vi.fn((_input, listener: (event: TerminalEvent) => void) =>
+      registerListener(terminalEventListeners, listener),
+    ),
   },
   projects: {
     searchEntries: vi.fn(),

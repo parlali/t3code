@@ -140,6 +140,7 @@ function createEnvironmentApi() {
       })),
       write: vi.fn(async () => undefined),
       resize: vi.fn(async () => undefined),
+      onSessionEvent: vi.fn(() => () => undefined),
     },
   };
 }

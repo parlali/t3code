@@ -20,6 +20,7 @@ import {
   TerminalSessionSnapshot,
   TerminalSessionLookupError,
   TerminalSessionStatus,
+  TerminalSubscribeInput,
   TerminalWriteInput,
 } from "@t3tools/contracts";
 import type { PtyProcess } from "./PTY.ts";
@@ -41,12 +42,12 @@ export interface TerminalSessionState {
   status: TerminalSessionStatus;
   pid: number | null;
   history: string;
-  pendingHistoryControlSequence: string;
   exitCode: number | null;
   exitSignal: number | null;
   updatedAt: string;
   cols: number;
   rows: number;
+  sequence: number;
   process: PtyProcess | null;
   unsubscribeData: (() => void) | null;
   unsubscribeExit: (() => void) | null;
@@ -115,6 +116,7 @@ export interface TerminalManagerShape {
    * Returns an unsubscribe function.
    */
   readonly subscribe: (
+    input: TerminalSubscribeInput,
     listener: (event: TerminalEvent) => Effect.Effect<void>,
   ) => Effect.Effect<() => void>;
 }

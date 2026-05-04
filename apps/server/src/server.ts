@@ -90,13 +90,8 @@ import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale"
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
-    if (typeof Bun !== "undefined") {
-      const BunPTY = yield* Effect.promise(() => import("./terminal/Layers/BunPTY.ts"));
-      return BunPTY.layer;
-    } else {
-      const NodePTY = yield* Effect.promise(() => import("./terminal/Layers/NodePTY.ts"));
-      return NodePTY.layer;
-    }
+    const NodePTY = yield* Effect.promise(() => import("./terminal/Layers/NodePTY.ts"));
+    return NodePTY.layer;
   }),
 );
 

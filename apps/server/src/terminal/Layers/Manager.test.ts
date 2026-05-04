@@ -247,7 +247,7 @@ const createManager = (
       });
       const eventsRef = yield* Ref.make<ReadonlyArray<TerminalEvent>>([]);
       const scope = yield* Effect.scope;
-      const unsubscribe = yield* manager.subscribe((event) =>
+      const unsubscribe = yield* manager.subscribe({}, (event) =>
         Ref.update(eventsRef, (events) => [...events, event]),
       );
       yield* Scope.addFinalizer(scope, Effect.sync(unsubscribe));
@@ -1030,7 +1030,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
       });
       const scope = yield* Effect.scope;
       const subscriberEvents = yield* Ref.make<ReadonlyArray<TerminalEvent>>([]);
-      const unsubscribe = yield* manager.subscribe((event) =>
+      const unsubscribe = yield* manager.subscribe({}, (event) =>
         Ref.update(subscriberEvents, (events) => [...events, event]),
       );
       yield* Scope.addFinalizer(scope, Effect.sync(unsubscribe));

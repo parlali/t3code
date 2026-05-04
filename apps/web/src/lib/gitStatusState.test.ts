@@ -81,6 +81,7 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
       restart: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
       onEvent: vi.fn(() => () => undefined),
+      onSessionEvent: vi.fn(() => () => undefined),
     },
     projects: {
       searchEntries: vi.fn(async () => []),

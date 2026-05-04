@@ -10,6 +10,7 @@ const TerminalColsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).ch
 const TerminalRowsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(
   Schema.isLessThanOrEqualTo(500),
 );
+const TerminalSequenceSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const TerminalIdSchema = TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(128));
 const TerminalEnvKeySchema = Schema.String.check(
   Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]*$/),
@@ -60,6 +61,14 @@ export type TerminalResizeInput = Schema.Codec.Encoded<typeof TerminalResizeInpu
 export const TerminalClearInput = TerminalSessionInput;
 export type TerminalClearInput = Schema.Codec.Encoded<typeof TerminalClearInput>;
 
+export const TerminalSubscribeInput = Schema.Struct({
+  threadId: Schema.optional(TrimmedNonEmptyStringSchema),
+  terminalId: Schema.optional(TerminalIdSchema),
+  afterSequence: Schema.optional(TerminalSequenceSchema),
+  includeOutput: Schema.optional(Schema.Boolean),
+});
+export type TerminalSubscribeInput = typeof TerminalSubscribeInput.Type;
+
 export const TerminalRestartInput = Schema.Struct({
   ...TerminalSessionInput.fields,
   cwd: TrimmedNonEmptyStringSchema,
@@ -88,6 +97,7 @@ export const TerminalSessionSnapshot = Schema.Struct({
   status: TerminalSessionStatus,
   pid: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
   history: Schema.String,
+  sequence: Schema.optional(TerminalSequenceSchema),
   exitCode: Schema.NullOr(Schema.Int),
   exitSignal: Schema.NullOr(Schema.Int),
   updatedAt: Schema.String,
@@ -97,6 +107,7 @@ export type TerminalSessionSnapshot = typeof TerminalSessionSnapshot.Type;
 const TerminalEventBaseSchema = Schema.Struct({
   threadId: Schema.String.check(Schema.isNonEmpty()),
   terminalId: Schema.String.check(Schema.isNonEmpty()),
+  sequence: Schema.optional(TerminalSequenceSchema),
   createdAt: Schema.String,
 });
 

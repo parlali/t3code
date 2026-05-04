@@ -47,7 +47,6 @@ import {
 } from "../types";
 import { readEnvironmentApi } from "~/environmentApi";
 import { readLocalApi } from "~/localApi";
-import { selectTerminalEventEntries, useTerminalStateStore } from "../terminalStateStore";
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
@@ -120,6 +119,24 @@ function terminalThemeFromApp(mountElement?: HTMLElement | null): ITheme {
     drawerStyles.color,
     normalizeComputedColor(bodyStyles.color, fallbackForeground),
   );
+  const ansiPalette = {
+    black: "rgb(0, 0, 0)",
+    red: "rgb(205, 49, 49)",
+    green: "rgb(13, 188, 121)",
+    yellow: "rgb(229, 229, 16)",
+    blue: "rgb(36, 114, 200)",
+    magenta: "rgb(188, 63, 188)",
+    cyan: "rgb(17, 168, 205)",
+    white: "rgb(229, 229, 229)",
+    brightBlack: "rgb(102, 102, 102)",
+    brightRed: "rgb(241, 76, 76)",
+    brightGreen: "rgb(35, 209, 139)",
+    brightYellow: "rgb(245, 245, 67)",
+    brightBlue: "rgb(59, 142, 234)",
+    brightMagenta: "rgb(214, 112, 214)",
+    brightCyan: "rgb(41, 184, 219)",
+    brightWhite: "rgb(255, 255, 255)",
+  };
 
   if (isDark) {
     return {
@@ -130,22 +147,7 @@ function terminalThemeFromApp(mountElement?: HTMLElement | null): ITheme {
       scrollbarSliderBackground: "rgba(255, 255, 255, 0.1)",
       scrollbarSliderHoverBackground: "rgba(255, 255, 255, 0.18)",
       scrollbarSliderActiveBackground: "rgba(255, 255, 255, 0.22)",
-      black: "rgb(24, 30, 38)",
-      red: "rgb(255, 122, 142)",
-      green: "rgb(134, 231, 149)",
-      yellow: "rgb(244, 205, 114)",
-      blue: "rgb(137, 190, 255)",
-      magenta: "rgb(208, 176, 255)",
-      cyan: "rgb(124, 232, 237)",
-      white: "rgb(210, 218, 230)",
-      brightBlack: "rgb(110, 120, 136)",
-      brightRed: "rgb(255, 168, 180)",
-      brightGreen: "rgb(176, 245, 186)",
-      brightYellow: "rgb(255, 224, 149)",
-      brightBlue: "rgb(174, 210, 255)",
-      brightMagenta: "rgb(229, 203, 255)",
-      brightCyan: "rgb(167, 244, 247)",
-      brightWhite: "rgb(244, 247, 252)",
+      ...ansiPalette,
     };
   }
 
@@ -157,22 +159,7 @@ function terminalThemeFromApp(mountElement?: HTMLElement | null): ITheme {
     scrollbarSliderBackground: "rgba(0, 0, 0, 0.15)",
     scrollbarSliderHoverBackground: "rgba(0, 0, 0, 0.25)",
     scrollbarSliderActiveBackground: "rgba(0, 0, 0, 0.3)",
-    black: "rgb(44, 53, 66)",
-    red: "rgb(191, 70, 87)",
-    green: "rgb(60, 126, 86)",
-    yellow: "rgb(146, 112, 35)",
-    blue: "rgb(72, 102, 163)",
-    magenta: "rgb(132, 86, 149)",
-    cyan: "rgb(53, 127, 141)",
-    white: "rgb(210, 215, 223)",
-    brightBlack: "rgb(112, 123, 140)",
-    brightRed: "rgb(212, 95, 112)",
-    brightGreen: "rgb(85, 148, 111)",
-    brightYellow: "rgb(173, 133, 45)",
-    brightBlue: "rgb(91, 124, 194)",
-    brightMagenta: "rgb(153, 107, 172)",
-    brightCyan: "rgb(70, 149, 164)",
-    brightWhite: "rgb(236, 240, 246)",
+    ...ansiPalette,
   };
 }
 
@@ -291,8 +278,8 @@ export function TerminalViewport({
   const selectionActionOpenRef = useRef(false);
   const selectionActionTimerRef = useRef<number | null>(null);
   const keybindingsRef = useRef(keybindings);
-  const lastAppliedTerminalEventIdRef = useRef(0);
-  const terminalHydratedRef = useRef(false);
+  const lastAppliedSequenceRef = useRef(0);
+  const attachRequestIdRef = useRef(0);
   const handleSessionExited = useEffectEvent(() => {
     onSessionExited();
   });
@@ -313,6 +300,7 @@ export function TerminalViewport({
     const api = readEnvironmentApi(environmentId);
     const localApi = readLocalApi();
     if (!api || !localApi) return;
+    const terminalApi = api.terminal;
 
     const fitAddon = new FitAddon();
     const terminal = new Terminal({
@@ -320,6 +308,8 @@ export function TerminalViewport({
       lineHeight: 1.2,
       fontSize: 12,
       scrollback: 5_000,
+      drawBoldTextInBrightColors: true,
+      minimumContrastRatio: 1,
       fontFamily: '"SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
       theme: terminalThemeFromApp(mount),
     });
@@ -405,14 +395,49 @@ export function TerminalViewport({
       }
     };
 
-    const sendTerminalInput = async (data: string, fallbackError: string) => {
+    let pendingInput = "";
+    let inputFlushTimer: number | null = null;
+    let inputWriteChain = Promise.resolve();
+
+    const flushTerminalInput = () => {
+      inputFlushTimer = null;
+      const data = pendingInput;
+      pendingInput = "";
+      if (data.length === 0) return;
+
+      const chunks: string[] = [];
+      for (let index = 0; index < data.length; index += 60_000) {
+        chunks.push(data.slice(index, index + 60_000));
+      }
+
+      inputWriteChain = inputWriteChain
+        .then(async () => {
+          for (const chunk of chunks) {
+            await terminalApi.write({ threadId, terminalId, data: chunk });
+          }
+        })
+        .catch((err: unknown) => {
+          writeSystemMessage(
+            terminal,
+            err instanceof Error ? err.message : "Terminal write failed",
+          );
+        });
+    };
+
+    const queueTerminalInput = (data: string) => {
       const activeTerminal = terminalRef.current;
       if (!activeTerminal) return;
-      try {
-        await api.terminal.write({ threadId, terminalId, data });
-      } catch (error) {
-        writeSystemMessage(activeTerminal, error instanceof Error ? error.message : fallbackError);
+      pendingInput += data;
+      if (pendingInput.length >= 32_768) {
+        if (inputFlushTimer !== null) {
+          window.clearTimeout(inputFlushTimer);
+          inputFlushTimer = null;
+        }
+        flushTerminalInput();
+        return;
       }
+      if (inputFlushTimer !== null) return;
+      inputFlushTimer = window.setTimeout(flushTerminalInput, 8);
     };
 
     terminal.attachCustomKeyEventHandler((event) => {
@@ -432,7 +457,7 @@ export function TerminalViewport({
       if (navigationData !== null) {
         event.preventDefault();
         event.stopPropagation();
-        void sendTerminalInput(navigationData, "Failed to move cursor");
+        queueTerminalInput(navigationData);
         return false;
       }
 
@@ -440,14 +465,14 @@ export function TerminalViewport({
       if (deleteData !== null) {
         event.preventDefault();
         event.stopPropagation();
-        void sendTerminalInput(deleteData, "Failed to delete terminal input");
+        queueTerminalInput(deleteData);
         return false;
       }
 
       if (!isTerminalClearShortcut(event)) return true;
       event.preventDefault();
       event.stopPropagation();
-      void sendTerminalInput("\u000c", "Failed to clear terminal");
+      queueTerminalInput("\u000c");
       return false;
     });
 
@@ -513,16 +538,7 @@ export function TerminalViewport({
       },
     });
 
-    const inputDisposable = terminal.onData((data) => {
-      void api.terminal
-        .write({ threadId, terminalId, data })
-        .catch((err) =>
-          writeSystemMessage(
-            terminal,
-            err instanceof Error ? err.message : "Terminal write failed",
-          ),
-        );
-    });
+    const inputDisposable = terminal.onData(queueTerminalInput);
 
     const selectionDisposable = terminal.onSelectionChange(() => {
       if (terminalRef.current?.hasSelection()) {
@@ -623,93 +639,83 @@ export function TerminalViewport({
         handleSessionExited();
       }, 0);
     };
-    const applyPendingTerminalEvents = (
-      terminalEventEntries: ReadonlyArray<{ id: number; event: TerminalEvent }>,
-    ) => {
-      const pendingEntries = selectPendingTerminalEventEntries(
-        terminalEventEntries,
-        lastAppliedTerminalEventIdRef.current,
-      );
-      if (pendingEntries.length === 0) {
-        return;
-      }
-      for (const entry of pendingEntries) {
-        applyTerminalEvent(entry.event);
-      }
-      lastAppliedTerminalEventIdRef.current =
-        pendingEntries.at(-1)?.id ?? lastAppliedTerminalEventIdRef.current;
-    };
+    let unsubscribeTerminalEvents: () => void = () => undefined;
+    let attachPromise: Promise<void> | null = null;
 
-    const unsubscribeTerminalEvents = useTerminalStateStore.subscribe((state, previousState) => {
-      if (!terminalHydratedRef.current) {
-        return;
-      }
-
-      const previousLastEntryId =
-        selectTerminalEventEntries(
-          previousState.terminalEventEntriesByKey,
-          threadRef,
-          terminalId,
-        ).at(-1)?.id ?? 0;
-      const nextEntries = selectTerminalEventEntries(
-        state.terminalEventEntriesByKey,
-        threadRef,
-        terminalId,
-      );
-      const nextLastEntryId = nextEntries.at(-1)?.id ?? 0;
-      if (nextLastEntryId === previousLastEntryId) {
-        return;
-      }
-
-      applyPendingTerminalEvents(nextEntries);
-    });
-
-    const openTerminal = async () => {
-      try {
-        const activeTerminal = terminalRef.current;
-        const activeFitAddon = fitAddonRef.current;
-        if (!activeTerminal || !activeFitAddon) return;
-        activeFitAddon.fit();
-        const snapshot = await api.terminal.open({
-          threadId,
-          terminalId,
-          cwd,
-          ...(worktreePath !== undefined ? { worktreePath } : {}),
-          cols: activeTerminal.cols,
-          rows: activeTerminal.rows,
-          ...(runtimeEnv ? { env: runtimeEnv } : {}),
-        });
-        if (disposed) return;
-        writeTerminalSnapshot(activeTerminal, snapshot);
-        const bufferedEntries = selectTerminalEventEntries(
-          useTerminalStateStore.getState().terminalEventEntriesByKey,
-          threadRef,
-          terminalId,
-        );
-        const replayEntries = selectTerminalEventEntriesAfterSnapshot(
-          bufferedEntries,
-          snapshot.updatedAt,
-        );
-        for (const entry of replayEntries) {
-          applyTerminalEvent(entry.event);
+    function applySequencedTerminalEvent(event: TerminalEvent) {
+      const sequence = typeof event.sequence === "number" ? event.sequence : null;
+      if (sequence !== null) {
+        const lastSequence = lastAppliedSequenceRef.current;
+        if (sequence <= lastSequence) {
+          return;
         }
-        lastAppliedTerminalEventIdRef.current = bufferedEntries.at(-1)?.id ?? 0;
-        terminalHydratedRef.current = true;
-        if (autoFocus) {
-          window.requestAnimationFrame(() => {
-            activeTerminal.focus();
+        if (sequence > lastSequence + 1) {
+          void attachTerminal();
+          return;
+        }
+        lastAppliedSequenceRef.current = sequence;
+      }
+      applyTerminalEvent(event);
+    }
+
+    async function attachTerminal() {
+      if (attachPromise) {
+        return attachPromise;
+      }
+
+      const requestId = ++attachRequestIdRef.current;
+      attachPromise = (async () => {
+        unsubscribeTerminalEvents();
+        unsubscribeTerminalEvents = () => undefined;
+        try {
+          const activeTerminal = terminalRef.current;
+          const activeFitAddon = fitAddonRef.current;
+          if (!activeTerminal || !activeFitAddon) return;
+          activeFitAddon.fit();
+          const snapshot = await terminalApi.open({
+            threadId,
+            terminalId,
+            cwd,
+            ...(worktreePath !== undefined ? { worktreePath } : {}),
+            cols: activeTerminal.cols,
+            rows: activeTerminal.rows,
+            ...(runtimeEnv ? { env: runtimeEnv } : {}),
           });
+          if (disposed || requestId !== attachRequestIdRef.current) return;
+          writeTerminalSnapshot(activeTerminal, snapshot);
+          lastAppliedSequenceRef.current = snapshot.sequence ?? 0;
+          unsubscribeTerminalEvents = terminalApi.onSessionEvent(
+            {
+              threadId,
+              terminalId,
+              afterSequence: lastAppliedSequenceRef.current,
+            },
+            applySequencedTerminalEvent,
+          );
+          if (autoFocus) {
+            window.requestAnimationFrame(() => {
+              activeTerminal.focus();
+            });
+          }
+        } catch (err) {
+          if (disposed || requestId !== attachRequestIdRef.current) return;
+          writeSystemMessage(
+            terminal,
+            err instanceof Error ? err.message : "Failed to open terminal",
+          );
+        } finally {
+          if (requestId === attachRequestIdRef.current) {
+            attachPromise = null;
+          }
         }
-      } catch (err) {
-        if (disposed) return;
-        writeSystemMessage(
-          terminal,
-          err instanceof Error ? err.message : "Failed to open terminal",
-        );
-      }
-    };
+      })();
+      return attachPromise;
+    }
 
-    const fitTimer = window.setTimeout(() => {
+    let resizeFrame: number | null = null;
+    let lastSentSize = { cols: terminal.cols, rows: terminal.rows };
+    const fitAndResize = () => {
+      resizeFrame = null;
       const activeTerminal = terminalRef.current;
       const activeFitAddon = fitAddonRef.current;
       if (!activeTerminal || !activeFitAddon) return;
@@ -719,7 +725,11 @@ export function TerminalViewport({
       if (wasAtBottom) {
         activeTerminal.scrollToBottom();
       }
-      void api.terminal
+      if (activeTerminal.cols === lastSentSize.cols && activeTerminal.rows === lastSentSize.rows) {
+        return;
+      }
+      lastSentSize = { cols: activeTerminal.cols, rows: activeTerminal.rows };
+      void terminalApi
         .resize({
           threadId,
           terminalId,
@@ -727,15 +737,32 @@ export function TerminalViewport({
           rows: activeTerminal.rows,
         })
         .catch(() => undefined);
-    }, 30);
-    void openTerminal();
+    };
+    const scheduleFitAndResize = () => {
+      if (resizeFrame !== null) {
+        window.cancelAnimationFrame(resizeFrame);
+      }
+      resizeFrame = window.requestAnimationFrame(fitAndResize);
+    };
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleFitAndResize);
+    resizeObserver?.observe(mount);
+    scheduleFitAndResize();
+    void attachTerminal();
 
     return () => {
       disposed = true;
-      terminalHydratedRef.current = false;
-      lastAppliedTerminalEventIdRef.current = 0;
+      attachRequestIdRef.current += 1;
+      lastAppliedSequenceRef.current = 0;
       unsubscribeTerminalEvents();
-      window.clearTimeout(fitTimer);
+      if (resizeFrame !== null) {
+        window.cancelAnimationFrame(resizeFrame);
+      }
+      resizeObserver?.disconnect();
+      if (inputFlushTimer !== null) {
+        window.clearTimeout(inputFlushTimer);
+      }
       inputDisposable.dispose();
       selectionDisposable.dispose();
       terminalLinksDisposable.dispose();

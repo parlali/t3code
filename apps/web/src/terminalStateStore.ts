@@ -687,6 +687,10 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
           ),
         applyTerminalEvent: (threadRef, event) =>
           set((state) => {
+            if (event.type === "output") {
+              return state;
+            }
+
             const threadKey = terminalThreadKey(threadRef);
             let nextTerminalStateByThreadKey = state.terminalStateByThreadKey;
             let nextTerminalLaunchContextByThreadKey = state.terminalLaunchContextByThreadKey;

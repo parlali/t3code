@@ -1008,12 +1008,12 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.terminalClose, terminalManager.close(input), {
             "rpc.aggregate": "terminal",
           }),
-        [WS_METHODS.subscribeTerminalEvents]: (_input) =>
+        [WS_METHODS.subscribeTerminalEvents]: (input) =>
           observeRpcStream(
             WS_METHODS.subscribeTerminalEvents,
             Stream.callback<TerminalEvent>((queue) =>
               Effect.acquireRelease(
-                terminalManager.subscribe((event) => Queue.offer(queue, event)),
+                terminalManager.subscribe(input, (event) => Queue.offer(queue, event)),
                 (unsubscribe) => Effect.sync(unsubscribe),
               ),
             ),

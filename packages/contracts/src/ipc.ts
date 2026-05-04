@@ -39,6 +39,7 @@ import type {
   TerminalResizeInput,
   TerminalRestartInput,
   TerminalSessionSnapshot,
+  TerminalSubscribeInput,
   TerminalWriteInput,
 } from "./terminal.ts";
 import type { ServerUpsertKeybindingInput } from "./server.ts";
@@ -321,6 +322,11 @@ export interface EnvironmentApi {
     restart: (input: typeof TerminalRestartInput.Encoded) => Promise<TerminalSessionSnapshot>;
     close: (input: typeof TerminalCloseInput.Encoded) => Promise<void>;
     onEvent: (callback: (event: TerminalEvent) => void) => () => void;
+    onSessionEvent: (
+      input: TerminalSubscribeInput,
+      callback: (event: TerminalEvent) => void,
+      options?: { readonly onResubscribe?: () => void },
+    ) => () => void;
   };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
