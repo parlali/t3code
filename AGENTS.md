@@ -11,6 +11,8 @@ T3 Code is a minimal web GUI for using coding agents like Codex and Claude.
 
 This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term maintainability is encouraged.
 
+This fork is also used as a self-hosted, central agent surface where browser clients connect to a persistent server instance. Keep this direction in mind, but keep committed docs and code free of private hostnames, tailnet IPs, absolute user paths, auth material, generated plist files, and local logs.
+
 ## Core Priorities
 
 1. Performance first.

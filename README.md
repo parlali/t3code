@@ -2,6 +2,14 @@
 
 T3 Code is a minimal web GUI for coding agents (currently Codex and Claude, more coming soon).
 
+## Fork direction
+
+This fork is being shaped around a self-hosted workflow: one persistent T3 Code instance runs on a trusted machine, while browser clients connect to it over a private network. The goal is for the server to be the central code and agent surface, with clients acting as UI shells.
+
+For macOS hosts, the intended production shape is a user `launchd` service that can survive browser disconnects, terminal exits, and machine restarts. A public-safe starter template lives at [`scripts/launchd/t3-origin.template.zsh`](./scripts/launchd/t3-origin.template.zsh). Copy it outside the repo, set host-specific values through environment variables, and keep generated plist files, local logs, tailnet addresses, and machine paths out of commits.
+
+The template is intentionally generic. The installed script on any actual host can add local conveniences such as restart helpers, Tailscale Serve wiring, smoke-test labels, or stricter health checks without exposing those details in the public fork.
+
 ## Installation
 
 > [!WARNING]
