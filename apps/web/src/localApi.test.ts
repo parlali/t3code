@@ -68,6 +68,7 @@ const rpcClientMock = {
     openInEditor: vi.fn(),
   },
   vcs: {
+    diff: vi.fn(),
     pull: vi.fn(),
     refreshStatus: vi.fn(),
     onStatus: vi.fn((input: { cwd: string }, listener: (event: VcsStatusResult) => void) =>

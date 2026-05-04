@@ -42,6 +42,7 @@ describe("parseDiffRouteSearch", () => {
   it("drops turn and file values when diff is closed", () => {
     const parsed = parseDiffRouteSearch({
       diff: "0",
+      diffMode: "repo",
       diffTurnId: "turn-1",
       diffFilePath: "src/app.ts",
     });
@@ -57,6 +58,33 @@ describe("parseDiffRouteSearch", () => {
 
     expect(parsed).toEqual({
       diff: "1",
+    });
+  });
+
+  it("parses repo mode and drops turn-specific values", () => {
+    const parsed = parseDiffRouteSearch({
+      diff: "1",
+      diffMode: "repo",
+      diffTurnId: "turn-1",
+      diffFilePath: "src/app.ts",
+    });
+
+    expect(parsed).toEqual({
+      diff: "1",
+      diffMode: "repo",
+    });
+  });
+
+  it("defaults unknown diff modes to turn mode", () => {
+    const parsed = parseDiffRouteSearch({
+      diff: "1",
+      diffMode: "wat",
+      diffTurnId: "turn-1",
+    });
+
+    expect(parsed).toEqual({
+      diff: "1",
+      diffTurnId: "turn-1",
     });
   });
 

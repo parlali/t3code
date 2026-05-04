@@ -8,6 +8,8 @@ import {
   type VcsSwitchRefResult,
   type VcsCreateRefInput,
   type VcsCreateRefResult,
+  type VcsDiffInput,
+  type VcsDiffResult,
   type VcsCreateWorktreeInput,
   type VcsCreateWorktreeResult,
   type VcsInitInput,
@@ -167,6 +169,7 @@ export interface GitVcsDriverShape {
     fallbackBranch: string | null,
     options?: { readonly remoteName?: string | null },
   ) => Effect.Effect<GitPushResult, GitCommandError>;
+  readonly diff: (input: VcsDiffInput) => Effect.Effect<VcsDiffResult, GitCommandError>;
   readonly readRangeContext: (
     cwd: string,
     baseRef: string,

@@ -84,6 +84,7 @@ export interface WsRpcClient {
     }) => ReturnType<LocalApi["shell"]["openInEditor"]>;
   };
   readonly vcs: {
+    readonly diff: RpcUnaryMethod<typeof WS_METHODS.vcsDiff>;
     readonly pull: RpcUnaryMethod<typeof WS_METHODS.vcsPull>;
     readonly refreshStatus: RpcUnaryMethod<typeof WS_METHODS.vcsRefreshStatus>;
     readonly onStatus: (
@@ -196,6 +197,7 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.shellOpenInEditor](input)),
     },
     vcs: {
+      diff: (input) => transport.request((client) => client[WS_METHODS.vcsDiff](input)),
       pull: (input) => transport.request((client) => client[WS_METHODS.vcsPull](input)),
       refreshStatus: (input) =>
         transport.request((client) => client[WS_METHODS.vcsRefreshStatus](input)),

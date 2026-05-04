@@ -24,6 +24,8 @@ import {
   GitManagerServiceError,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
+  VcsDiffInput,
+  VcsDiffResult,
   VcsPullInput,
   GitPullRequestRefInput,
   VcsPullResult,
@@ -105,6 +107,7 @@ export const WS_METHODS = {
   filesystemBrowse: "filesystem.browse",
 
   // VCS methods
+  vcsDiff: "vcs.diff",
   vcsPull: "vcs.pull",
   vcsRefreshStatus: "vcs.refreshStatus",
   vcsListRefs: "vcs.listRefs",
@@ -247,6 +250,12 @@ export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
 export const WsVcsPullRpc = Rpc.make(WS_METHODS.vcsPull, {
   payload: VcsPullInput,
   success: VcsPullResult,
+  error: GitCommandError,
+});
+
+export const WsVcsDiffRpc = Rpc.make(WS_METHODS.vcsDiff, {
+  payload: VcsDiffInput,
+  success: VcsDiffResult,
   error: GitCommandError,
 });
 
@@ -428,6 +437,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsSubscribeVcsStatusRpc,
+  WsVcsDiffRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,

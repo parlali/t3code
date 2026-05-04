@@ -3586,8 +3586,8 @@ export default function ChatView(props: ChatViewProps) {
         search: (previous) => {
           const rest = stripDiffSearchParams(previous);
           return filePath
-            ? { ...rest, diff: "1", diffTurnId: turnId, diffFilePath: filePath }
-            : { ...rest, diff: "1", diffTurnId: turnId };
+            ? { ...rest, diff: "1", diffMode: "turn", diffTurnId: turnId, diffFilePath: filePath }
+            : { ...rest, diff: "1", diffMode: "turn", diffTurnId: turnId };
         },
       });
     },

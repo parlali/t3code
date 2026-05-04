@@ -7,6 +7,8 @@ import {
   type VcsSwitchRefResult,
   type VcsCreateRefInput,
   type VcsCreateRefResult,
+  type VcsDiffInput,
+  type VcsDiffResult,
   type VcsCreateWorktreeInput,
   type VcsCreateWorktreeResult,
   type VcsListRefsInput,
@@ -44,6 +46,7 @@ export interface GitWorkflowServiceShape {
   readonly invalidateRemoteStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly invalidateStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
+  readonly diff: (input: VcsDiffInput) => Effect.Effect<VcsDiffResult, GitCommandError>;
   readonly runStackedAction: (
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
@@ -270,6 +273,8 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
       ensureGitCommand("GitWorkflowService.pullCurrentBranch", cwd).pipe(
         Effect.andThen(git.pullCurrentBranch(cwd)),
       ),
+    diff: (input) =>
+      ensureGitCommand("GitWorkflowService.diff", input.cwd).pipe(Effect.andThen(git.diff(input))),
     runStackedAction: (input, options) =>
       ensureGit("GitWorkflowService.runStackedAction", input.cwd).pipe(
         Effect.andThen(gitManager.runStackedAction(input, options)),

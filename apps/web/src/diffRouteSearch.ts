@@ -2,6 +2,7 @@ import { TurnId } from "@t3tools/contracts";
 
 export interface DiffRouteSearch {
   diff?: "1" | undefined;
+  diffMode?: "turn" | "repo" | undefined;
   diffTurnId?: TurnId | undefined;
   diffFilePath?: string | undefined;
 }
@@ -20,19 +21,29 @@ function normalizeSearchString(value: unknown): string | undefined {
 
 export function stripDiffSearchParams<T extends Record<string, unknown>>(
   params: T,
-): Omit<T, "diff" | "diffTurnId" | "diffFilePath"> {
-  const { diff: _diff, diffTurnId: _diffTurnId, diffFilePath: _diffFilePath, ...rest } = params;
-  return rest as Omit<T, "diff" | "diffTurnId" | "diffFilePath">;
+): Omit<T, "diff" | "diffMode" | "diffTurnId" | "diffFilePath"> {
+  const {
+    diff: _diff,
+    diffMode: _diffMode,
+    diffTurnId: _diffTurnId,
+    diffFilePath: _diffFilePath,
+    ...rest
+  } = params;
+  return rest as Omit<T, "diff" | "diffMode" | "diffTurnId" | "diffFilePath">;
 }
 
 export function parseDiffRouteSearch(search: Record<string, unknown>): DiffRouteSearch {
   const diff = isDiffOpenValue(search.diff) ? "1" : undefined;
-  const diffTurnIdRaw = diff ? normalizeSearchString(search.diffTurnId) : undefined;
+  const normalizedDiffMode = diff ? normalizeSearchString(search.diffMode) : undefined;
+  const diffMode = normalizedDiffMode === "repo" ? "repo" : undefined;
+  const diffTurnIdRaw =
+    diff && diffMode !== "repo" ? normalizeSearchString(search.diffTurnId) : undefined;
   const diffTurnId = diffTurnIdRaw ? TurnId.make(diffTurnIdRaw) : undefined;
   const diffFilePath = diff && diffTurnId ? normalizeSearchString(search.diffFilePath) : undefined;
 
   return {
     ...(diff ? { diff } : {}),
+    ...(diffMode ? { diffMode } : {}),
     ...(diffTurnId ? { diffTurnId } : {}),
     ...(diffFilePath ? { diffFilePath } : {}),
   };

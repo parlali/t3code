@@ -3,6 +3,8 @@ import { Schema } from "effect";
 
 import {
   VcsCreateWorktreeInput,
+  VcsDiffInput,
+  VcsDiffResult,
   GitPreparePullRequestThreadInput,
   GitRunStackedActionResult,
   GitRunStackedActionInput,
@@ -10,6 +12,8 @@ import {
 } from "./git.ts";
 
 const decodeCreateWorktreeInput = Schema.decodeUnknownSync(VcsCreateWorktreeInput);
+const decodeDiffInput = Schema.decodeUnknownSync(VcsDiffInput);
+const decodeDiffResult = Schema.decodeUnknownSync(VcsDiffResult);
 const decodePreparePullRequestThreadInput = Schema.decodeUnknownSync(
   GitPreparePullRequestThreadInput,
 );
@@ -27,6 +31,24 @@ describe("VcsCreateWorktreeInput", () => {
 
     expect(parsed.newRefName).toBeUndefined();
     expect(parsed.refName).toBe("feature/existing");
+  });
+});
+
+describe("VcsDiff", () => {
+  it("accepts cwd and whitespace options", () => {
+    const parsed = decodeDiffInput({
+      cwd: "/repo",
+      ignoreWhitespace: true,
+    });
+
+    expect(parsed.cwd).toBe("/repo");
+    expect(parsed.ignoreWhitespace).toBe(true);
+  });
+
+  it("decodes a raw patch result", () => {
+    const parsed = decodeDiffResult({ diff: "diff --git a/a.ts b/a.ts" });
+
+    expect(parsed.diff).toContain("diff --git");
   });
 });
 

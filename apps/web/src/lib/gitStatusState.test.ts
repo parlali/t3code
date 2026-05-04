@@ -91,6 +91,7 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
       openInEditor: vi.fn(async () => undefined),
     },
     vcs: {
+      diff: vi.fn(async () => ({ diff: "" })),
       pull: vi.fn(async () => undefined),
       refreshStatus: vi.fn(async (input: { cwd: string }) => ({
         ...BASE_STATUS,

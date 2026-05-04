@@ -129,4 +129,32 @@ describe("GitWorkflowService", () => {
       ),
     ),
   );
+
+  it.effect("routes repository diff requests to the git driver", () => {
+    const diff = vi.fn<GitVcsDriver.GitVcsDriverShape["diff"]>(() =>
+      Effect.succeed({ diff: "diff --git a/a.ts b/a.ts" }),
+    );
+
+    const testLayer = GitWorkflowService.layer.pipe(
+      Layer.provide(
+        Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
+          resolve: () => Effect.succeed({ kind: "git" } as never),
+        }),
+      ),
+      Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({ diff })),
+      Layer.provide(Layer.mock(GitManager.GitManager)({})),
+    );
+
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const result = yield* workflow.diff({ cwd: "/repo", ignoreWhitespace: true });
+
+      assert.equal(result.diff, "diff --git a/a.ts b/a.ts");
+      assert.equal(diff.mock.calls.length, 1);
+      assert.deepStrictEqual(diff.mock.calls[0]?.[0], {
+        cwd: "/repo",
+        ignoreWhitespace: true,
+      });
+    }).pipe(Effect.provide(testLayer));
+  });
 });

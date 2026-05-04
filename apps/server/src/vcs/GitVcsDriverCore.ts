@@ -38,6 +38,7 @@ const PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES = 49_000;
 const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
+const WORKING_TREE_DIFF_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(5);
@@ -1631,6 +1632,26 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  const diff: GitVcsDriver.GitVcsDriverShape["diff"] = Effect.fn("diff")(function* (input) {
+    const stdout = yield* runGitStdoutWithOptions(
+      "GitVcsDriver.diff",
+      input.cwd,
+      [
+        "diff",
+        "--patch",
+        "--minimal",
+        "--no-color",
+        ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+      ],
+      {
+        maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
+        truncateOutputAtMaxBytes: true,
+      },
+    );
+
+    return { diff: stdout };
+  });
+
   const readConfigValue: GitVcsDriver.GitVcsDriverShape["readConfigValue"] = (cwd, key) =>
     runGitStdout("GitVcsDriver.readConfigValue", cwd, ["config", "--get", key], true).pipe(
       Effect.map((stdout) => stdout.trim()),
@@ -2124,6 +2145,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     commit,
     pushCurrentBranch,
     pullCurrentBranch,
+    diff,
     readRangeContext,
     readConfigValue,
     listRefs,

@@ -109,6 +109,12 @@ export const VcsPullInput = Schema.Struct({
 });
 export type VcsPullInput = typeof VcsPullInput.Type;
 
+export const VcsDiffInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  ignoreWhitespace: Schema.optional(Schema.Boolean),
+});
+export type VcsDiffInput = typeof VcsDiffInput.Type;
+
 export const GitRunStackedActionInput = Schema.Struct({
   actionId: TrimmedNonEmptyStringSchema,
   cwd: TrimmedNonEmptyStringSchema,
@@ -315,6 +321,11 @@ export const VcsPullResult = Schema.Struct({
   upstreamRef: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
 });
 export type VcsPullResult = typeof VcsPullResult.Type;
+
+export const VcsDiffResult = Schema.Struct({
+  diff: Schema.String,
+});
+export type VcsDiffResult = typeof VcsDiffResult.Type;
 
 // RPC / domain errors
 export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()("GitCommandError", {

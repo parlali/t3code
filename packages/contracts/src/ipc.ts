@@ -14,6 +14,8 @@ import type {
   VcsPullResult,
   VcsRemoveWorktreeInput,
   GitResolvePullRequestResult,
+  VcsDiffInput,
+  VcsDiffResult,
   VcsStatusInput,
   VcsStatusResult,
   VcsCreateRefResult,
@@ -353,6 +355,7 @@ export interface EnvironmentApi {
     createRef: (input: VcsCreateRefInput) => Promise<VcsCreateRefResult>;
     switchRef: (input: VcsSwitchRefInput) => Promise<VcsSwitchRefResult>;
     init: (input: VcsInitInput) => Promise<void>;
+    diff: (input: VcsDiffInput) => Promise<VcsDiffResult>;
     pull: (input: VcsPullInput) => Promise<VcsPullResult>;
     refreshStatus: (input: VcsStatusInput) => Promise<VcsStatusResult>;
     onStatus: (

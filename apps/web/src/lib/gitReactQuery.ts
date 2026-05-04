@@ -22,6 +22,8 @@ export const gitQueryKeys = {
   all: ["git"] as const,
   refs: (environmentId: EnvironmentId | null, cwd: string | null) =>
     ["git", "refs", environmentId ?? null, cwd] as const,
+  diff: (environmentId: EnvironmentId | null, cwd: string | null, ignoreWhitespace: boolean) =>
+    ["git", "diff", environmentId ?? null, cwd, ignoreWhitespace] as const,
   branchSearch: (environmentId: EnvironmentId | null, cwd: string | null, query: string) =>
     ["git", "refs", environmentId ?? null, cwd, "search", query] as const,
 };
@@ -124,6 +126,25 @@ export function gitResolvePullRequestQueryOptions(input: {
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+  });
+}
+
+export function gitDiffQueryOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  ignoreWhitespace: boolean;
+  enabled?: boolean;
+}) {
+  return queryOptions({
+    queryKey: gitQueryKeys.diff(input.environmentId, input.cwd, input.ignoreWhitespace),
+    queryFn: async () => {
+      if (!input.cwd || !input.environmentId) throw new Error("Git diff is unavailable.");
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.vcs.diff({ cwd: input.cwd, ignoreWhitespace: input.ignoreWhitespace });
+    },
+    enabled: (input.enabled ?? true) && input.environmentId !== null && input.cwd !== null,
+    staleTime: Infinity,
+    retry: 2,
   });
 }
 

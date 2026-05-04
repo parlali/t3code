@@ -31,6 +31,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       publishRepository: rpcClient.sourceControl.publishRepository,
     },
     vcs: {
+      diff: rpcClient.vcs.diff,
       pull: rpcClient.vcs.pull,
       refreshStatus: rpcClient.vcs.refreshStatus,
       onStatus: (input, callback, options) => rpcClient.vcs.onStatus(input, callback, options),

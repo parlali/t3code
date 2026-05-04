@@ -15,6 +15,7 @@ import { EnvironmentId, type VcsListRefsResult } from "@t3tools/contracts";
 
 import {
   gitBranchSearchInfiniteQueryOptions,
+  gitDiffQueryOptions,
   gitMutationKeys,
   gitPreparePullRequestThreadMutationOptions,
   gitPullMutationOptions,
@@ -54,6 +55,29 @@ describe("gitMutationKeys", () => {
     expect(gitMutationKeys.preparePullRequestThread(ENVIRONMENT_A, "/repo/a")).not.toEqual(
       gitMutationKeys.preparePullRequestThread(ENVIRONMENT_A, "/repo/b"),
     );
+  });
+});
+
+describe("gitDiffQueryOptions", () => {
+  it("forwards cwd and whitespace mode to the VCS API", async () => {
+    const diff = vi.fn().mockResolvedValue({ diff: "patch" });
+    const { ensureEnvironmentApi } = await import("../environmentApi");
+    vi.mocked(ensureEnvironmentApi).mockReturnValue({
+      vcs: {
+        diff,
+      },
+    } as never);
+
+    const queryClient = new QueryClient();
+    await queryClient.fetchQuery(
+      gitDiffQueryOptions({
+        environmentId: ENVIRONMENT_A,
+        cwd: "/repo/a",
+        ignoreWhitespace: true,
+      }),
+    );
+
+    expect(diff).toHaveBeenCalledWith({ cwd: "/repo/a", ignoreWhitespace: true });
   });
 });
 
