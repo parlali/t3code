@@ -580,6 +580,13 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
           cwd: input.cwd,
           args: ["repo", "view", input.repository, "--json", "nameWithOwner,url,sshUrl"],
         }).pipe(Effect.map((result) => JSON.parse(result.stdout))),
+      createRepository: (input) =>
+        Effect.fail(
+          new GitHubCliError({
+            operation: "createRepository",
+            detail: `Unexpected repository create: ${input.repository}`,
+          }),
+        ),
       checkoutPullRequest: (input) =>
         execute({
           cwd: input.cwd,
@@ -648,6 +655,7 @@ function makeManager(input?: {
           get: () => Effect.succeed(provider),
           resolveHandle: () => Effect.succeed({ provider, context: null }),
           resolve: () => Effect.succeed(provider),
+          discover: Effect.succeed([]),
         }),
       ),
       Effect.provide(Layer.succeed(GitHubCli, gitHubCli)),
