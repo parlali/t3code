@@ -110,13 +110,28 @@ describe("tailscale", () => {
   });
 
   it.effect("configures tailscale serve through the process spawner service", () => {
+    const commands: {
+      readonly command: string;
+      readonly args: ReadonlyArray<string>;
+    }[] = [];
     const layer = mockSpawnerLayer((command, args) => {
+      commands.push({ command, args });
       assert.equal(command, "tailscale");
-      assert.deepEqual(args, ["serve", "--bg", "--https=8443", "http://127.0.0.1:13773"]);
       return {};
     });
 
-    return ensureTailscaleServe({ localPort: 13773, servePort: 8443 }).pipe(Effect.provide(layer));
+    return Effect.gen(function* () {
+      yield* ensureTailscaleServe({ localPort: 13773, servePort: 8443 }).pipe(
+        Effect.provide(layer),
+      );
+      assert.deepEqual(commands, [
+        { command: "tailscale", args: ["serve", "--https=8443", "off"] },
+        {
+          command: "tailscale",
+          args: ["serve", "--bg", "--tls-terminated-tcp=8443", "tcp://127.0.0.1:13773"],
+        },
+      ]);
+    });
   });
 
   it.effect("disables tailscale serve through the process spawner service", () => {
@@ -127,13 +142,32 @@ describe("tailscale", () => {
     const layer = mockSpawnerLayer((command, args) => {
       commands.push({ command, args });
       assert.equal(command, "tailscale");
-      assert.deepEqual(args, ["serve", "--https=8443", "off"]);
       return {};
     });
 
     return Effect.gen(function* () {
       yield* disableTailscaleServe({ servePort: 8443 }).pipe(Effect.provide(layer));
       assert.deepEqual(commands, [
+        { command: "tailscale", args: ["serve", "--tls-terminated-tcp=8443", "off"] },
+      ]);
+    });
+  });
+
+  it.effect("falls back to disabling legacy https tailscale serve mode", () => {
+    const commands: {
+      readonly command: string;
+      readonly args: ReadonlyArray<string>;
+    }[] = [];
+    const layer = mockSpawnerLayer((command, args) => {
+      commands.push({ command, args });
+      assert.equal(command, "tailscale");
+      return args.includes("--tls-terminated-tcp=8443") ? { code: 1 } : {};
+    });
+
+    return Effect.gen(function* () {
+      yield* disableTailscaleServe({ servePort: 8443 }).pipe(Effect.provide(layer));
+      assert.deepEqual(commands, [
+        { command: "tailscale", args: ["serve", "--tls-terminated-tcp=8443", "off"] },
         { command: "tailscale", args: ["serve", "--https=8443", "off"] },
       ]);
     });

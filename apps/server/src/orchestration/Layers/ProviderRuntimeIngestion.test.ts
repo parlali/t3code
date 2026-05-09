@@ -366,7 +366,7 @@ describe("ProviderRuntimeIngestion", () => {
     });
 
     await waitForThread(
-      harness.engine,
+      harness.readModel,
       (thread) =>
         thread.session?.status === "running" && thread.session.activeTurnId === "turn-aborted",
     );
@@ -384,7 +384,7 @@ describe("ProviderRuntimeIngestion", () => {
     });
 
     const thread = await waitForThread(
-      harness.engine,
+      harness.readModel,
       (entry) => entry.session?.status === "ready" && entry.session.activeTurnId === null,
     );
     expect(thread.session?.lastError).toBeNull();

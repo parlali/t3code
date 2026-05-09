@@ -1,7 +1,6 @@
-import { useEffect, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import ThreadSidebar from "./Sidebar";
 import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
 import {
   clearShortcutModifierState,
@@ -11,6 +10,24 @@ import {
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
 const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
+const ThreadSidebar = lazy(() => import("./Sidebar"));
+
+function ThreadSidebarLoadingState() {
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-card text-card-foreground">
+      <div className="h-12 shrink-0 border-b border-border" />
+      <div className="min-h-0 flex-1 px-2 py-3">
+        <div className="h-7 rounded-md bg-muted/45" />
+        <div className="mt-3 space-y-2">
+          <div className="h-5 rounded-md bg-muted/35" />
+          <div className="h-5 rounded-md bg-muted/25" />
+          <div className="h-5 rounded-md bg-muted/20" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
@@ -66,7 +83,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >
-        <ThreadSidebar />
+        <Suspense fallback={<ThreadSidebarLoadingState />}>
+          <ThreadSidebar />
+        </Suspense>
         <SidebarRail />
       </Sidebar>
       {children}

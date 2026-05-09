@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/unstable/reactivity";
 
+import { recordClientPerfEvent } from "../observability/perfDiagnostics";
 import { appAtomRegistry } from "./atomRegistry";
 
 export const SLOW_RPC_ACK_THRESHOLD_MS = 15_000;
@@ -61,6 +62,11 @@ export function trackRpcRequestSent(requestId: string, tag: string): void {
   };
   const timeoutId = setTimeout(() => {
     pendingRpcAckRequests.delete(requestId);
+    recordClientPerfEvent("rpc.request.slow_ack", {
+      requestId,
+      tag,
+      thresholdMs: slowRpcAckThresholdMs,
+    });
     appendSlowRpcAckRequest(request);
   }, slowRpcAckThresholdMs);
 

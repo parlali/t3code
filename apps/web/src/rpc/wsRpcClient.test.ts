@@ -62,13 +62,14 @@ describe("wsRpcClient", () => {
 
     const transport = {
       dispose: vi.fn(async () => undefined),
+      isConnectionOpen: vi.fn(() => true),
       reconnect: vi.fn(async () => undefined),
       request: vi.fn(),
       requestStream: vi.fn(),
       subscribe,
     } satisfies Pick<
       WsTransport,
-      "dispose" | "reconnect" | "request" | "requestStream" | "subscribe"
+      "dispose" | "isConnectionOpen" | "reconnect" | "request" | "requestStream" | "subscribe"
     >;
 
     const client = createWsRpcClient(transport as unknown as WsTransport);

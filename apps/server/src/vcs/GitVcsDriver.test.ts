@@ -77,6 +77,8 @@ it.effect("GitVcsDriver forwards execute env to the VCS process", () => {
     });
 
     assert.deepStrictEqual(observedEnv, {
+      GIT_TERMINAL_PROMPT: "0",
+      GCM_INTERACTIVE: "never",
       GIT_INDEX_FILE: "/tmp/t3-index",
     });
   }).pipe(

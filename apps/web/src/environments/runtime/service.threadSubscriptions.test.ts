@@ -165,6 +165,7 @@ describe("retainThreadDetailSubscription", () => {
     mockThreadUnsubscribe.mockImplementation(() => undefined);
     mockSubscribeThread.mockImplementation(() => mockThreadUnsubscribe);
     mockCreateWsRpcClient.mockReturnValue({
+      isConnectionOpen: vi.fn(() => true),
       server: {
         getConfig: vi.fn(async () => ({
           environment: {
@@ -189,6 +190,7 @@ describe("retainThreadDetailSubscription", () => {
         knownEnvironment: input.knownEnvironment,
         client: input.client,
         ensureBootstrapped: vi.fn(async () => undefined),
+        isConnectionOpen: vi.fn(() => false),
         reconnect,
         dispose: vi.fn(async () => undefined),
       };
@@ -411,6 +413,52 @@ describe("retainThreadDetailSubscription", () => {
     visibilityState = "visible";
     documentTarget.dispatchEvent(new Event("visibilitychange"));
     expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not reconnect healthy environment streams when the browser resumes", async () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    const documentTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    mockCreateEnvironmentConnection.mockImplementation((input) => {
+      const reconnect = vi.fn(async () => undefined);
+      mockConnectionReconnects.push(reconnect);
+      return {
+        kind: input.kind,
+        environmentId: input.knownEnvironment.environmentId,
+        knownEnvironment: input.knownEnvironment,
+        client: input.client,
+        ensureBootstrapped: vi.fn(async () => undefined),
+        isConnectionOpen: vi.fn(() => true),
+        reconnect,
+        dispose: vi.fn(async () => undefined),
+      };
+    });
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    expect(mockConnectionReconnects).toHaveLength(1);
+
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    visibilityState = "visible";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     stop();
     await resetEnvironmentServiceForTests();

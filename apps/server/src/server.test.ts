@@ -52,6 +52,7 @@ import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
 import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
+import { brotliCompressSync, gzipSync } from "node:zlib";
 import { vi } from "vitest";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
@@ -898,6 +899,41 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const response = yield* HttpClient.get("/");
       assert.equal(response.status, 200);
       assert.include(yield* response.text, "router-static-ok");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves precompressed immutable static assets when accepted", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-router-static-compressed-",
+      });
+      const assetsDir = path.join(staticDir, "assets");
+      const assetPath = path.join(assetsDir, "app-test.js");
+      const assetBytes = new TextEncoder().encode("console.log('compressed static asset');");
+
+      yield* fileSystem.makeDirectory(assetsDir, { recursive: true });
+      yield* fileSystem.writeFileString(path.join(staticDir, "index.html"), "<html></html>");
+      yield* fileSystem.writeFile(assetPath, assetBytes);
+      yield* fileSystem.writeFile(`${assetPath}.br`, brotliCompressSync(assetBytes));
+      yield* fileSystem.writeFile(`${assetPath}.gz`, gzipSync(assetBytes));
+
+      yield* buildAppUnderTest({ config: { staticDir } });
+
+      const url = yield* getHttpServerUrl("/assets/app-test.js");
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          headers: {
+            "accept-encoding": "gzip, br",
+          },
+        }),
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-encoding"), "br");
+      assert.equal(response.headers.get("vary"), "Accept-Encoding");
+      assert.equal(response.headers.get("cache-control"), "public, max-age=31536000, immutable");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

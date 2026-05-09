@@ -29,6 +29,19 @@ const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+const STATIC_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
+const STATIC_DOCUMENT_CACHE_CONTROL = "no-cache";
+const STATIC_COMPRESSED_EXTENSIONS = new Set([
+  ".css",
+  ".html",
+  ".js",
+  ".json",
+  ".map",
+  ".mjs",
+  ".svg",
+  ".txt",
+  ".wasm",
+]);
 
 export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: ["GET", "POST", "OPTIONS"],
@@ -50,6 +63,45 @@ export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
   redirectUrl.search = requestUrl.search;
   redirectUrl.hash = requestUrl.hash;
   return redirectUrl.toString();
+}
+
+function acceptsEncoding(headerValue: string | undefined, encoding: "br" | "gzip"): boolean {
+  if (!headerValue) return false;
+  return headerValue
+    .split(",")
+    .map((token) => token.trim().toLowerCase())
+    .some((token) => {
+      const [name, ...parameters] = token.split(";").map((part) => part.trim());
+      if (name !== encoding && name !== "*") return false;
+      return !parameters.some((parameter) => parameter === "q=0" || parameter === "q=0.0");
+    });
+}
+
+function isPrecompressibleStaticFile(filePath: string, pathService: Path.Path): boolean {
+  return STATIC_COMPRESSED_EXTENSIONS.has(pathService.extname(filePath));
+}
+
+function staticCacheControl(staticRelativePath: string): string {
+  const normalized = staticRelativePath.replace(/\\/g, "/");
+  return normalized.startsWith("assets/")
+    ? STATIC_ASSET_CACHE_CONTROL
+    : STATIC_DOCUMENT_CACHE_CONTROL;
+}
+
+function staticResponseHeaders(
+  staticRelativePath: string,
+  encoding?: "br" | "gzip",
+  varyAcceptEncoding = false,
+): Record<string, string> {
+  return {
+    "Cache-Control": staticCacheControl(staticRelativePath),
+    ...(varyAcceptEncoding ? { Vary: "Accept-Encoding" } : {}),
+    ...(encoding
+      ? {
+          "Content-Encoding": encoding,
+        }
+      : {}),
+  };
 }
 
 const requireAuthenticatedRequest = Effect.gen(function* () {
@@ -293,12 +345,31 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       return HttpServerResponse.uint8Array(indexData, {
         status: 200,
         contentType: "text/html; charset=utf-8",
+        headers: staticResponseHeaders("index.html"),
       });
     }
 
     const contentType = Mime.getType(filePath) ?? "application/octet-stream";
+    const acceptEncoding = request.headers["accept-encoding"];
+    const canServeCompressed = isPrecompressibleStaticFile(filePath, path);
+    const staticEncoding =
+      canServeCompressed &&
+      acceptsEncoding(acceptEncoding, "br") &&
+      (yield* fileSystem.exists(`${filePath}.br`))
+        ? ("br" as const)
+        : canServeCompressed &&
+            acceptsEncoding(acceptEncoding, "gzip") &&
+            (yield* fileSystem.exists(`${filePath}.gz`))
+          ? ("gzip" as const)
+          : undefined;
+    const responsePath =
+      staticEncoding === "br"
+        ? `${filePath}.br`
+        : staticEncoding === "gzip"
+          ? `${filePath}.gz`
+          : filePath;
     const data = yield* fileSystem
-      .readFile(filePath)
+      .readFile(responsePath)
       .pipe(Effect.catch(() => Effect.succeed(null)));
     if (!data) {
       return HttpServerResponse.text("Internal Server Error", { status: 500 });
@@ -307,6 +378,7 @@ export const staticAndDevRouteLayer = HttpRouter.add(
     return HttpServerResponse.uint8Array(data, {
       status: 200,
       contentType,
+      headers: staticResponseHeaders(staticRelativePath, staticEncoding, canServeCompressed),
     });
   }),
 );

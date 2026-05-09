@@ -167,6 +167,7 @@ const configSnapshot = {
 function createClient() {
   return {
     dispose: vi.fn(async () => undefined),
+    isConnectionOpen: vi.fn(() => true),
     reconnect: vi.fn(async () => undefined),
     server: {
       getConfig: vi.fn(async () => configSnapshot),
@@ -249,6 +250,7 @@ describe("saved environment startup", () => {
         knownEnvironment: input.knownEnvironment,
         client: input.client,
         ensureBootstrapped: vi.fn(async () => undefined),
+        isConnectionOpen: vi.fn(() => true),
         reconnect: vi.fn(async () => undefined),
         dispose: vi.fn(async () => undefined),
       };

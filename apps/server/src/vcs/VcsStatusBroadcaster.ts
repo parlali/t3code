@@ -89,6 +89,7 @@ export const layer = Layer.effect(
       Scope.close(scope, Exit.void),
     );
     const cacheRef = yield* Ref.make(new Map<string, CachedVcsStatus>());
+    const remoteRefreshInFlightRef = yield* Ref.make(new Set<string>());
     const pollersRef = yield* SynchronizedRef.make(new Map<string, ActiveRemotePoller>());
 
     const getCachedStatus = Effect.fn("VcsStatusBroadcaster.getCachedStatus")(function* (
@@ -168,13 +169,6 @@ export const layer = Layer.effect(
       return yield* updateCachedLocalStatus(cwd, local);
     });
 
-    const loadRemoteStatus = Effect.fn("VcsStatusBroadcaster.loadRemoteStatus")(function* (
-      cwd: string,
-    ) {
-      const remote = yield* workflow.remoteStatus({ cwd });
-      return yield* updateCachedRemoteStatus(cwd, remote);
-    });
-
     const getOrLoadLocalStatus = Effect.fn("VcsStatusBroadcaster.getOrLoadLocalStatus")(function* (
       cwd: string,
     ) {
@@ -185,13 +179,45 @@ export const layer = Layer.effect(
       return yield* loadLocalStatus(cwd);
     });
 
-    const getOrLoadRemoteStatus = Effect.fn("VcsStatusBroadcaster.getOrLoadRemoteStatus")(
+    const refreshRemoteStatus = Effect.fn("VcsStatusBroadcaster.refreshRemoteStatus")(function* (
+      cwd: string,
+    ) {
+      yield* workflow.invalidateRemoteStatus(cwd);
+      const remote = yield* workflow.remoteStatus({ cwd });
+      return yield* updateCachedRemoteStatus(cwd, remote, { publish: true });
+    });
+
+    const logRemoteRefreshFailure = (cwd: string) => (error: Error) =>
+      Effect.logWarning("VCS remote status refresh failed", {
+        cwd,
+        detail: error.message,
+      });
+
+    const triggerRemoteStatusRefresh = Effect.fn("VcsStatusBroadcaster.triggerRemoteStatusRefresh")(
       function* (cwd: string) {
-        const cached = yield* getCachedStatus(cwd);
-        if (cached?.remote) {
-          return cached.remote.value;
+        const shouldStart = yield* Ref.modify(remoteRefreshInFlightRef, (inFlight) => {
+          if (inFlight.has(cwd)) {
+            return [false, inFlight] as const;
+          }
+          const nextInFlight = new Set(inFlight);
+          nextInFlight.add(cwd);
+          return [true, nextInFlight] as const;
+        });
+        if (!shouldStart) {
+          return;
         }
-        return yield* loadRemoteStatus(cwd);
+
+        const clearInFlight = Ref.update(remoteRefreshInFlightRef, (inFlight) => {
+          const nextInFlight = new Set(inFlight);
+          nextInFlight.delete(cwd);
+          return nextInFlight;
+        });
+
+        yield* refreshRemoteStatus(cwd).pipe(
+          Effect.catch(logRemoteRefreshFailure(cwd)),
+          Effect.ensuring(clearInFlight),
+          Effect.forkIn(broadcasterScope),
+        );
       },
     );
 
@@ -199,10 +225,11 @@ export const layer = Layer.effect(
       "VcsStatusBroadcaster.getStatus",
     )(function* (input) {
       const cwd = normalizeCwd(input.cwd);
-      const [local, remote] = yield* Effect.all([
-        getOrLoadLocalStatus(cwd),
-        getOrLoadRemoteStatus(cwd),
-      ]);
+      const local = yield* getOrLoadLocalStatus(cwd);
+      const remote = (yield* getCachedStatus(cwd))?.remote?.value ?? null;
+      if (remote === null) {
+        yield* triggerRemoteStatusRefresh(cwd);
+      }
       return mergeGitStatusParts(local, remote);
     });
 
@@ -215,38 +242,25 @@ export const layer = Layer.effect(
       return yield* updateCachedLocalStatus(cwd, local, { publish: true });
     });
 
-    const refreshRemoteStatus = Effect.fn("VcsStatusBroadcaster.refreshRemoteStatus")(function* (
-      cwd: string,
-    ) {
-      yield* workflow.invalidateRemoteStatus(cwd);
-      const remote = yield* workflow.remoteStatus({ cwd });
-      return yield* updateCachedRemoteStatus(cwd, remote, { publish: true });
-    });
-
     const refreshStatus: VcsStatusBroadcasterShape["refreshStatus"] = Effect.fn(
       "VcsStatusBroadcaster.refreshStatus",
     )(function* (rawCwd) {
       const cwd = normalizeCwd(rawCwd);
-      const [local, remote] = yield* Effect.all([
-        refreshLocalStatus(cwd),
-        refreshRemoteStatus(cwd),
-      ]);
+      const local = yield* refreshLocalStatus(cwd);
+      const remote = (yield* getCachedStatus(cwd))?.remote?.value ?? null;
+      yield* triggerRemoteStatusRefresh(cwd);
       return mergeGitStatusParts(local, remote);
     });
 
     const makeRemoteRefreshLoop = (cwd: string) => {
-      const logRefreshFailure = (error: Error) =>
-        Effect.logWarning("VCS remote status refresh failed", {
-          cwd,
-          detail: error.message,
-        });
-
       return refreshRemoteStatus(cwd).pipe(
-        Effect.catch(logRefreshFailure),
+        Effect.catch(logRemoteRefreshFailure(cwd)),
         Effect.andThen(
           Effect.forever(
             Effect.sleep(VCS_STATUS_REFRESH_INTERVAL).pipe(
-              Effect.andThen(refreshRemoteStatus(cwd).pipe(Effect.catch(logRefreshFailure))),
+              Effect.andThen(
+                refreshRemoteStatus(cwd).pipe(Effect.catch(logRemoteRefreshFailure(cwd))),
+              ),
             ),
           ),
         ),

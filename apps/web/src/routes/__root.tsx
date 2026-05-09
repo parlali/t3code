@@ -12,7 +12,7 @@ import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
-import { CommandPalette } from "../components/CommandPalette";
+import { CommandPaletteShell } from "../components/CommandPaletteShell";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import {
   SlowRpcAckToastCoordinator,
@@ -120,11 +120,11 @@ function RootRouteView() {
   }
 
   const appShell = (
-    <CommandPalette>
+    <CommandPaletteShell>
       <AppSidebarLayout>
         <Outlet />
       </AppSidebarLayout>
-    </CommandPalette>
+    </CommandPaletteShell>
   );
 
   return (

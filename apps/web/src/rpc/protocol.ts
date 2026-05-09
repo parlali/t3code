@@ -3,6 +3,7 @@ import { Duration, Effect, Layer, Schedule } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
 
+import { recordClientPerfEvent } from "../observability/perfDiagnostics";
 import {
   acknowledgeRpcRequest,
   clearAllTrackedRpcRequests,
@@ -18,6 +19,19 @@ import {
   WS_RECONNECT_MAX_RETRIES,
 } from "./wsConnectionState";
 
+const WS_HEARTBEAT_INTERVAL = Duration.seconds(10);
+const WS_HEARTBEAT_MISSED_PONG_LIMIT = 4;
+
+interface ClientRpcTiming {
+  readonly tag: string;
+  readonly stream: boolean;
+  readonly startedAtMs: number;
+  firstAckAtMs: number | null;
+}
+
+const clientRpcTimings = new Map<string, ClientRpcTiming>();
+let websocketAttemptStartedAtMs = 0;
+
 export interface WsProtocolCloseContext {
   readonly intentional: boolean;
 }
@@ -25,6 +39,7 @@ export interface WsProtocolCloseContext {
 export interface WsProtocolLifecycleHandlers {
   readonly getConnectionLabel?: () => string | null;
   readonly getVersionMismatchHint?: () => string | null;
+  readonly trackConnectionStatus?: boolean;
   readonly isCloseIntentional?: () => boolean;
   readonly isActive?: () => boolean;
   readonly onAttempt?: (socketUrl: string) => void;
@@ -85,6 +100,10 @@ function resolveConnectionMetadata(handlers?: WsProtocolLifecycleHandlers): WsCo
   };
 }
 
+function shouldTrackConnectionStatus(handlers?: WsProtocolLifecycleHandlers): boolean {
+  return handlers?.trackConnectionStatus !== false;
+}
+
 type ComposedWsProtocolLifecycleHandlers = Required<
   Pick<WsProtocolLifecycleHandlers, "isActive" | "onAttempt" | "onOpen" | "onError" | "onClose">
 >;
@@ -95,18 +114,27 @@ function defaultLifecycleHandlers(
   return {
     isActive: () => true,
     onAttempt: (socketUrl) => {
+      if (!shouldTrackConnectionStatus(handlers)) {
+        return;
+      }
       recordWsConnectionAttempt(socketUrl, resolveConnectionMetadata(handlers));
     },
     onOpen: () => {
+      if (!shouldTrackConnectionStatus(handlers)) {
+        return;
+      }
       recordWsConnectionOpened(resolveConnectionMetadata(handlers));
     },
     onError: (message) => {
       clearAllTrackedRpcRequests();
+      if (!shouldTrackConnectionStatus(handlers)) {
+        return;
+      }
       recordWsConnectionErrored(message, resolveConnectionMetadata(handlers));
     },
     onClose: (details, context) => {
       clearAllTrackedRpcRequests();
-      if (context.intentional) {
+      if (context.intentional || !shouldTrackConnectionStatus(handlers)) {
         return;
       }
       recordWsConnectionClosed(details, resolveConnectionMetadata(handlers));
@@ -174,12 +202,19 @@ export function createWsRpcProtocolLayer(
   const trackingWebSocketConstructorLayer = Layer.succeed(
     Socket.WebSocketConstructor,
     (socketUrl, protocols) => {
+      websocketAttemptStartedAtMs = performance.now();
+      recordClientPerfEvent("ws.connect.start", {
+        url: socketUrl,
+      });
       lifecycle.onAttempt(socketUrl);
       const socket = new globalThis.WebSocket(socketUrl, protocols);
 
       socket.addEventListener(
         "open",
         () => {
+          recordClientPerfEvent("ws.connect.open", {
+            durationMs: Math.round(performance.now() - websocketAttemptStartedAtMs),
+          });
           lifecycle.onOpen();
         },
         { once: true },
@@ -187,6 +222,9 @@ export function createWsRpcProtocolLayer(
       socket.addEventListener(
         "error",
         () => {
+          recordClientPerfEvent("ws.connect.error", {
+            durationMs: Math.round(performance.now() - websocketAttemptStartedAtMs),
+          });
           lifecycle.onError("Unable to connect to the T3 server WebSocket.");
         },
         { once: true },
@@ -194,6 +232,11 @@ export function createWsRpcProtocolLayer(
       socket.addEventListener(
         "close",
         (event) => {
+          recordClientPerfEvent("ws.connect.close", {
+            durationMs: Math.round(performance.now() - websocketAttemptStartedAtMs),
+            code: event.code,
+            reason: event.reason,
+          });
           lifecycle.onClose(
             {
               code: event.code,
@@ -222,6 +265,8 @@ export function createWsRpcProtocolLayer(
       RpcClient.makeProtocolSocket({
         retryPolicy,
         retryTransientErrors: true,
+        pingInterval: WS_HEARTBEAT_INTERVAL,
+        missedPongLimit: WS_HEARTBEAT_MISSED_PONG_LIMIT,
       }),
       (protocol) => ({
         ...protocol,
@@ -243,47 +288,96 @@ export function createWsRpcProtocolLayer(
           if (!lifecycle.isActive()) {
             return;
           }
-          handlers?.onRequestStart?.({
-            id: String(info.id),
+          const requestId = String(info.id);
+          const startedAtMs = performance.now();
+          clientRpcTimings.set(requestId, {
+            tag: info.tag,
+            stream: info.stream,
+            startedAtMs,
+            firstAckAtMs: null,
+          });
+          recordClientPerfEvent("rpc.request.start", {
+            requestId,
             tag: info.tag,
             stream: info.stream,
           });
-          trackRpcRequestSent(String(info.id), info.tag);
+          handlers?.onRequestStart?.({
+            id: requestId,
+            tag: info.tag,
+            stream: info.stream,
+          });
+          trackRpcRequestSent(requestId, info.tag);
         }),
       onRequestChunk: (info) =>
         Effect.sync(() => {
           if (!lifecycle.isActive()) {
             return;
           }
+          const requestId = String(info.id);
+          const timing = clientRpcTimings.get(requestId);
+          if (timing && timing.firstAckAtMs === null) {
+            timing.firstAckAtMs = performance.now();
+            recordClientPerfEvent("rpc.request.first_ack", {
+              requestId,
+              tag: timing.tag,
+              stream: timing.stream,
+              durationMs: Math.round(timing.firstAckAtMs - timing.startedAtMs),
+              chunkCount: info.chunkCount,
+            });
+          }
           handlers?.onRequestChunk?.({
-            id: String(info.id),
+            id: requestId,
             tag: info.tag,
             chunkCount: info.chunkCount,
           });
-          acknowledgeRpcRequest(String(info.id));
+          acknowledgeRpcRequest(requestId);
         }),
       onRequestExit: (info) =>
         Effect.sync(() => {
           if (!lifecycle.isActive()) {
             return;
           }
+          const requestId = String(info.id);
+          const timing = clientRpcTimings.get(requestId);
+          if (timing) {
+            const finishedAtMs = performance.now();
+            recordClientPerfEvent("rpc.request.finish", {
+              requestId,
+              tag: timing.tag,
+              stream: timing.stream,
+              durationMs: Math.round(finishedAtMs - timing.startedAtMs),
+              firstAckMs:
+                timing.firstAckAtMs === null
+                  ? null
+                  : Math.round(timing.firstAckAtMs - timing.startedAtMs),
+            });
+            clientRpcTimings.delete(requestId);
+          }
           handlers?.onRequestExit?.({
-            id: String(info.id),
+            id: requestId,
             tag: info.tag,
             stream: info.stream,
           });
-          acknowledgeRpcRequest(String(info.id));
+          acknowledgeRpcRequest(requestId);
         }),
       onRequestInterrupt: (info) =>
         Effect.sync(() => {
           if (!lifecycle.isActive()) {
             return;
           }
+          const requestId = String(info.id);
+          const timing = clientRpcTimings.get(requestId);
+          recordClientPerfEvent("rpc.request.interrupt", {
+            requestId,
+            tag: info.tag ?? timing?.tag ?? null,
+            durationMs: timing ? Math.round(performance.now() - timing.startedAtMs) : null,
+          });
+          clientRpcTimings.delete(requestId);
           handlers?.onRequestInterrupt?.({
-            id: String(info.id),
+            id: requestId,
             ...(info.tag === undefined ? {} : { tag: info.tag }),
           });
-          acknowledgeRpcRequest(String(info.id));
+          acknowledgeRpcRequest(requestId);
         }),
     }),
   );
@@ -305,10 +399,12 @@ export function createWsRpcProtocolLayer(
       onPingTimeout: Effect.sync(() => {
         if (lifecycle.isActive()) {
           clearAllTrackedRpcRequests();
-          recordWsConnectionErrored(
-            "WebSocket heartbeat timed out.",
-            resolveConnectionMetadata(handlers),
-          );
+          if (shouldTrackConnectionStatus(handlers)) {
+            recordWsConnectionErrored(
+              "WebSocket heartbeat timed out.",
+              resolveConnectionMetadata(handlers),
+            );
+          }
           handlers?.onHeartbeatTimeout?.();
         }
       }),

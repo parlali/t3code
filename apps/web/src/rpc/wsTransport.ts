@@ -12,6 +12,7 @@ import {
 import { RpcClient } from "effect/unstable/rpc";
 
 import { ClientTracingLive } from "../observability/clientTracing";
+import { recordClientPerfEvent } from "../observability/perfDiagnostics";
 import { clearAllTrackedRpcRequests } from "./requestLatencyState";
 import {
   createWsRpcProtocolLayer,
@@ -63,6 +64,7 @@ export class WsTransport {
   private reconnectChain: Promise<void> = Promise.resolve();
   private nextSessionId = 0;
   private activeSessionId = 0;
+  private connectedSessionId = 0;
   private session: TransportSession;
   private lastHeartbeatPongAt = 0;
   private readonly streamRequestStartListeners = new Set<(info: StreamRequestStartInfo) => void>();
@@ -85,7 +87,15 @@ export class WsTransport {
     }
 
     const session = this.session;
+    const waitingForClientAtMs = performance.now();
     const client = await session.clientPromise;
+    const clientWaitMs = Math.round(performance.now() - waitingForClientAtMs);
+    if (clientWaitMs > 250) {
+      recordClientPerfEvent("transport.request.client_ready", {
+        sessionId: this.activeSessionId,
+        durationMs: clientWaitMs,
+      });
+    }
     return await session.runtime.runPromise(Effect.suspend(() => execute(client)));
   }
 
@@ -210,6 +220,7 @@ export class WsTransport {
 
       clearAllTrackedRpcRequests();
       this.lastHeartbeatPongAt = 0;
+      this.connectedSessionId = 0;
       const previousSession = this.session;
       this.session = this.createSession();
       await this.closeSession(previousSession);
@@ -223,11 +234,16 @@ export class WsTransport {
     return this.lastHeartbeatPongAt > 0 && Date.now() - this.lastHeartbeatPongAt <= maxAgeMs;
   }
 
+  isConnectionOpen(): boolean {
+    return this.connectedSessionId === this.activeSessionId;
+  }
+
   async dispose() {
     if (this.disposed) {
       return;
     }
     this.disposed = true;
+    this.connectedSessionId = 0;
     await this.closeSession(this.session);
   }
 
@@ -255,6 +271,16 @@ export class WsTransport {
           onHeartbeatPong: () => {
             this.lastHeartbeatPongAt = Date.now();
             this.lifecycleHandlers?.onHeartbeatPong?.();
+          },
+          onOpen: () => {
+            this.connectedSessionId = sessionId;
+            this.lifecycleHandlers?.onOpen?.();
+          },
+          onClose: (details, context) => {
+            if (this.connectedSessionId === sessionId) {
+              this.connectedSessionId = 0;
+            }
+            this.lifecycleHandlers?.onClose?.(details, context);
           },
           onRequestStart: (info) => {
             this.lifecycleHandlers?.onRequestStart?.(info);

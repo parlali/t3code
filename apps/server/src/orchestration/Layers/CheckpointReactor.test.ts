@@ -535,7 +535,7 @@ describe("CheckpointReactor", () => {
 
     await waitForEvent(harness.engine, (event) => event.type === "thread.turn-diff-completed");
     const thread = await waitForThread(
-      harness.engine,
+      harness.readModel,
       (entry) => entry.latestTurn?.turnId === "turn-aborted" && entry.checkpoints.length === 1,
     );
     expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1);
@@ -547,7 +547,7 @@ describe("CheckpointReactor", () => {
       ),
     ).toBe("v2\n");
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const readThread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(readThread?.checkpoints[0]?.status).toBe("missing");
   });

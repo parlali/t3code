@@ -111,6 +111,7 @@ vi.mock("./connection", () => ({
 
 vi.mock("../../rpc/wsRpcClient", () => ({
   createWsRpcClient: vi.fn(() => ({
+    isConnectionOpen: vi.fn(() => true),
     server: {
       getConfig: mockClientGetConfig,
     },
@@ -198,6 +199,7 @@ describe("addSavedEnvironment", () => {
         knownEnvironment: input.knownEnvironment,
         client: input.client,
         ensureBootstrapped: async () => undefined,
+        isConnectionOpen: () => true,
         reconnect: async () => undefined,
         dispose: async () => undefined,
       }),
@@ -463,6 +465,7 @@ describe("addSavedEnvironment", () => {
           knownEnvironment: input.knownEnvironment,
           client: input.client,
           ensureBootstrapped: async () => undefined,
+          isConnectionOpen: () => true,
           reconnect: async () => undefined,
           dispose: vi.fn(async () => undefined),
         };
@@ -503,6 +506,7 @@ describe("addSavedEnvironment", () => {
       },
       client: {},
       ensureBootstrapped: async () => undefined,
+      isConnectionOpen: () => false,
       reconnect: vi.fn(async () => {
         throw new Error("socket closed");
       }),
@@ -722,6 +726,7 @@ describe("addSavedEnvironment", () => {
         knownEnvironment: input.knownEnvironment,
         client: input.client,
         ensureBootstrapped: async () => undefined,
+        isConnectionOpen: () => true,
         reconnect: async () => undefined,
         dispose,
       }),

@@ -2,7 +2,9 @@
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { brotliCompress, constants as zlibConstants, gzip } from "node:zlib";
 import { Data, Effect, FileSystem, Logger, Option, Path } from "effect";
+import { promisify } from "node:util";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -34,6 +36,21 @@ class CliError extends Data.TaggedError("CliError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
+
+const gzipAsync = promisify(gzip);
+const brotliCompressAsync = promisify(brotliCompress);
+const PRECOMPRESS_MIN_BYTES = 1024;
+const PRECOMPRESS_BROTLI_QUALITY = 7;
+const PRECOMPRESS_EXTENSIONS = new Set([
+  ".css",
+  ".html",
+  ".js",
+  ".json",
+  ".mjs",
+  ".svg",
+  ".txt",
+  ".wasm",
+]);
 
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),
@@ -129,6 +146,106 @@ const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")
   yield* Effect.log("[cli] Applied development icon overrides to dist/client");
 });
 
+const precompressClientAssets = Effect.fn("precompressClientAssets")(function* (
+  clientTarget: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  let compressedCount = 0;
+
+  const visit = (dir: string): Effect.Effect<void, CliError> =>
+    Effect.gen(function* () {
+      const entries = yield* fs.readDirectory(dir).pipe(
+        Effect.mapError(
+          (cause) =>
+            new CliError({
+              message: `Failed to read client asset directory: ${dir}`,
+              cause,
+            }),
+        ),
+      );
+
+      for (const entry of entries) {
+        const entryPath = path.join(dir, entry);
+        const info = yield* fs.stat(entryPath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new CliError({
+                message: `Failed to stat client asset: ${entryPath}`,
+                cause,
+              }),
+          ),
+        );
+        if (info.type === "Directory") {
+          yield* visit(entryPath);
+          continue;
+        }
+        if (info.type !== "File") {
+          continue;
+        }
+        if (entryPath.endsWith(".br") || entryPath.endsWith(".gz")) {
+          continue;
+        }
+        if (
+          info.size < PRECOMPRESS_MIN_BYTES ||
+          !PRECOMPRESS_EXTENSIONS.has(path.extname(entryPath))
+        ) {
+          continue;
+        }
+
+        const input = yield* fs.readFile(entryPath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new CliError({
+                message: `Failed to read client asset: ${entryPath}`,
+                cause,
+              }),
+          ),
+        );
+        const [br, gz] = yield* Effect.promise(() =>
+          Promise.all([
+            brotliCompressAsync(input, {
+              params: {
+                [zlibConstants.BROTLI_PARAM_QUALITY]: PRECOMPRESS_BROTLI_QUALITY,
+              },
+            }),
+            gzipAsync(input, { level: zlibConstants.Z_BEST_COMPRESSION }),
+          ]),
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new CliError({
+                message: `Failed to precompress client asset: ${entryPath}`,
+                cause,
+              }),
+          ),
+        );
+        yield* fs.writeFile(`${entryPath}.br`, br).pipe(
+          Effect.mapError(
+            (cause) =>
+              new CliError({
+                message: `Failed to write Brotli client asset: ${entryPath}.br`,
+                cause,
+              }),
+          ),
+        );
+        yield* fs.writeFile(`${entryPath}.gz`, gz).pipe(
+          Effect.mapError(
+            (cause) =>
+              new CliError({
+                message: `Failed to write gzip client asset: ${entryPath}.gz`,
+                cause,
+              }),
+          ),
+        );
+        compressedCount += 1;
+      }
+    });
+
+  yield* visit(clientTarget);
+  yield* Effect.log(`[cli] Precompressed ${compressedCount} web client assets`);
+});
+
 // ---------------------------------------------------------------------------
 // build subcommand
 // ---------------------------------------------------------------------------
@@ -160,8 +277,10 @@ const buildCmd = Command.make(
       const clientTarget = path.join(serverDir, "dist/client");
 
       if (yield* fs.exists(webDist)) {
+        yield* fs.remove(clientTarget, { force: true, recursive: true });
         yield* fs.copy(webDist, clientTarget);
         yield* applyDevelopmentIconOverrides(repoRoot, serverDir);
+        yield* precompressClientAssets(clientTarget);
         yield* Effect.log("[cli] Bundled web app into dist/client");
       } else {
         yield* Effect.logWarning("[cli] Web dist not found — skipping client bundle.");

@@ -18,9 +18,14 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 const SOURCE_CONTROL_DISCOVERY_TARGET = { key: "primary" } as const;
 const SOURCE_CONTROL_DISCOVERY_STALE_TIME_MS = 30_000;
 const SOURCE_CONTROL_DISCOVERY_IDLE_TTL_MS = 5 * 60_000;
+const SOURCE_CONTROL_DISCOVERY_REFRESH_DISABLED_PREFIX = "disabled:";
 
 interface SourceControlDiscoveryTargetInput {
   readonly environmentId?: EnvironmentId | null;
+}
+
+interface UseSourceControlDiscoveryInput extends SourceControlDiscoveryTargetInput {
+  readonly autoRefresh?: boolean;
 }
 
 function sourceControlDiscoveryTarget(
@@ -61,18 +66,25 @@ export const sourceControlDiscoveryManager = createSourceControlDiscoveryManager
   },
 });
 
-const sourceControlDiscoveryAutoRefreshAtom = Atom.family((targetKey: string) =>
-  Atom.make(() =>
-    Effect.promise(() => sourceControlDiscoveryManager.refresh({ key: targetKey })),
+const sourceControlDiscoveryAutoRefreshAtom = Atom.family((refreshKey: string) => {
+  const autoRefresh = !refreshKey.startsWith(SOURCE_CONTROL_DISCOVERY_REFRESH_DISABLED_PREFIX);
+  const targetKey = autoRefresh
+    ? refreshKey
+    : refreshKey.slice(SOURCE_CONTROL_DISCOVERY_REFRESH_DISABLED_PREFIX.length);
+
+  return Atom.make(() =>
+    autoRefresh
+      ? Effect.promise(() => sourceControlDiscoveryManager.refresh({ key: targetKey }))
+      : Effect.succeed(null),
   ).pipe(
     Atom.swr({
       staleTime: SOURCE_CONTROL_DISCOVERY_STALE_TIME_MS,
-      revalidateOnMount: true,
+      revalidateOnMount: autoRefresh,
     }),
     Atom.setIdleTTL(SOURCE_CONTROL_DISCOVERY_IDLE_TTL_MS),
-    Atom.withLabel(`source-control-discovery:auto-refresh:${targetKey}`),
-  ),
-);
+    Atom.withLabel(`source-control-discovery:auto-refresh:${refreshKey}`),
+  );
+});
 
 export function refreshSourceControlDiscovery(
   input?: SourceControlDiscoveryTargetInput,
@@ -91,13 +103,17 @@ export function resetSourceControlDiscoveryStateForTests(): void {
 }
 
 export function useSourceControlDiscovery(
-  input?: SourceControlDiscoveryTargetInput,
+  input?: UseSourceControlDiscoveryInput,
 ): SourceControlDiscoveryState {
   const targetKey =
     getSourceControlDiscoveryTargetKey(sourceControlDiscoveryTarget(input)) ??
     SOURCE_CONTROL_DISCOVERY_TARGET.key;
+  const autoRefresh = input?.autoRefresh ?? true;
+  const refreshKey = autoRefresh
+    ? targetKey
+    : `${SOURCE_CONTROL_DISCOVERY_REFRESH_DISABLED_PREFIX}${targetKey}`;
 
-  useAtomValue(sourceControlDiscoveryAutoRefreshAtom(targetKey));
+  useAtomValue(sourceControlDiscoveryAutoRefreshAtom(refreshKey));
 
   return useAtomValue(sourceControlDiscoveryStateAtom(targetKey));
 }

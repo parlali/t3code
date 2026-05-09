@@ -255,15 +255,40 @@ export const ensureTailscaleServe = (input: {
 }): Effect.Effect<void, TailscaleCommandError, ChildProcessSpawner.ChildProcessSpawner> => {
   const servePort = input.servePort ?? DEFAULT_TAILSCALE_SERVE_PORT;
   const localHost = input.localHost ?? "127.0.0.1";
-  const args = ["serve", "--bg", `--https=${servePort}`, `http://${localHost}:${input.localPort}`];
-  return runTailscaleCommand(args, {
+  const legacyHttpsOff = runTailscaleCommand(["serve", `--https=${servePort}`, "off"], {
+    spawnMessage: "Failed to spawn legacy tailscale serve off.",
+    runMessage: "Failed to run legacy tailscale serve off.",
+    exitMessage: (exitCode) => `Legacy Tailscale serve off exited with code ${exitCode}.`,
+    timeoutMessage: "Legacy Tailscale serve off timed out.",
+    timeoutMs: TAILSCALE_SERVE_TIMEOUT_MS,
+  }).pipe(Effect.catch(() => Effect.void));
+  const args = [
+    "serve",
+    "--bg",
+    `--tls-terminated-tcp=${servePort}`,
+    `tcp://${localHost}:${input.localPort}`,
+  ];
+  return legacyHttpsOff.pipe(
+    Effect.andThen(
+      runTailscaleCommand(args, {
+        spawnMessage: "Failed to spawn tailscale serve.",
+        runMessage: "Failed to run tailscale serve.",
+        exitMessage: (exitCode) => `Tailscale serve exited with code ${exitCode}.`,
+        timeoutMessage: "Tailscale serve timed out.",
+        timeoutMs: TAILSCALE_SERVE_TIMEOUT_MS,
+      }),
+    ),
+  );
+};
+
+const disableTailscaleServeMode = (args: readonly string[]) =>
+  runTailscaleCommand(args, {
     spawnMessage: "Failed to spawn tailscale serve.",
     runMessage: "Failed to run tailscale serve.",
     exitMessage: (exitCode) => `Tailscale serve exited with code ${exitCode}.`,
     timeoutMessage: "Tailscale serve timed out.",
     timeoutMs: TAILSCALE_SERVE_TIMEOUT_MS,
   });
-};
 
 export const disableTailscaleServe = (
   input: {
@@ -272,13 +297,13 @@ export const disableTailscaleServe = (
 ): Effect.Effect<void, TailscaleCommandError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const servePort = input.servePort ?? DEFAULT_TAILSCALE_SERVE_PORT;
-    return yield* runTailscaleCommand(["serve", `--https=${servePort}`, "off"], {
-      spawnMessage: "Failed to spawn tailscale serve off.",
-      runMessage: "Failed to run tailscale serve off.",
-      exitMessage: (exitCode) => `Tailscale serve off exited with code ${exitCode}.`,
-      timeoutMessage: "Tailscale serve off timed out.",
-      timeoutMs: TAILSCALE_SERVE_TIMEOUT_MS,
-    });
+    return yield* disableTailscaleServeMode([
+      "serve",
+      `--tls-terminated-tcp=${servePort}`,
+      "off",
+    ]).pipe(
+      Effect.catch(() => disableTailscaleServeMode(["serve", `--https=${servePort}`, "off"])),
+    );
   });
 
 export const probeTailscaleHttpsEndpoint = (input: {

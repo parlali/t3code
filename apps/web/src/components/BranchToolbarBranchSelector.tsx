@@ -199,18 +199,17 @@ export function BranchToolbarBranchSelector({
   const queryClient = useQueryClient();
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
   const [branchQuery, setBranchQuery] = useState("");
+  const [branchRefsIdleReady, setBranchRefsIdleReady] = useState(false);
   const deferredBranchQuery = useDeferredValue(branchQuery);
 
   const branchStatusQuery = useGitStatus({ environmentId, cwd: branchCwd });
+  const currentGitBranchFromStatus = branchStatusQuery.data?.refName ?? null;
+  const shouldLoadBranchRefs =
+    isBranchMenuOpen ||
+    (effectiveEnvMode === "worktree" && !activeWorktreePath) ||
+    (!currentGitBranchFromStatus && branchRefsIdleReady);
   const trimmedBranchQuery = branchQuery.trim();
   const deferredTrimmedBranchQuery = deferredBranchQuery.trim();
-
-  useEffect(() => {
-    if (!branchCwd) return;
-    void queryClient.prefetchInfiniteQuery(
-      gitBranchSearchInfiniteQueryOptions({ environmentId, cwd: branchCwd, query: "" }),
-    );
-  }, [branchCwd, environmentId, queryClient]);
 
   const {
     data: branchesSearchData,
@@ -223,6 +222,7 @@ export function BranchToolbarBranchSelector({
       environmentId,
       cwd: branchCwd,
       query: deferredTrimmedBranchQuery,
+      enabled: shouldLoadBranchRefs,
     }),
   );
   const refs = useMemo(
@@ -230,7 +230,7 @@ export function BranchToolbarBranchSelector({
     [branchesSearchData?.pages],
   );
   const currentGitBranch =
-    branchStatusQuery.data?.refName ?? refs.find((refName) => refName.current)?.name ?? null;
+    currentGitBranchFromStatus ?? refs.find((refName) => refName.current)?.name ?? null;
   const sourceControlPresentation = useMemo(
     () => getSourceControlPresentation(branchStatusQuery.data?.sourceControlProvider),
     [branchStatusQuery.data?.sourceControlProvider],
@@ -294,13 +294,39 @@ export function BranchToolbarBranchSelector({
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
   const shouldVirtualizeBranchList = filteredBranchPickerItems.length > 40;
   const totalBranchCount = branchesSearchData?.pages[0]?.totalCount ?? 0;
-  const branchStatusText = isBranchesSearchPending
-    ? "Loading refs..."
-    : isFetchingNextPage
-      ? "Loading more refs..."
-      : hasNextPage
-        ? `Showing ${refs.length} of ${totalBranchCount} refs`
-        : null;
+  const branchStatusText =
+    isBranchMenuOpen && isBranchesSearchPending
+      ? "Loading refs..."
+      : isFetchingNextPage
+        ? "Loading more refs..."
+        : hasNextPage
+          ? `Showing ${refs.length} of ${totalBranchCount} refs`
+          : null;
+
+  useEffect(() => {
+    if (branchRefsIdleReady || currentGitBranchFromStatus) {
+      return;
+    }
+
+    if ("requestIdleCallback" in window) {
+      const handle = window.requestIdleCallback(
+        () => {
+          setBranchRefsIdleReady(true);
+        },
+        { timeout: 5_000 },
+      );
+      return () => {
+        window.cancelIdleCallback(handle);
+      };
+    }
+
+    const timeout = globalThis.setTimeout(() => {
+      setBranchRefsIdleReady(true);
+    }, 3_000);
+    return () => {
+      globalThis.clearTimeout(timeout);
+    };
+  }, [branchRefsIdleReady, currentGitBranchFromStatus]);
 
   // ---------------------------------------------------------------------------
   // Branch actions
@@ -592,7 +618,10 @@ export function BranchToolbarBranchSelector({
       <ComboboxTrigger
         render={<Button variant="ghost" size="xs" />}
         className={cn("min-w-0 text-muted-foreground/70 hover:text-foreground/80", className)}
-        disabled={(isBranchesSearchPending && refs.length === 0) || isBranchActionPending}
+        disabled={
+          (isBranchMenuOpen && isBranchesSearchPending && refs.length === 0) ||
+          isBranchActionPending
+        }
       >
         <span className="min-w-0 max-w-[240px] truncate">{triggerLabel}</span>
         <ChevronDownIcon className="shrink-0" />

@@ -390,6 +390,10 @@ function CommandPaletteDialog() {
   return <OpenCommandPaletteDialog />;
 }
 
+export function CommandPaletteDialogContent() {
+  return <OpenCommandPaletteDialog />;
+}
+
 function OpenCommandPaletteDialog() {
   const navigate = useNavigate();
   const setOpen = useCommandPaletteStore((store) => store.setOpen);

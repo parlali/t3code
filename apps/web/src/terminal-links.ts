@@ -1,5 +1,3 @@
-import { isMacPlatform } from "./lib/utils";
-
 export type TerminalLinkKind = "url" | "path";
 
 export interface TerminalLinkMatch {
@@ -261,9 +259,8 @@ export function isTerminalLinkActivation(
   platform = typeof navigator === "undefined" ? "" : navigator.platform,
 ): boolean {
   if (platform.length === 0) return false;
-  return isMacPlatform(platform)
-    ? event.metaKey && !event.ctrlKey
-    : event.ctrlKey && !event.metaKey;
+  const isMacPlatform = /mac|iphone|ipad|ipod/i.test(platform);
+  return isMacPlatform ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 }
 
 export function resolvePathLinkTarget(rawPath: string, cwd: string): string {

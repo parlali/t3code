@@ -38,6 +38,7 @@ const gitStatusListeners = new Set<(event: VcsStatusResult) => void>();
 
 const rpcClientMock = {
   dispose: vi.fn(),
+  isConnectionOpen: vi.fn(() => true),
   terminal: {
     open: vi.fn(),
     write: vi.fn(),
@@ -123,6 +124,7 @@ vi.mock("./environments/runtime", () => ({
     client: rpcClientMock,
     environmentId: EnvironmentId.make("environment-local"),
     ensureBootstrapped: async () => undefined,
+    isConnectionOpen: () => true,
     reconnect: async () => undefined,
     dispose: async () => undefined,
   }),

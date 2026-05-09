@@ -2746,6 +2746,7 @@ export default function Sidebar() {
   const suppressProjectClickAfterDragRef = useRef(false);
   const suppressProjectClickForContextMenuRef = useRef(false);
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
+  const [threadDetailPrewarmReady, setThreadDetailPrewarmReady] = useState(false);
   const selectedThreadCount = useThreadSelectionStore((s) => s.selectedThreadKeys.size);
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
@@ -3093,8 +3094,8 @@ export default function Sidebar() {
     : EMPTY_THREAD_JUMP_LABELS;
   const orderedSidebarThreadKeys = visibleSidebarThreadKeys;
   const prewarmedSidebarThreadKeys = useMemo(
-    () => getSidebarThreadIdsToPrewarm(visibleSidebarThreadKeys),
-    [visibleSidebarThreadKeys],
+    () => (threadDetailPrewarmReady ? getSidebarThreadIdsToPrewarm(visibleSidebarThreadKeys) : []),
+    [threadDetailPrewarmReady, visibleSidebarThreadKeys],
   );
   const prewarmedSidebarThreadRefs = useMemo(
     () =>
@@ -3106,6 +3107,35 @@ export default function Sidebar() {
   );
 
   useEffect(() => {
+    if (threadDetailPrewarmReady) {
+      return;
+    }
+
+    if ("requestIdleCallback" in window) {
+      const handle = window.requestIdleCallback(
+        () => {
+          setThreadDetailPrewarmReady(true);
+        },
+        { timeout: 5_000 },
+      );
+      return () => {
+        window.cancelIdleCallback(handle);
+      };
+    }
+
+    const timeout = globalThis.setTimeout(() => {
+      setThreadDetailPrewarmReady(true);
+    }, 3_000);
+    return () => {
+      globalThis.clearTimeout(timeout);
+    };
+  }, [threadDetailPrewarmReady]);
+
+  useEffect(() => {
+    if (!threadDetailPrewarmReady) {
+      return;
+    }
+
     const releases = prewarmedSidebarThreadRefs.map((ref) =>
       retainThreadDetailSubscription(ref.environmentId, ref.threadId),
     );
@@ -3115,7 +3145,7 @@ export default function Sidebar() {
         release();
       }
     };
-  }, [prewarmedSidebarThreadRefs]);
+  }, [prewarmedSidebarThreadRefs, threadDetailPrewarmReady]);
 
   useEffect(() => {
     updateThreadJumpHintsVisibility(shouldShowThreadJumpHintsNow);

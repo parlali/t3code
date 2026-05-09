@@ -39,10 +39,19 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 
+vi.mock("@xterm/addon-unicode11", () => ({
+  Unicode11Addon: class MockUnicode11Addon {
+    activate() {
+      return undefined;
+    }
+  },
+}));
+
 vi.mock("@xterm/xterm", () => ({
   Terminal: class MockTerminal {
     cols = 80;
     rows = 24;
+    unicode = { activeVersion: "6" };
     options: { theme?: unknown } = {};
     buffer = {
       active: {

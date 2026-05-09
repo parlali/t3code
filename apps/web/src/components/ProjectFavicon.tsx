@@ -1,6 +1,6 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { FolderIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { resolveEnvironmentHttpUrl } from "../environments/runtime";
 
 const loadedProjectFaviconSrcs = new Set<string>();
@@ -24,6 +24,44 @@ export function ProjectFavicon(input: {
   const [status, setStatus] = useState<"loading" | "loaded" | "error">(() =>
     src && loadedProjectFaviconSrcs.has(src) ? "loaded" : "loading",
   );
+  const [requestedSrc, setRequestedSrc] = useState<string | null>(() =>
+    src && loadedProjectFaviconSrcs.has(src) ? src : null,
+  );
+
+  useEffect(() => {
+    setStatus(src && loadedProjectFaviconSrcs.has(src) ? "loaded" : "loading");
+
+    if (!src) {
+      setRequestedSrc(null);
+      return;
+    }
+
+    if (loadedProjectFaviconSrcs.has(src)) {
+      setRequestedSrc(src);
+      return;
+    }
+
+    let cancelled = false;
+    const requestFavicon = () => {
+      if (!cancelled) {
+        setRequestedSrc(src);
+      }
+    };
+
+    if ("requestIdleCallback" in window) {
+      const handle = window.requestIdleCallback(requestFavicon, { timeout: 2_500 });
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback(handle);
+      };
+    }
+
+    const timeoutId = globalThis.setTimeout(requestFavicon, 750);
+    return () => {
+      cancelled = true;
+      globalThis.clearTimeout(timeoutId);
+    };
+  }, [src]);
 
   if (!src) {
     return (
@@ -41,7 +79,7 @@ export function ProjectFavicon(input: {
         />
       ) : null}
       <img
-        src={src}
+        src={requestedSrc ?? undefined}
         alt=""
         className={`size-3.5 shrink-0 rounded-sm object-contain ${status === "loaded" ? "" : "hidden"} ${input.className ?? ""}`}
         onLoad={() => {

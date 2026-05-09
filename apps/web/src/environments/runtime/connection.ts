@@ -16,6 +16,7 @@ export interface EnvironmentConnection {
   readonly knownEnvironment: KnownEnvironment;
   readonly client: WsRpcClient;
   readonly ensureBootstrapped: () => Promise<void>;
+  readonly isConnectionOpen: () => boolean;
   readonly reconnect: () => Promise<void>;
   readonly dispose: () => Promise<void>;
 }
@@ -163,6 +164,7 @@ export function createEnvironmentConnection(
     knownEnvironment: input.knownEnvironment,
     client: input.client,
     ensureBootstrapped: () => bootstrapGate.wait(),
+    isConnectionOpen: () => input.client.isConnectionOpen(),
     reconnect: async () => {
       bootstrapGate.reset();
       try {

@@ -1,4 +1,4 @@
-import { Duration, Effect, Exit, Metric, Stream } from "effect";
+import { Cause, Duration, Effect, Exit, Metric, Stream } from "effect";
 
 import { outcomeFromExit } from "./Attributes.ts";
 import { metricAttributes, rpcRequestDuration, rpcRequestsTotal, withMetrics } from "./Metrics.ts";
@@ -41,16 +41,43 @@ export const observeRpcEffect = <A, E, R>(
 ): Effect.Effect<A, E, R> =>
   Effect.gen(function* () {
     yield* annotateRpcSpan(method, traceAttributes);
+    const startedAt = Date.now();
+    yield* Effect.logInfo("ws.rpc.start", {
+      method,
+      ...traceAttributes,
+    });
 
-    return yield* effect.pipe(
-      withMetrics({
-        counter: rpcRequestsTotal,
-        timer: rpcRequestDuration,
-        attributes: {
-          method,
-        },
-      }),
+    const exit = yield* Effect.exit(
+      effect.pipe(
+        withMetrics({
+          counter: rpcRequestsTotal,
+          timer: rpcRequestDuration,
+          attributes: {
+            method,
+          },
+        }),
+      ),
     );
+
+    const durationMs = Date.now() - startedAt;
+    if (Exit.isSuccess(exit)) {
+      yield* Effect.logInfo("ws.rpc.finish", {
+        method,
+        durationMs,
+        outcome: "success",
+        ...traceAttributes,
+      });
+      return exit.value;
+    }
+
+    yield* Effect.logWarning("ws.rpc.finish", {
+      method,
+      durationMs,
+      outcome: "failure",
+      error: Cause.pretty(exit.cause),
+      ...traceAttributes,
+    });
+    return yield* Effect.failCause(exit.cause);
   });
 
 export const observeRpcStream = <A, E, R>(

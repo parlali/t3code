@@ -1,10 +1,11 @@
 import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
+import "@xterm/xterm/css/xterm.css";
 import { Plus, SquareSplitHorizontal, TerminalSquare, Trash2, XIcon } from "lucide-react";
 import {
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type TerminalEvent,
-  type TerminalSessionSnapshot,
   type ThreadId,
 } from "@t3tools/contracts";
 import { Terminal, type ITheme } from "@xterm/xterm";
@@ -20,6 +21,9 @@ import {
 } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
+import { cn } from "~/lib/utils";
+import { restoreTerminalSnapshot } from "~/terminalSnapshotRestore";
+import { recordClientPerfEvent } from "~/observability/perfDiagnostics";
 import { openInPreferredEditor } from "../editorPreferences";
 import {
   collectWrappedTerminalLinkLine,
@@ -65,13 +69,6 @@ function clampDrawerHeight(height: number): number {
 
 function writeSystemMessage(terminal: Terminal, message: string): void {
   terminal.write(`\r\n[terminal] ${message}\r\n`);
-}
-
-function writeTerminalSnapshot(terminal: Terminal, snapshot: TerminalSessionSnapshot): void {
-  terminal.write("\u001bc");
-  if (snapshot.history.length > 0) {
-    terminal.write(snapshot.history);
-  }
 }
 
 export function selectTerminalEventEntriesAfterSnapshot(
@@ -280,6 +277,8 @@ export function TerminalViewport({
   const keybindingsRef = useRef(keybindings);
   const lastAppliedSequenceRef = useRef(0);
   const attachRequestIdRef = useRef(0);
+  const terminalSessionReadyRef = useRef(false);
+  const firstOutputLoggedRef = useRef(false);
   const handleSessionExited = useEffectEvent(() => {
     onSessionExited();
   });
@@ -297,13 +296,16 @@ export function TerminalViewport({
     if (!mount) return;
 
     let disposed = false;
+    terminalSessionReadyRef.current = false;
     const api = readEnvironmentApi(environmentId);
     const localApi = readLocalApi();
     if (!api || !localApi) return;
     const terminalApi = api.terminal;
 
     const fitAddon = new FitAddon();
+    const unicode11Addon = new Unicode11Addon();
     const terminal = new Terminal({
+      allowProposedApi: true,
       cursorBlink: true,
       lineHeight: 1.2,
       fontSize: 12,
@@ -314,8 +316,23 @@ export function TerminalViewport({
       theme: terminalThemeFromApp(mount),
     });
     terminal.loadAddon(fitAddon);
+    terminal.loadAddon(unicode11Addon);
+    terminal.unicode.activeVersion = "11";
+    const mountedAtMs = performance.now();
+    recordClientPerfEvent("terminal.viewport.mount.start", {
+      threadId,
+      terminalId,
+      cwd,
+    });
     terminal.open(mount);
     fitAddon.fit();
+    recordClientPerfEvent("terminal.viewport.mount.finish", {
+      threadId,
+      terminalId,
+      durationMs: Math.round(performance.now() - mountedAtMs),
+      cols: terminal.cols,
+      rows: terminal.rows,
+    });
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
@@ -594,15 +611,33 @@ export function TerminalViewport({
       }
 
       if (event.type === "output") {
+        if (!firstOutputLoggedRef.current) {
+          firstOutputLoggedRef.current = true;
+          recordClientPerfEvent("terminal.event.first_output", {
+            threadId,
+            terminalId,
+            sequence: event.sequence,
+            bytes: event.data.length,
+          });
+        }
         activeTerminal.write(event.data);
         clearSelectionAction();
         return;
       }
 
       if (event.type === "started" || event.type === "restarted") {
+        recordClientPerfEvent("terminal.event.started", {
+          threadId,
+          terminalId,
+          type: event.type,
+          sequence: event.sequence,
+          snapshotSequence: event.snapshot.sequence,
+          historyBytes: event.snapshot.history.length,
+          screenBytes: event.snapshot.screen?.data.length ?? 0,
+        });
         hasHandledExitRef.current = false;
         clearSelectionAction();
-        writeTerminalSnapshot(activeTerminal, event.snapshot);
+        restoreTerminalSnapshot(activeTerminal, event.snapshot);
         return;
       }
 
@@ -672,6 +707,14 @@ export function TerminalViewport({
           const activeFitAddon = fitAddonRef.current;
           if (!activeTerminal || !activeFitAddon) return;
           activeFitAddon.fit();
+          const openStartedAtMs = performance.now();
+          recordClientPerfEvent("terminal.attach.open.start", {
+            threadId,
+            terminalId,
+            cwd,
+            cols: activeTerminal.cols,
+            rows: activeTerminal.rows,
+          });
           const snapshot = await terminalApi.open({
             threadId,
             terminalId,
@@ -682,7 +725,20 @@ export function TerminalViewport({
             ...(runtimeEnv ? { env: runtimeEnv } : {}),
           });
           if (disposed || requestId !== attachRequestIdRef.current) return;
-          writeTerminalSnapshot(activeTerminal, snapshot);
+          recordClientPerfEvent("terminal.attach.open.finish", {
+            threadId,
+            terminalId,
+            durationMs: Math.round(performance.now() - openStartedAtMs),
+            status: snapshot.status,
+            pid: snapshot.pid,
+            sequence: snapshot.sequence,
+            historyBytes: snapshot.history.length,
+            screenBytes: snapshot.screen?.data.length ?? 0,
+          });
+          terminalSessionReadyRef.current = true;
+          firstOutputLoggedRef.current = false;
+          lastSentSize = { cols: activeTerminal.cols, rows: activeTerminal.rows };
+          restoreTerminalSnapshot(activeTerminal, snapshot);
           lastAppliedSequenceRef.current = snapshot.sequence ?? 0;
           unsubscribeTerminalEvents = terminalApi.onSessionEvent(
             {
@@ -725,6 +781,9 @@ export function TerminalViewport({
       if (wasAtBottom) {
         activeTerminal.scrollToBottom();
       }
+      if (!terminalSessionReadyRef.current) {
+        return;
+      }
       if (activeTerminal.cols === lastSentSize.cols && activeTerminal.rows === lastSentSize.rows) {
         return;
       }
@@ -754,6 +813,7 @@ export function TerminalViewport({
     return () => {
       disposed = true;
       attachRequestIdRef.current += 1;
+      terminalSessionReadyRef.current = false;
       lastAppliedSequenceRef.current = 0;
       unsubscribeTerminalEvents();
       if (resizeFrame !== null) {
@@ -797,7 +857,7 @@ export function TerminalViewport({
     const api = readEnvironmentApi(environmentId);
     const terminal = terminalRef.current;
     const fitAddon = fitAddonRef.current;
-    if (!api || !terminal || !fitAddon) return;
+    if (!api || !terminal || !fitAddon || !terminalSessionReadyRef.current) return;
     const wasAtBottom = terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
     const frame = window.requestAnimationFrame(() => {
       fitAddon.fit();
@@ -818,10 +878,7 @@ export function TerminalViewport({
     };
   }, [drawerHeight, environmentId, resizeEpoch, terminalId, threadId]);
   return (
-    <div
-      ref={containerRef}
-      className="relative h-full w-full overflow-hidden rounded-[4px] bg-background"
-    />
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-background" />
   );
 }
 
@@ -876,6 +933,65 @@ function TerminalActionButton({ label, className, onClick, children }: TerminalA
         {label}
       </PopoverPopup>
     </Popover>
+  );
+}
+
+interface TerminalActionControlsProps {
+  hasReachedSplitLimit: boolean;
+  splitTerminalActionLabel: string;
+  newTerminalActionLabel: string;
+  closeTerminalActionLabel: string;
+  onSplitTerminalAction: () => void;
+  onNewTerminalAction: () => void;
+  onCloseActiveTerminal: () => void;
+  className?: string;
+  buttonClassName?: string;
+  separatorClassName?: string;
+  hoverClassName?: string;
+}
+
+function TerminalActionControls({
+  hasReachedSplitLimit,
+  splitTerminalActionLabel,
+  newTerminalActionLabel,
+  closeTerminalActionLabel,
+  onSplitTerminalAction,
+  onNewTerminalAction,
+  onCloseActiveTerminal,
+  className = "inline-flex h-full items-stretch",
+  buttonClassName = "inline-flex h-full items-center px-1",
+  separatorClassName = "border-l border-border/70",
+  hoverClassName = "hover:bg-accent/70",
+}: TerminalActionControlsProps) {
+  const baseButtonClassName = "text-foreground/90 transition-colors";
+  const splitButtonStateClassName = hasReachedSplitLimit
+    ? "cursor-not-allowed opacity-45 hover:bg-transparent"
+    : hoverClassName;
+
+  return (
+    <div className={className}>
+      <TerminalActionButton
+        className={cn(buttonClassName, baseButtonClassName, splitButtonStateClassName)}
+        onClick={onSplitTerminalAction}
+        label={splitTerminalActionLabel}
+      >
+        <SquareSplitHorizontal className="size-3.25" />
+      </TerminalActionButton>
+      <TerminalActionButton
+        className={cn(buttonClassName, separatorClassName, baseButtonClassName, hoverClassName)}
+        onClick={onNewTerminalAction}
+        label={newTerminalActionLabel}
+      >
+        <Plus className="size-3.25" />
+      </TerminalActionButton>
+      <TerminalActionButton
+        className={cn(buttonClassName, separatorClassName, baseButtonClassName, hoverClassName)}
+        onClick={onCloseActiveTerminal}
+        label={closeTerminalActionLabel}
+      >
+        <Trash2 className="size-3.25" />
+      </TerminalActionButton>
+    </div>
   );
 }
 
@@ -1033,6 +1149,9 @@ export default function ThreadTerminalDrawer({
   const onNewTerminalAction = useCallback(() => {
     onNewTerminal();
   }, [onNewTerminal]);
+  const onCloseActiveTerminal = useCallback(() => {
+    onCloseTerminal(resolvedActiveTerminalId);
+  }, [onCloseTerminal, resolvedActiveTerminalId]);
 
   useEffect(() => {
     onHeightChangeRef.current = onHeightChange;
@@ -1150,36 +1269,17 @@ export default function ThreadTerminalDrawer({
       />
 
       {!hasTerminalSidebar && (
-        <div className="pointer-events-none absolute right-2 top-2 z-20">
-          <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background/70">
-            <TerminalActionButton
-              className={`p-1 text-foreground/90 transition-colors ${
-                hasReachedSplitLimit
-                  ? "cursor-not-allowed opacity-45 hover:bg-transparent"
-                  : "hover:bg-accent"
-              }`}
-              onClick={onSplitTerminalAction}
-              label={splitTerminalActionLabel}
-            >
-              <SquareSplitHorizontal className="size-3.25" />
-            </TerminalActionButton>
-            <div className="h-4 w-px bg-border/80" />
-            <TerminalActionButton
-              className="p-1 text-foreground/90 transition-colors hover:bg-accent"
-              onClick={onNewTerminalAction}
-              label={newTerminalActionLabel}
-            >
-              <Plus className="size-3.25" />
-            </TerminalActionButton>
-            <div className="h-4 w-px bg-border/80" />
-            <TerminalActionButton
-              className="p-1 text-foreground/90 transition-colors hover:bg-accent"
-              onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
-              label={closeTerminalActionLabel}
-            >
-              <Trash2 className="size-3.25" />
-            </TerminalActionButton>
-          </div>
+        <div className="flex h-7 shrink-0 items-center justify-end border-b border-border/70 bg-background px-2">
+          <TerminalActionControls
+            hasReachedSplitLimit={hasReachedSplitLimit}
+            splitTerminalActionLabel={splitTerminalActionLabel}
+            newTerminalActionLabel={newTerminalActionLabel}
+            closeTerminalActionLabel={closeTerminalActionLabel}
+            onSplitTerminalAction={onSplitTerminalAction}
+            onNewTerminalAction={onNewTerminalAction}
+            onCloseActiveTerminal={onCloseActiveTerminal}
+            className="inline-flex h-[22px] items-stretch overflow-hidden rounded-md border border-border/80 bg-background"
+          />
         </div>
       )}
 
@@ -1205,7 +1305,7 @@ export default function ThreadTerminalDrawer({
                       }
                     }}
                   >
-                    <div className="h-full p-1">
+                    <div className="h-full">
                       <TerminalViewport
                         threadRef={threadRef}
                         threadId={threadId}
@@ -1227,7 +1327,7 @@ export default function ThreadTerminalDrawer({
                 ))}
               </div>
             ) : (
-              <div className="h-full p-1">
+              <div className="h-full">
                 <TerminalViewport
                   key={resolvedActiveTerminalId}
                   threadRef={threadRef}
@@ -1252,33 +1352,15 @@ export default function ThreadTerminalDrawer({
           {hasTerminalSidebar && (
             <aside className="flex w-36 min-w-36 flex-col border border-border/70 bg-muted/10">
               <div className="flex h-[22px] items-stretch justify-end border-b border-border/70">
-                <div className="inline-flex h-full items-stretch">
-                  <TerminalActionButton
-                    className={`inline-flex h-full items-center px-1 text-foreground/90 transition-colors ${
-                      hasReachedSplitLimit
-                        ? "cursor-not-allowed opacity-45 hover:bg-transparent"
-                        : "hover:bg-accent/70"
-                    }`}
-                    onClick={onSplitTerminalAction}
-                    label={splitTerminalActionLabel}
-                  >
-                    <SquareSplitHorizontal className="size-3.25" />
-                  </TerminalActionButton>
-                  <TerminalActionButton
-                    className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
-                    onClick={onNewTerminalAction}
-                    label={newTerminalActionLabel}
-                  >
-                    <Plus className="size-3.25" />
-                  </TerminalActionButton>
-                  <TerminalActionButton
-                    className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
-                    onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
-                    label={closeTerminalActionLabel}
-                  >
-                    <Trash2 className="size-3.25" />
-                  </TerminalActionButton>
-                </div>
+                <TerminalActionControls
+                  hasReachedSplitLimit={hasReachedSplitLimit}
+                  splitTerminalActionLabel={splitTerminalActionLabel}
+                  newTerminalActionLabel={newTerminalActionLabel}
+                  closeTerminalActionLabel={closeTerminalActionLabel}
+                  onSplitTerminalAction={onSplitTerminalAction}
+                  onNewTerminalAction={onNewTerminalAction}
+                  onCloseActiveTerminal={onCloseActiveTerminal}
+                />
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-1 py-1">

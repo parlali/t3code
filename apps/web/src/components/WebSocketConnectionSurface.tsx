@@ -14,6 +14,8 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { getPrimaryEnvironmentConnection } from "../environments/runtime";
 
 const FORCED_WS_RECONNECT_DEBOUNCE_MS = 5_000;
+const RECOVERED_TOAST_MIN_DISCONNECT_MS = 10_000;
+const RECOVERED_TOAST_THROTTLE_MS = 60_000;
 type WsAutoReconnectTrigger = "focus" | "online";
 
 const connectionTimeFormatter = new Intl.DateTimeFormat(undefined, {
@@ -145,12 +147,38 @@ export function shouldRestartStalledReconnect(
   );
 }
 
+export function shouldShowRecoveredToast(
+  previousDisconnectedAt: string | null,
+  connectedAt: string | null,
+  lastRecoveredToastAtMs: number,
+  nowMs: number,
+): boolean {
+  if (previousDisconnectedAt === null || connectedAt === null) {
+    return false;
+  }
+
+  const disconnectedAtMs = new Date(previousDisconnectedAt).getTime();
+  const connectedAtMs = new Date(connectedAt).getTime();
+  if (!Number.isFinite(disconnectedAtMs) || !Number.isFinite(connectedAtMs)) {
+    return false;
+  }
+
+  if (connectedAtMs - disconnectedAtMs < RECOVERED_TOAST_MIN_DISCONNECT_MS) {
+    return false;
+  }
+
+  return (
+    lastRecoveredToastAtMs === 0 || nowMs - lastRecoveredToastAtMs >= RECOVERED_TOAST_THROTTLE_MS
+  );
+}
+
 export function WebSocketConnectionCoordinator() {
   const status = useWsConnectionStatus();
   const [nowMs, setNowMs] = useState(() => Date.now());
   const lastForcedReconnectAtRef = useRef(0);
   const toastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
   const toastResetTimerRef = useRef<number | null>(null);
+  const lastRecoveredToastAtRef = useRef(0);
   const previousUiStateRef = useRef<WsConnectionUiState>(getWsConnectionUiState(status));
   const previousDisconnectedAtRef = useRef<string | null>(status.disconnectedAt);
 
@@ -338,8 +366,14 @@ export function WebSocketConnectionCoordinator() {
     if (
       uiState === "connected" &&
       (previousUiState === "offline" || previousUiState === "reconnecting") &&
-      previousDisconnectedAt !== null
+      shouldShowRecoveredToast(
+        previousDisconnectedAt,
+        status.connectedAt,
+        lastRecoveredToastAtRef.current,
+        Date.now(),
+      )
     ) {
+      lastRecoveredToastAtRef.current = Date.now();
       const successToast = {
         description: describeRecoveredToast(previousDisconnectedAt, status.connectedAt),
         title: buildRecoveredTitle(status),

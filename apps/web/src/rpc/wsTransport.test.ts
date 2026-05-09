@@ -258,6 +258,48 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("can opt out of global websocket state tracking", async () => {
+    const onOpen = vi.fn();
+    const onClose = vi.fn();
+    const transport = createTransport("ws://localhost:3020", {
+      trackConnectionStatus: false,
+      onOpen,
+      onClose,
+    });
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const socket = getSocket();
+    socket.open();
+
+    await waitFor(() => {
+      expect(onOpen).toHaveBeenCalledOnce();
+    });
+    expect(transport.isConnectionOpen()).toBe(true);
+    expect(getWsConnectionStatus()).toMatchObject({
+      attemptCount: 0,
+      phase: "idle",
+    });
+
+    socket.close(1013, "try again later");
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledWith(
+        { code: 1013, reason: "try again later" },
+        { intentional: false },
+      );
+    });
+    expect(transport.isConnectionOpen()).toBe(false);
+    expect(getWsConnectionStatus()).toMatchObject({
+      attemptCount: 0,
+      phase: "idle",
+    });
+
+    await transport.dispose();
+  });
+
   it("composes custom lifecycle handlers with default websocket state tracking", async () => {
     const onOpen = vi.fn();
     const onClose = vi.fn();

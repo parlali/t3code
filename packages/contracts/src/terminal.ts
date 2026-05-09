@@ -89,6 +89,14 @@ export type TerminalCloseInput = typeof TerminalCloseInput.Type;
 export const TerminalSessionStatus = Schema.Literals(["starting", "running", "exited", "error"]);
 export type TerminalSessionStatus = typeof TerminalSessionStatus.Type;
 
+export const TerminalScreenSnapshot = Schema.Struct({
+  format: Schema.Literal("xterm-serialize"),
+  data: Schema.String,
+  cols: TerminalColsSchema,
+  rows: TerminalRowsSchema,
+});
+export type TerminalScreenSnapshot = typeof TerminalScreenSnapshot.Type;
+
 export const TerminalSessionSnapshot = Schema.Struct({
   threadId: Schema.String.check(Schema.isNonEmpty()),
   terminalId: Schema.String.check(Schema.isNonEmpty()),
@@ -96,6 +104,7 @@ export const TerminalSessionSnapshot = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyStringSchema),
   status: TerminalSessionStatus,
   pid: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
+  screen: Schema.optional(Schema.NullOr(TerminalScreenSnapshot)),
   history: Schema.String,
   sequence: Schema.optional(TerminalSequenceSchema),
   exitCode: Schema.NullOr(Schema.Int),

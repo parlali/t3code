@@ -5,6 +5,7 @@
 # then install it with `t3-origin install`.
 
 set -euo pipefail
+unsetopt BG_NICE 2>/dev/null || true
 
 script_path="${0:A}"
 repo="${T3_ORIGIN_REPO:?Set T3_ORIGIN_REPO to the absolute path of this repository}"
@@ -243,6 +244,7 @@ write_plist() {
     print -r -- '  <true/>'
     print -r -- '  <key>KeepAlive</key>'
     print -r -- '  <true/>'
+    plist_string "ProcessType" "Interactive"
     plist_string "StandardOutPath" "${log_dir}/t3-origin.log"
     plist_string "StandardErrorPath" "${log_dir}/t3-origin.log"
     print -r -- '  <key>EnvironmentVariables</key>'

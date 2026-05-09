@@ -434,6 +434,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
 
       const snapshot = yield* manager.restart(restartInput());
       assert.equal(snapshot.history, "");
+      expect(snapshot.screen?.format).toBe("xterm-serialize");
       assert.equal(snapshot.status, "running");
       expect(ptyAdapter.spawnInputs).toHaveLength(2);
       yield* waitFor(Effect.map(readFileString(historyLogPath(logsDir)), (text) => text === ""));
@@ -831,6 +832,32 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
     }),
   );
 
+  it.effect("returns serialized terminal screen state separately from transcript history", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      yield* manager.open(openInput({ cols: 40, rows: 10 }));
+      const process = ptyAdapter.processes[0];
+      expect(process).toBeDefined();
+      if (!process) return;
+
+      process.emitData("one\n");
+      process.emitData("\x1b[2J\x1b[Htwo");
+      yield* waitFor(
+        Effect.map(manager.open(openInput({ cols: 40, rows: 10 })), (snapshot) =>
+          snapshot.history.includes("two"),
+        ),
+      );
+
+      const snapshot = yield* manager.open(openInput({ cols: 40, rows: 10 }));
+      assert.equal(snapshot.screen?.format, "xterm-serialize");
+      assert.equal(snapshot.screen?.cols, 40);
+      assert.equal(snapshot.screen?.rows, 10);
+      expect(snapshot.screen?.data).toContain("two");
+      expect(snapshot.history).toContain("one\n");
+      expect(snapshot.history).toContain("\x1b[2J\x1b[Htwo");
+    }),
+  );
+
   it.effect("retries with fallback shells when preferred shell spawn fails", () =>
     Effect.gen(function* () {
       const missingShell =
@@ -945,6 +972,8 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
       setEnv("PORT", "5173");
       setEnv("T3CODE_PORT", "3773");
       setEnv("VITE_DEV_SERVER_URL", "http://localhost:5173");
+      setEnv("NO_COLOR", "1");
+      setEnv("TERM", "dumb");
       setEnv("TEST_TERMINAL_KEEP", "keep-me");
 
       try {
@@ -957,10 +986,35 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
         expect(spawnInput.env.PORT).toBeUndefined();
         expect(spawnInput.env.T3CODE_PORT).toBeUndefined();
         expect(spawnInput.env.VITE_DEV_SERVER_URL).toBeUndefined();
+        expect(spawnInput.env.NO_COLOR).toBeUndefined();
+        expect(spawnInput.env.TERM).toBe("xterm-256color");
+        expect(spawnInput.env.COLORTERM).toBe("truecolor");
         expect(spawnInput.env.TEST_TERMINAL_KEEP).toBe("keep-me");
       } finally {
         restoreEnv();
       }
+    }),
+  );
+
+  it.effect("lets explicit runtime env override terminal capability defaults", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      yield* manager.open(
+        openInput({
+          env: {
+            TERM: "screen-256color",
+            COLORTERM: "24bit",
+            NO_COLOR: "1",
+          },
+        }),
+      );
+      const spawnInput = ptyAdapter.spawnInputs[0];
+      expect(spawnInput).toBeDefined();
+      if (!spawnInput) return;
+
+      assert.equal(spawnInput.env.TERM, "screen-256color");
+      assert.equal(spawnInput.env.COLORTERM, "24bit");
+      assert.equal(spawnInput.env.NO_COLOR, "1");
     }),
   );
 

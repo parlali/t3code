@@ -5,16 +5,17 @@ import {
   use,
   useCallback,
   useEffect,
+  lazy,
   useMemo,
   useRef,
   useState,
+  Suspense,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
-import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
@@ -61,6 +62,17 @@ import {
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
+
+const ChatMarkdown = lazy(() => import("../ChatMarkdown"));
+
+function ChatMarkdownFallback({ text }: { text: string }) {
+  if (text.length === 0) return null;
+  return (
+    <div className="w-full min-w-0 whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
+      {text}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via useContext.
@@ -421,11 +433,13 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                 </div>
               )}
               <div className="min-w-0 px-1 py-0.5">
-                <ChatMarkdown
-                  text={messageText}
-                  cwd={ctx.markdownCwd}
-                  isStreaming={Boolean(row.message.streaming)}
-                />
+                <Suspense fallback={<ChatMarkdownFallback text={messageText} />}>
+                  <ChatMarkdown
+                    text={messageText}
+                    cwd={ctx.markdownCwd}
+                    isStreaming={Boolean(row.message.streaming)}
+                  />
+                </Suspense>
                 <AssistantChangedFilesSection
                   turnSummary={row.assistantTurnDiffSummary}
                   routeThreadKey={ctx.routeThreadKey}

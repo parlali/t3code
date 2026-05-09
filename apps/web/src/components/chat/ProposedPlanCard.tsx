@@ -1,4 +1,4 @@
-import { memo, useState, useId } from "react";
+import { lazy, memo, Suspense, useState, useId } from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
   buildCollapsedProposedPlanPreviewMarkdown,
@@ -8,7 +8,6 @@ import {
   proposedPlanTitle,
   stripDisplayedPlanMarkdown,
 } from "../../proposedPlan";
-import ChatMarkdown from "../ChatMarkdown";
 import { EllipsisIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -27,6 +26,16 @@ import {
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { readEnvironmentApi } from "~/environmentApi";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+
+const ChatMarkdown = lazy(() => import("../ChatMarkdown"));
+
+function ChatMarkdownFallback({ text }: { text: string }) {
+  return (
+    <div className="w-full min-w-0 whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
+      {text}
+    </div>
+  );
+}
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
   planMarkdown,
@@ -163,9 +172,13 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       <div className="mt-4">
         <div className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")}>
           {canCollapse && !expanded ? (
-            <ChatMarkdown text={collapsedPreview ?? ""} cwd={cwd} isStreaming={false} />
+            <Suspense fallback={<ChatMarkdownFallback text={collapsedPreview ?? ""} />}>
+              <ChatMarkdown text={collapsedPreview ?? ""} cwd={cwd} isStreaming={false} />
+            </Suspense>
           ) : (
-            <ChatMarkdown text={displayedPlanMarkdown} cwd={cwd} isStreaming={false} />
+            <Suspense fallback={<ChatMarkdownFallback text={displayedPlanMarkdown} />}>
+              <ChatMarkdown text={displayedPlanMarkdown} cwd={cwd} isStreaming={false} />
+            </Suspense>
           )}
           {canCollapse && !expanded ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-linear-to-t from-card/95 via-card/80 to-transparent" />

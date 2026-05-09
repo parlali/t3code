@@ -139,6 +139,7 @@ vi.mock("../../environments/runtime", () => {
       },
     },
     ensureBootstrapped: async () => undefined,
+    isConnectionOpen: () => true,
     reconnect: async () => undefined,
     dispose: async () => undefined,
   };

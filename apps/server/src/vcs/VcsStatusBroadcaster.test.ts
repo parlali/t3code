@@ -32,9 +32,13 @@ const baseRemoteStatus: VcsStatusRemoteResult = {
   pr: null,
 };
 
-const baseStatus: VcsStatusResult = {
+const baseLocalOnlyStatus: VcsStatusResult = {
   ...baseLocalStatus,
-  ...baseRemoteStatus,
+  hasUpstream: false,
+  aheadCount: 0,
+  behindCount: 0,
+  aheadOfDefaultCount: 0,
+  pr: null,
 };
 
 function makeTestLayer(state: {
@@ -87,13 +91,14 @@ describe("VcsStatusBroadcaster", () => {
 
       const first = yield* broadcaster.getStatus({ cwd: "/repo" });
       const second = yield* broadcaster.getStatus({ cwd: "/repo" });
+      yield* Effect.yieldNow;
 
-      assert.deepStrictEqual(first, baseStatus);
-      assert.deepStrictEqual(second, baseStatus);
+      assert.deepStrictEqual(first, baseLocalOnlyStatus);
+      assert.deepStrictEqual(second, baseLocalOnlyStatus);
       assert.equal(state.localStatusCalls, 1);
       assert.equal(state.remoteStatusCalls, 1);
       assert.equal(state.localInvalidationCalls, 0);
-      assert.equal(state.remoteInvalidationCalls, 0);
+      assert.equal(state.remoteInvalidationCalls, 1);
     }).pipe(Effect.provide(makeTestLayer(state)));
   });
 
@@ -120,19 +125,24 @@ describe("VcsStatusBroadcaster", () => {
         aheadCount: 2,
       };
       const refreshed = yield* broadcaster.refreshStatus("/repo");
+      yield* Effect.yieldNow;
       const cached = yield* broadcaster.getStatus({ cwd: "/repo" });
 
-      assert.deepStrictEqual(initial, baseStatus);
+      assert.deepStrictEqual(initial, baseLocalOnlyStatus);
       assert.deepStrictEqual(refreshed, {
         ...state.currentLocalStatus,
-        ...state.currentRemoteStatus,
+        hasUpstream: false,
+        aheadCount: 0,
+        behindCount: 0,
+        aheadOfDefaultCount: 0,
+        pr: null,
       });
       assert.deepStrictEqual(cached, {
         ...state.currentLocalStatus,
         ...state.currentRemoteStatus,
       });
       assert.equal(state.localStatusCalls, 2);
-      assert.equal(state.remoteStatusCalls, 2);
+      assert.equal(state.remoteStatusCalls, 1);
       assert.equal(state.localInvalidationCalls, 1);
       assert.equal(state.remoteInvalidationCalls, 1);
     }).pipe(Effect.provide(makeTestLayer(state)));
@@ -159,9 +169,10 @@ describe("VcsStatusBroadcaster", () => {
       };
 
       const refreshedLocal = yield* broadcaster.refreshLocalStatus("/repo");
+      yield* Effect.yieldNow;
       const cached = yield* broadcaster.getStatus({ cwd: "/repo" });
 
-      assert.deepStrictEqual(initial, baseStatus);
+      assert.deepStrictEqual(initial, baseLocalOnlyStatus);
       assert.deepStrictEqual(refreshedLocal, state.currentLocalStatus);
       assert.deepStrictEqual(cached, {
         ...state.currentLocalStatus,
@@ -170,7 +181,7 @@ describe("VcsStatusBroadcaster", () => {
       assert.equal(state.localStatusCalls, 2);
       assert.equal(state.remoteStatusCalls, 1);
       assert.equal(state.localInvalidationCalls, 1);
-      assert.equal(state.remoteInvalidationCalls, 0);
+      assert.equal(state.remoteInvalidationCalls, 1);
     }).pipe(Effect.provide(makeTestLayer(state)));
   });
 
@@ -226,6 +237,7 @@ describe("VcsStatusBroadcaster", () => {
 
       const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       yield* broadcaster.getStatus({ cwd: linkDir });
+      yield* Effect.yieldNow;
       yield* broadcaster.getStatus({ cwd: realDir });
 
       assert.deepStrictEqual(seenCwds, [realPath, realPath]);
