@@ -395,6 +395,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
+      ...(settings.automaticGitFetchInterval !== DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval
+        ? ["Automatic Git fetch interval"]
+        : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
         : []),
@@ -420,6 +423,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.diffIgnoreWhitespace,
       settings.diffWordWrap,
+      settings.automaticGitFetchInterval,
       settings.enableAssistantStreaming,
       settings.timestampFormat,
       theme,

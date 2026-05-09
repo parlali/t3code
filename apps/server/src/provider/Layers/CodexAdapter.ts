@@ -1151,7 +1151,15 @@ function mapToRuntimeEvents(
         type: "thread.realtime.started",
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
-          realtimeSessionId: payload.sessionId ?? undefined,
+          realtimeSessionId:
+            (
+              payload as {
+                readonly realtimeSessionId?: string | null;
+                readonly sessionId?: string | null;
+              }
+            ).realtimeSessionId ??
+            payload.sessionId ??
+            undefined,
         },
       },
     ];

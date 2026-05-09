@@ -1,5 +1,7 @@
 import type { DesktopAppBranding } from "@t3tools/contracts";
 
+export type HostedAppChannel = "latest" | "nightly";
+
 function readInjectedDesktopAppBranding(): DesktopAppBranding | null {
   if (typeof window === "undefined") {
     return null;

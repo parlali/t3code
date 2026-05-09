@@ -718,6 +718,7 @@ export default function ChatView(props: ChatViewProps) {
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
+  const getComposer = useCallback(() => composerRef.current, [composerRef]);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
@@ -1840,8 +1841,8 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   const focusComposer = useCallback(() => {
-    composerRef.current?.focusAtEnd();
-  }, []);
+    getComposer()?.focusAtEnd();
+  }, [getComposer]);
   const scheduleComposerFocus = useCallback(() => {
     window.requestAnimationFrame(() => {
       focusComposer();
@@ -1890,7 +1891,7 @@ export default function ChatView(props: ChatViewProps) {
       setComposerDraftPrompt(composerDraftTarget, prefill.prompt);
       addComposerDraftImages(composerDraftTarget, prefill.images);
       setComposerDraftTerminalContexts(composerDraftTarget, []);
-      composerRef.current?.resetCursorState({
+      getComposer()?.resetCursorState({
         cursor: collapseExpandedComposerCursor(prefill.prompt, prefill.prompt.length),
         prompt: prefill.prompt,
         detectTrigger: true,
@@ -1902,7 +1903,7 @@ export default function ChatView(props: ChatViewProps) {
       clearComposerDraftContent,
       clearPendingEditPrefill,
       composerDraftTarget,
-      composerRef,
+      getComposer,
       scheduleComposerFocus,
       setComposerDraftPrompt,
       setComposerDraftTerminalContexts,
@@ -1932,9 +1933,12 @@ export default function ChatView(props: ChatViewProps) {
     inferredCheckpointTurnCountByTurnId,
     turnDiffSummaries,
   ]);
-  const addTerminalContextToDraft = useCallback((selection: TerminalContextSelection) => {
-    composerRef.current?.addTerminalContext(selection);
-  }, []);
+  const addTerminalContextToDraft = useCallback(
+    (selection: TerminalContextSelection) => {
+      getComposer()?.addTerminalContext(selection);
+    },
+    [getComposer],
+  );
   const setTerminalOpen = useCallback(
     (open: boolean) => {
       if (!activeThreadRef) return;
@@ -2619,7 +2623,7 @@ export default function ChatView(props: ChatViewProps) {
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
-        modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
+        modelPickerOpen: getComposer()?.isModelPickerOpen() ?? false,
       };
 
       const command = resolveShortcutCommand(event, keybindings, {
@@ -2672,7 +2676,7 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "modelPicker.toggle") {
         event.preventDefault();
         event.stopPropagation();
-        composerRef.current?.toggleModelPicker();
+        getComposer()?.toggleModelPicker();
         return;
       }
 
@@ -2697,6 +2701,7 @@ export default function ChatView(props: ChatViewProps) {
     runProjectScript,
     splitTerminal,
     keybindings,
+    getComposer,
     onToggleDiff,
     toggleTerminalVisibility,
   ]);
@@ -2792,7 +2797,7 @@ export default function ChatView(props: ChatViewProps) {
       onAdvanceActivePendingUserInput();
       return;
     }
-    const sendCtx = composerRef.current?.getSendContext();
+    const sendCtx = getComposer()?.getSendContext();
     if (!sendCtx) return;
     const {
       images: composerImages,
@@ -2821,7 +2826,7 @@ export default function ChatView(props: ChatViewProps) {
       });
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
-      composerRef.current?.resetCursorState();
+      getComposer()?.resetCursorState();
       await onSubmitPlanFollowUp({
         text: followUp.text,
         interactionMode: followUp.interactionMode,
@@ -2836,7 +2841,7 @@ export default function ChatView(props: ChatViewProps) {
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
-      composerRef.current?.resetCursorState();
+      getComposer()?.resetCursorState();
       return;
     }
     if (!hasSendableContent) {
@@ -2943,7 +2948,7 @@ export default function ChatView(props: ChatViewProps) {
     }
     promptRef.current = "";
     clearComposerDraftContent(composerDraftTarget);
-    composerRef.current?.resetCursorState();
+    getComposer()?.resetCursorState();
 
     let turnStartSucceeded = false;
     await (async () => {
@@ -3062,7 +3067,7 @@ export default function ChatView(props: ChatViewProps) {
         setComposerDraftPrompt(composerDraftTarget, promptForSend);
         addComposerDraftImages(composerDraftTarget, retryComposerImages);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
-        composerRef.current?.resetCursorState({
+        getComposer()?.resetCursorState({
           cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),
           prompt: promptForSend,
           detectTrigger: true,
@@ -3187,9 +3192,9 @@ export default function ChatView(props: ChatViewProps) {
         };
       });
       promptRef.current = "";
-      composerRef.current?.resetCursorState({ cursor: 0 });
+      getComposer()?.resetCursorState({ cursor: 0 });
     },
-    [activePendingProgress?.activeQuestion, activePendingUserInput],
+    [activePendingProgress?.activeQuestion, activePendingUserInput, getComposer],
   );
 
   const onChangeActivePendingUserInputCustomAnswer = useCallback(
@@ -3214,16 +3219,16 @@ export default function ChatView(props: ChatViewProps) {
           ),
         },
       }));
-      const snapshot = composerRef.current?.readSnapshot();
+      const snapshot = getComposer()?.readSnapshot();
       if (
         snapshot?.value !== value ||
         snapshot.cursor !== nextCursor ||
         snapshot.expandedCursor !== expandedCursor
       ) {
-        composerRef.current?.focusAt(nextCursor);
+        getComposer()?.focusAt(nextCursor);
       }
     },
-    [activePendingUserInput],
+    [activePendingUserInput, getComposer],
   );
 
   const onAdvanceActivePendingUserInput = useCallback(() => {
@@ -3277,7 +3282,7 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
-      const sendCtx = composerRef.current?.getSendContext();
+      const sendCtx = getComposer()?.getSendContext();
       if (!sendCtx) {
         return;
       }
@@ -3395,6 +3400,7 @@ export default function ChatView(props: ChatViewProps) {
       setThreadError,
       autoOpenPlanSidebar,
       environmentId,
+      getComposer,
     ],
   );
 
@@ -3414,7 +3420,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
 
-    const sendCtx = composerRef.current?.getSendContext();
+    const sendCtx = getComposer()?.getSendContext();
     if (!sendCtx) {
       return;
     }
@@ -3532,6 +3538,7 @@ export default function ChatView(props: ChatViewProps) {
     runtimeMode,
     autoOpenPlanSidebar,
     environmentId,
+    getComposer,
   ]);
 
   const onProviderModelSelect = useCallback(

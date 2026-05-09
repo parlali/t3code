@@ -1,4 +1,5 @@
 import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "./pairingUrl";
+import type { HostedAppChannel } from "./branding";
 
 const DEFAULT_HOSTED_APP_URL = "https://app.t3.codes";
 
@@ -16,6 +17,11 @@ function configuredBackendUrl(): string {
   return import.meta.env.VITE_HTTP_URL?.trim() || import.meta.env.VITE_WS_URL?.trim() || "";
 }
 
+function configuredHostedAppChannel(): HostedAppChannel | null {
+  const channel = import.meta.env.VITE_HOSTED_APP_CHANNEL?.trim().toLowerCase();
+  return channel === "latest" || channel === "nightly" ? channel : null;
+}
+
 function originFromUrl(value: string): string | null {
   try {
     return new URL(value).origin;
@@ -27,6 +33,10 @@ function originFromUrl(value: string): string | null {
 export function isHostedStaticApp(url: URL = new URL(window.location.href)): boolean {
   if (configuredBackendUrl()) {
     return false;
+  }
+
+  if (configuredHostedAppChannel()) {
+    return true;
   }
 
   const hostedOrigin = originFromUrl(configuredHostedAppUrl());

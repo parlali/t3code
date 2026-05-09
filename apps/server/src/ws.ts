@@ -1,5 +1,6 @@
 import { Cause, Duration, Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
 import {
+  DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL_MS,
   type AuthAccessStreamEvent,
   AuthSessionId,
   CommandId,
@@ -163,6 +164,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const serverEnvironment = yield* ServerEnvironment;
       const serverAuth = yield* ServerAuth;
       const sourceControlDiscovery = yield* SourceControlDiscoveryLayer.SourceControlDiscovery;
+      const automaticGitFetchInterval = serverSettings.getSettings.pipe(
+        Effect.map((settings) => Duration.millis(settings.automaticGitFetchInterval)),
+        Effect.catch((cause) =>
+          Effect.logWarning("Failed to read automatic Git fetch interval setting", {
+            detail: cause.message,
+          }).pipe(Effect.as(Duration.millis(DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL_MS))),
+        ),
+      );
       const sourceControlRepositories = yield* SourceControlRepositoryService;
       const bootstrapCredentials = yield* BootstrapCredentialService;
       const sessions = yield* SessionCredentialService;
@@ -895,7 +904,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.subscribeVcsStatus]: (input) =>
           observeRpcStream(
             WS_METHODS.subscribeVcsStatus,
-            vcsStatusBroadcaster.streamStatus(input),
+            vcsStatusBroadcaster.streamStatus(input, {
+              automaticRemoteRefreshInterval: automaticGitFetchInterval,
+            }),
             {
               "rpc.aggregate": "vcs",
             },

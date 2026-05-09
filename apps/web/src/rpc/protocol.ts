@@ -29,9 +29,6 @@ interface ClientRpcTiming {
   firstAckAtMs: number | null;
 }
 
-const clientRpcTimings = new Map<string, ClientRpcTiming>();
-let websocketAttemptStartedAtMs = 0;
-
 export interface WsProtocolCloseContext {
   readonly intentional: boolean;
 }
@@ -186,6 +183,8 @@ export function createWsRpcProtocolLayer(
   handlers?: WsProtocolLifecycleHandlers,
 ) {
   const lifecycle = composeLifecycleHandlers(handlers);
+  const clientRpcTimings = new Map<string, ClientRpcTiming>();
+  let websocketAttemptStartedAtMs = 0;
   const resolvedUrl =
     typeof url === "function"
       ? Effect.promise(() => url()).pipe(

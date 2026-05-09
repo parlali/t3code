@@ -565,17 +565,17 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
-  it.effect("deduplicates overlapping assistant text deltas after part updates", () =>
+  it.effect("appends raw assistant text deltas and reconciles part update snapshots", () =>
     Effect.sync(() => {
       const firstUpdate = mergeOpenCodeAssistantText(undefined, "Hello");
       const overlapDelta = appendOpenCodeAssistantTextDelta(firstUpdate.latestText, "lo world");
-      const secondUpdate = mergeOpenCodeAssistantText(overlapDelta.nextText, "Hello world!");
+      const secondUpdate = mergeOpenCodeAssistantText(overlapDelta.nextText, "Hellolo world");
 
       assert.deepEqual(
         [firstUpdate.deltaToEmit, overlapDelta.deltaToEmit, secondUpdate.deltaToEmit],
-        ["Hello", " world", "!"],
+        ["Hello", "lo world", ""],
       );
-      assert.equal(secondUpdate.latestText, "Hello world!");
+      assert.equal(secondUpdate.latestText, "Hellolo world");
     }),
   );
 
