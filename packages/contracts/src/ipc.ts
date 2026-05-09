@@ -40,10 +40,19 @@ import type {
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalRestartInput,
+  TerminalRuntimeStatusSnapshot,
   TerminalSessionSnapshot,
+  TerminalStatusSnapshotInput,
   TerminalSubscribeInput,
   TerminalWriteInput,
 } from "./terminal.ts";
+import type {
+  ThreadReadReceipt,
+  ThreadReadReceiptMarkUnreadInput,
+  ThreadReadReceiptMarkVisitedInput,
+  ThreadReadReceiptSnapshot,
+  ThreadReadReceiptStreamEvent,
+} from "./threadReadReceipts.ts";
 import type { ServerUpsertKeybindingInput } from "./server.ts";
 import type {
   ClientOrchestrationCommand,
@@ -324,12 +333,21 @@ export interface EnvironmentApi {
     clear: (input: typeof TerminalClearInput.Encoded) => Promise<void>;
     restart: (input: typeof TerminalRestartInput.Encoded) => Promise<TerminalSessionSnapshot>;
     close: (input: typeof TerminalCloseInput.Encoded) => Promise<void>;
+    getStatusSnapshot: (
+      input?: TerminalStatusSnapshotInput,
+    ) => Promise<TerminalRuntimeStatusSnapshot>;
     onEvent: (callback: (event: TerminalEvent) => void) => () => void;
     onSessionEvent: (
       input: TerminalSubscribeInput,
       callback: (event: TerminalEvent) => void,
       options?: { readonly onResubscribe?: () => void },
     ) => () => void;
+  };
+  threadRead: {
+    getSnapshot: () => Promise<ThreadReadReceiptSnapshot>;
+    markVisited: (input: ThreadReadReceiptMarkVisitedInput) => Promise<ThreadReadReceipt>;
+    markUnread: (input: ThreadReadReceiptMarkUnreadInput) => Promise<ThreadReadReceipt>;
+    subscribe: (callback: (event: ThreadReadReceiptStreamEvent) => void) => () => void;
   };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;

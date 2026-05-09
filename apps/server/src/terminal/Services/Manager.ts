@@ -17,9 +17,11 @@ import {
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalRestartInput,
+  TerminalRuntimeStatusSnapshot,
   TerminalSessionSnapshot,
   TerminalSessionLookupError,
   TerminalSessionStatus,
+  TerminalStatusSnapshotInput,
   TerminalSubscribeInput,
   TerminalWriteInput,
 } from "@t3tools/contracts";
@@ -109,6 +111,15 @@ export interface TerminalManagerShape {
    * When `terminalId` is omitted, closes all sessions for the thread.
    */
   readonly close: (input: TerminalCloseInput) => Effect.Effect<void, TerminalError>;
+
+  /**
+   * Return the server-authoritative runtime status for active terminal
+   * sessions. This is intentionally independent from output replay so clients
+   * can rebuild badges after refresh without replaying terminal buffers.
+   */
+  readonly getStatusSnapshot: (
+    input?: TerminalStatusSnapshotInput,
+  ) => Effect.Effect<TerminalRuntimeStatusSnapshot>;
 
   /**
    * Subscribe to terminal runtime events with a direct callback.

@@ -203,6 +203,20 @@ function createMockEnvironmentApi(input: {
 }): EnvironmentApi {
   return {
     terminal: {} as EnvironmentApi["terminal"],
+    threadRead: {
+      getSnapshot: async () => ({ receipts: [], updatedAt: new Date().toISOString() }),
+      markVisited: async (receipt) => ({
+        threadId: receipt.threadId,
+        lastVisitedAt: receipt.visitedAt ?? new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      markUnread: async (receipt) => ({
+        threadId: receipt.threadId,
+        lastVisitedAt: new Date(Date.parse(receipt.latestTurnCompletedAt) - 1).toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      subscribe: () => () => undefined,
+    },
     projects: {} as EnvironmentApi["projects"],
     filesystem: {
       browse: input.browse,

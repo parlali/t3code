@@ -5,6 +5,8 @@ import type {
   ServerConfig,
   ServerLifecycleWelcomePayload,
   TerminalEvent,
+  TerminalRuntimeStatusSnapshot,
+  ThreadReadReceiptStreamEvent,
 } from "@t3tools/contracts";
 import type { KnownEnvironment } from "@t3tools/client-runtime";
 
@@ -31,6 +33,14 @@ interface OrchestrationHandlers {
     environmentId: EnvironmentId,
   ) => void;
   readonly applyTerminalEvent: (event: TerminalEvent, environmentId: EnvironmentId) => void;
+  readonly syncTerminalStatusSnapshot?: (
+    snapshot: TerminalRuntimeStatusSnapshot,
+    environmentId: EnvironmentId,
+  ) => void;
+  readonly applyThreadReadReceiptEvent?: (
+    event: ThreadReadReceiptStreamEvent,
+    environmentId: EnvironmentId,
+  ) => void;
 }
 
 interface EnvironmentConnectionInput extends OrchestrationHandlers {
@@ -150,10 +160,28 @@ export function createEnvironmentConnection(
     },
   );
 
+  void input.client.terminal
+    .getStatusSnapshot({})
+    .then((snapshot) => {
+      if (!disposed) {
+        input.syncTerminalStatusSnapshot?.(snapshot, environmentId);
+      }
+    })
+    .catch((error: unknown) => {
+      console.warn("Failed to load terminal status snapshot", error);
+    });
+
+  const unsubThreadReadReceipts = input.client.threadRead.subscribe(
+    (event: Parameters<Parameters<WsRpcClient["threadRead"]["subscribe"]>[0]>[0]) => {
+      input.applyThreadReadReceiptEvent?.(event, environmentId);
+    },
+  );
+
   const cleanup = () => {
     disposed = true;
     unsubShell();
     unsubTerminalEvent();
+    unsubThreadReadReceipts();
     unsubLifecycle();
     unsubConfig();
   };

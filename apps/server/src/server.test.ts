@@ -56,6 +56,7 @@ import { brotliCompressSync, gzipSync } from "node:zlib";
 import { vi } from "vitest";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
+const TEST_EPOCH_ISO = "1970-01-01T00:00:00.000Z";
 
 import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
@@ -87,6 +88,7 @@ import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./server
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
+import { ThreadReadReceipts, type ThreadReadReceiptsShape } from "./threadReadReceipts.ts";
 import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
@@ -329,6 +331,7 @@ const buildAppUnderTest = (options?: {
     vcsStatusBroadcaster?: Partial<VcsStatusBroadcaster.VcsStatusBroadcasterShape>;
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunnerShape>;
     terminalManager?: Partial<TerminalManagerShape>;
+    threadReadReceipts?: Partial<ThreadReadReceiptsShape>;
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
@@ -558,7 +561,33 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(
         Layer.mock(TerminalManager)({
+          getStatusSnapshot: () => Effect.succeed({ sessions: [], updatedAt: TEST_EPOCH_ISO }),
           ...options?.layers?.terminalManager,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ThreadReadReceipts)({
+          getSnapshot: Effect.succeed({ receipts: [], updatedAt: TEST_EPOCH_ISO }),
+          markVisited: (input) =>
+            Effect.succeed({
+              threadId: input.threadId,
+              lastVisitedAt: input.visitedAt ?? TEST_EPOCH_ISO,
+              updatedAt: TEST_EPOCH_ISO,
+            }),
+          markUnread: (input) =>
+            Effect.succeed({
+              threadId: input.threadId,
+              lastVisitedAt: new Date(Date.parse(input.latestTurnCompletedAt) - 1).toISOString(),
+              updatedAt: TEST_EPOCH_ISO,
+            }),
+          streamChanges: Stream.empty,
+          streamWithSnapshot: Effect.succeed(
+            Stream.make({
+              type: "snapshot" as const,
+              snapshot: { receipts: [], updatedAt: TEST_EPOCH_ISO },
+            }),
+          ),
+          ...options?.layers?.threadReadReceipts,
         }),
       ),
       Layer.provide(

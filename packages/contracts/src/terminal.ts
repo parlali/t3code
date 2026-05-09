@@ -113,6 +113,26 @@ export const TerminalSessionSnapshot = Schema.Struct({
 });
 export type TerminalSessionSnapshot = typeof TerminalSessionSnapshot.Type;
 
+export const TerminalStatusSnapshotInput = Schema.Struct({
+  threadId: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type TerminalStatusSnapshotInput = typeof TerminalStatusSnapshotInput.Type;
+
+export const TerminalRuntimeSessionStatus = Schema.Struct({
+  threadId: Schema.String.check(Schema.isNonEmpty()),
+  terminalId: Schema.String.check(Schema.isNonEmpty()),
+  status: TerminalSessionStatus,
+  hasRunningSubprocess: Schema.Boolean,
+  updatedAt: Schema.String,
+});
+export type TerminalRuntimeSessionStatus = typeof TerminalRuntimeSessionStatus.Type;
+
+export const TerminalRuntimeStatusSnapshot = Schema.Struct({
+  sessions: Schema.Array(TerminalRuntimeSessionStatus),
+  updatedAt: Schema.String,
+});
+export type TerminalRuntimeStatusSnapshot = typeof TerminalRuntimeStatusSnapshot.Type;
+
 const TerminalEventBaseSchema = Schema.Struct({
   threadId: Schema.String.check(Schema.isNonEmpty()),
   terminalId: Schema.String.check(Schema.isNonEmpty()),

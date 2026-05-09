@@ -78,7 +78,6 @@ import {
   useStore,
 } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
-import { useUiStateStore } from "../uiStateStore";
 import {
   buildPlanImplementationThreadTitle,
   buildPlanImplementationPrompt,
@@ -139,6 +138,7 @@ import {
   type TerminalContextSelection,
 } from "../lib/terminalContext";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import { useThreadReadReceiptStore } from "../threadReadReceiptStore";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
@@ -661,9 +661,8 @@ export default function ChatView(props: ChatViewProps) {
     ),
   );
   const setStoreThreadError = useStore((store) => store.setError);
-  const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
-  const activeThreadLastVisitedAt = useUiStateStore((store) =>
-    routeKind === "server" ? store.threadLastVisitedAtById[routeThreadKey] : undefined,
+  const activeThreadLastVisitedAt = useThreadReadReceiptStore((store) =>
+    routeKind === "server" ? store.receiptByThreadKey[routeThreadKey]?.lastVisitedAt : undefined,
   );
   const settings = useSettings();
   const setStickyComposerModelSelection = useComposerDraftStore(
@@ -1173,15 +1172,25 @@ export default function ChatView(props: ChatViewProps) {
     const lastVisitedAt = activeThreadLastVisitedAt ? Date.parse(activeThreadLastVisitedAt) : NaN;
     if (!Number.isNaN(lastVisitedAt) && lastVisitedAt >= turnCompletedAt) return;
 
-    markThreadVisited(
-      scopedThreadKey(scopeThreadRef(serverThread.environmentId, serverThread.id)),
-      activeLatestTurn.completedAt,
-    );
+    useThreadReadReceiptStore
+      .getState()
+      .markVisitedOptimistic(
+        serverThread.environmentId,
+        serverThread.id,
+        activeLatestTurn.completedAt,
+      );
+    void readEnvironmentApi(serverThread.environmentId)
+      ?.threadRead.markVisited({
+        threadId: serverThread.id,
+        visitedAt: activeLatestTurn.completedAt,
+      })
+      .catch((error: unknown) => {
+        console.warn("Failed to mark thread visited", error);
+      });
   }, [
     activeLatestTurn?.completedAt,
     activeThreadLastVisitedAt,
     latestTurnSettled,
-    markThreadVisited,
     serverThread?.environmentId,
     serverThread?.id,
   ]);

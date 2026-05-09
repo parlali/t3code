@@ -46,12 +46,19 @@ const rpcClientMock = {
     clear: vi.fn(),
     restart: vi.fn(),
     close: vi.fn(),
+    getStatusSnapshot: vi.fn(),
     onEvent: vi.fn((listener: (event: TerminalEvent) => void) =>
       registerListener(terminalEventListeners, listener),
     ),
     onSessionEvent: vi.fn((_input, listener: (event: TerminalEvent) => void) =>
       registerListener(terminalEventListeners, listener),
     ),
+  },
+  threadRead: {
+    getSnapshot: vi.fn(),
+    markVisited: vi.fn(),
+    markUnread: vi.fn(),
+    subscribe: vi.fn(),
   },
   projects: {
     searchEntries: vi.fn(),

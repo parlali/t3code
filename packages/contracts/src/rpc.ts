@@ -67,10 +67,20 @@ import {
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalRestartInput,
+  TerminalRuntimeStatusSnapshot,
   TerminalSessionSnapshot,
+  TerminalStatusSnapshotInput,
   TerminalSubscribeInput,
   TerminalWriteInput,
 } from "./terminal.ts";
+import {
+  ThreadReadReceipt,
+  ThreadReadReceiptError,
+  ThreadReadReceiptMarkUnreadInput,
+  ThreadReadReceiptMarkVisitedInput,
+  ThreadReadReceiptSnapshot,
+  ThreadReadReceiptStreamEvent,
+} from "./threadReadReceipts.ts";
 import {
   ServerConfigStreamEvent,
   ServerConfig,
@@ -129,6 +139,12 @@ export const WS_METHODS = {
   terminalClear: "terminal.clear",
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
+  terminalGetStatusSnapshot: "terminal.getStatusSnapshot",
+
+  // Thread read receipt methods
+  threadReadGetSnapshot: "threadRead.getSnapshot",
+  threadReadMarkVisited: "threadRead.markVisited",
+  threadReadMarkUnread: "threadRead.markUnread",
 
   // Server meta
   serverGetConfig: "server.getConfig",
@@ -146,6 +162,7 @@ export const WS_METHODS = {
   // Streaming subscriptions
   subscribeVcsStatus: "subscribeVcsStatus",
   subscribeTerminalEvents: "subscribeTerminalEvents",
+  subscribeThreadReadReceipts: "subscribeThreadReadReceipts",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
@@ -350,6 +367,29 @@ export const WsTerminalCloseRpc = Rpc.make(WS_METHODS.terminalClose, {
   error: TerminalError,
 });
 
+export const WsTerminalGetStatusSnapshotRpc = Rpc.make(WS_METHODS.terminalGetStatusSnapshot, {
+  payload: TerminalStatusSnapshotInput,
+  success: TerminalRuntimeStatusSnapshot,
+});
+
+export const WsThreadReadGetSnapshotRpc = Rpc.make(WS_METHODS.threadReadGetSnapshot, {
+  payload: Schema.Struct({}),
+  success: ThreadReadReceiptSnapshot,
+  error: ThreadReadReceiptError,
+});
+
+export const WsThreadReadMarkVisitedRpc = Rpc.make(WS_METHODS.threadReadMarkVisited, {
+  payload: ThreadReadReceiptMarkVisitedInput,
+  success: ThreadReadReceipt,
+  error: ThreadReadReceiptError,
+});
+
+export const WsThreadReadMarkUnreadRpc = Rpc.make(WS_METHODS.threadReadMarkUnread, {
+  payload: ThreadReadReceiptMarkUnreadInput,
+  success: ThreadReadReceipt,
+  error: ThreadReadReceiptError,
+});
+
 export const WsOrchestrationDispatchCommandRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.dispatchCommand,
   {
@@ -412,6 +452,13 @@ export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTermina
   stream: true,
 });
 
+export const WsSubscribeThreadReadReceiptsRpc = Rpc.make(WS_METHODS.subscribeThreadReadReceipts, {
+  payload: Schema.Struct({}),
+  success: ThreadReadReceiptStreamEvent,
+  error: ThreadReadReceiptError,
+  stream: true,
+});
+
 export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerConfig, {
   payload: Schema.Struct({}),
   success: ServerConfigStreamEvent,
@@ -464,7 +511,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalClearRpc,
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
+  WsTerminalGetStatusSnapshotRpc,
+  WsThreadReadGetSnapshotRpc,
+  WsThreadReadMarkVisitedRpc,
+  WsThreadReadMarkUnreadRpc,
   WsSubscribeTerminalEventsRpc,
+  WsSubscribeThreadReadReceiptsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,

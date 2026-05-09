@@ -56,6 +56,8 @@ describe("ProjectSetupScriptRunner", () => {
                 clear: () => Effect.void,
                 restart: () => Effect.die(new Error("unused")),
                 close: () => Effect.void,
+                getStatusSnapshot: () =>
+                  Effect.succeed({ sessions: [], updatedAt: "1970-01-01T00:00:00.000Z" }),
                 subscribe: () => Effect.succeed(() => undefined),
               }),
             ),
@@ -115,6 +117,8 @@ describe("ProjectSetupScriptRunner", () => {
                 clear: () => Effect.void,
                 restart: () => Effect.die(new Error("unused")),
                 close: () => Effect.void,
+                getStatusSnapshot: () =>
+                  Effect.succeed({ sessions: [], updatedAt: "1970-01-01T00:00:00.000Z" }),
                 subscribe: () => Effect.succeed(() => undefined),
               }),
             ),

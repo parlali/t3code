@@ -63,8 +63,15 @@ export interface WsRpcClient {
     readonly clear: RpcUnaryMethod<typeof WS_METHODS.terminalClear>;
     readonly restart: RpcUnaryMethod<typeof WS_METHODS.terminalRestart>;
     readonly close: RpcUnaryMethod<typeof WS_METHODS.terminalClose>;
+    readonly getStatusSnapshot: RpcUnaryMethod<typeof WS_METHODS.terminalGetStatusSnapshot>;
     readonly onEvent: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
     readonly onSessionEvent: RpcInputStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
+  };
+  readonly threadRead: {
+    readonly getSnapshot: RpcUnaryNoArgMethod<typeof WS_METHODS.threadReadGetSnapshot>;
+    readonly markVisited: RpcUnaryMethod<typeof WS_METHODS.threadReadMarkVisited>;
+    readonly markUnread: RpcUnaryMethod<typeof WS_METHODS.threadReadMarkUnread>;
+    readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeThreadReadReceipts>;
   };
   readonly projects: {
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
@@ -161,6 +168,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       clear: (input) => transport.request((client) => client[WS_METHODS.terminalClear](input)),
       restart: (input) => transport.request((client) => client[WS_METHODS.terminalRestart](input)),
       close: (input) => transport.request((client) => client[WS_METHODS.terminalClose](input)),
+      getStatusSnapshot: (input) =>
+        transport.request((client) => client[WS_METHODS.terminalGetStatusSnapshot](input)),
       onEvent: (listener, options) =>
         transport.subscribe(
           (client) => client[WS_METHODS.subscribeTerminalEvents]({ includeOutput: false }),
@@ -177,6 +186,23 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
           {
             ...options,
             tag: WS_METHODS.subscribeTerminalEvents,
+          },
+        ),
+    },
+    threadRead: {
+      getSnapshot: () =>
+        transport.request((client) => client[WS_METHODS.threadReadGetSnapshot]({})),
+      markVisited: (input) =>
+        transport.request((client) => client[WS_METHODS.threadReadMarkVisited](input)),
+      markUnread: (input) =>
+        transport.request((client) => client[WS_METHODS.threadReadMarkUnread](input)),
+      subscribe: (listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeThreadReadReceipts]({}),
+          listener,
+          {
+            ...options,
+            tag: WS_METHODS.subscribeThreadReadReceipts,
           },
         ),
     },

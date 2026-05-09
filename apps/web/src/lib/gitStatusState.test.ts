@@ -81,8 +81,15 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
       clear: vi.fn(async () => undefined),
       restart: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
+      getStatusSnapshot: vi.fn(async () => ({ sessions: [], updatedAt: new Date().toISOString() })),
       onEvent: vi.fn(() => () => undefined),
       onSessionEvent: vi.fn(() => () => undefined),
+    },
+    threadRead: {
+      getSnapshot: vi.fn(async () => ({ receipts: [], updatedAt: new Date().toISOString() })),
+      markVisited: vi.fn(async () => undefined),
+      markUnread: vi.fn(async () => undefined),
+      subscribe: vi.fn(() => () => undefined),
     },
     projects: {
       searchEntries: vi.fn(async () => []),

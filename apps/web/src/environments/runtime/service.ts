@@ -8,6 +8,8 @@ import {
   type OrchestrationShellStreamEvent,
   type ServerConfig,
   type TerminalEvent,
+  type TerminalRuntimeStatusSnapshot,
+  type ThreadReadReceiptStreamEvent,
   ThreadId,
 } from "@t3tools/contracts";
 import { type QueryClient } from "@tanstack/react-query";
@@ -62,6 +64,8 @@ import {
   selectThreadsAcrossEnvironments,
 } from "~/store";
 import { useTerminalStateStore } from "~/terminalStateStore";
+import { useTerminalRuntimeStatusStore } from "~/terminalRuntimeStatusStore";
+import { useThreadReadReceiptStore } from "~/threadReadReceiptStore";
 import { useUiStateStore } from "~/uiStateStore";
 import type { WsProtocolCloseContext } from "../../rpc/protocol";
 import { getServerConfig } from "../../rpc/serverState";
@@ -925,6 +929,21 @@ function syncThreadUiFromStore() {
   markPromotedDraftThreadsByRef(
     threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
   );
+  const threadsByEnvironment = new Map<EnvironmentId, typeof threads>();
+  for (const thread of threads) {
+    const environmentThreads = threadsByEnvironment.get(thread.environmentId) ?? [];
+    environmentThreads.push(thread);
+    threadsByEnvironment.set(thread.environmentId, environmentThreads);
+  }
+  for (const [environmentId, environmentThreads] of threadsByEnvironment) {
+    useThreadReadReceiptStore.getState().syncThreadSeeds(
+      environmentId,
+      environmentThreads.map((thread) => ({
+        threadId: thread.id,
+        seedVisitedAt: thread.updatedAt ?? thread.createdAt,
+      })),
+    );
+  }
 }
 
 function reconcileSnapshotDerivedState() {
@@ -941,6 +960,7 @@ function reconcileSnapshotDerivedState() {
     draftThreadKeys: useComposerDraftStore.getState().listDraftThreadKeys(),
   });
   useTerminalStateStore.getState().removeOrphanedTerminalStates(activeThreadKeys);
+  useThreadReadReceiptStore.getState().removeOrphanedThreads(activeThreadKeys);
 }
 
 export function shouldApplyTerminalEvent(input: {
@@ -993,13 +1013,7 @@ function applyRecoveredEventBatch(
     (event) => event.type === "thread.created" || event.type === "thread.deleted",
   );
   if (needsThreadUiSync) {
-    const threads = selectThreadsAcrossEnvironments(useStore.getState());
-    useUiStateStore.getState().syncThreads(
-      threads.map((thread) => ({
-        key: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        seedVisitedAt: thread.updatedAt ?? thread.createdAt,
-      })),
-    );
+    syncThreadUiFromStore();
   }
 
   const draftStore = useComposerDraftStore.getState();
@@ -1011,6 +1025,7 @@ function applyRecoveredEventBatch(
     useUiStateStore
       .getState()
       .clearThreadUi(scopedThreadKey(scopeThreadRef(environmentId, threadId)));
+    useThreadReadReceiptStore.getState().removeThread(environmentId, threadId);
   }
   for (const event of events) {
     if (event.type === "project.deleted") {
@@ -1019,6 +1034,7 @@ function applyRecoveredEventBatch(
   }
   for (const threadId of batchEffects.removeTerminalStateThreadIds) {
     useTerminalStateStore.getState().removeTerminalState(scopeThreadRef(environmentId, threadId));
+    useTerminalRuntimeStatusStore.getState().removeThread(environmentId, threadId);
   }
 
   reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
@@ -1065,6 +1081,7 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
       }
       if (previousThread?.archivedAt === null && event.thread.archivedAt !== null && threadRef) {
         useTerminalStateStore.getState().removeTerminalState(threadRef);
+        useTerminalRuntimeStatusStore.getState().removeThread(environmentId, event.thread.id);
       }
       reconcileThreadDetailSubscriptionEvictionForThread(environmentId, event.thread.id);
       evictIdleThreadDetailSubscriptionsToCapacity();
@@ -1075,6 +1092,8 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
         useComposerDraftStore.getState().clearDraftThread(threadRef);
         useUiStateStore.getState().clearThreadUi(scopedThreadKey(threadRef));
         useTerminalStateStore.getState().removeTerminalState(threadRef);
+        useTerminalRuntimeStatusStore.getState().removeThread(environmentId, event.threadId);
+        useThreadReadReceiptStore.getState().removeThread(environmentId, event.threadId);
       }
       syncThreadUiFromStore();
       return;
@@ -1116,7 +1135,20 @@ function createEnvironmentConnectionHandlers() {
       ) {
         return;
       }
+      useTerminalRuntimeStatusStore.getState().applyTerminalEvent(environmentId, event);
       useTerminalStateStore.getState().applyTerminalEvent(threadRef, event);
+    },
+    syncTerminalStatusSnapshot: (
+      snapshot: TerminalRuntimeStatusSnapshot,
+      environmentId: EnvironmentId,
+    ) => {
+      useTerminalRuntimeStatusStore.getState().syncSnapshot(environmentId, snapshot);
+    },
+    applyThreadReadReceiptEvent: (
+      event: ThreadReadReceiptStreamEvent,
+      environmentId: EnvironmentId,
+    ) => {
+      useThreadReadReceiptStore.getState().applyStreamEvent(environmentId, event);
     },
   };
 }

@@ -71,6 +71,11 @@ import {
   useStore,
 } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import {
+  selectThreadTerminalRuntimeStatus,
+  useTerminalRuntimeStatusStore,
+} from "../terminalRuntimeStatusStore";
+import { useThreadReadReceiptStore } from "../threadReadReceiptStore";
 import { useUiStateStore } from "../uiStateStore";
 import {
   resolveShortcutCommand,
@@ -84,6 +89,7 @@ import { useModelPickerOpen } from "../modelPickerOpenState";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { useGitStatus } from "../lib/gitStatusState";
 import { readLocalApi } from "../localApi";
+import { readEnvironmentApi } from "../environmentApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
@@ -166,7 +172,6 @@ import { sortThreads } from "../lib/threadSort";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { CommandDialogTrigger } from "./ui/command";
-import { readEnvironmentApi } from "../environmentApi";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
 import {
@@ -322,12 +327,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
-  const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
+  const lastVisitedAt = useThreadReadReceiptStore(
+    (state) => state.receiptByThreadKey[threadKey]?.lastVisitedAt,
+  );
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const hasSelection = useThreadSelectionStore((state) => state.selectedThreadKeys.size > 0);
-  const runningTerminalIds = useTerminalStateStore(
-    (state) =>
-      selectThreadTerminalState(state.terminalStateByThreadKey, threadRef).runningTerminalIds,
+  const terminalRuntimeStatus = useTerminalRuntimeStatusStore((state) =>
+    selectThreadTerminalRuntimeStatus(state, thread.environmentId, thread.id),
   );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isRemoteThread =
@@ -368,7 +374,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   });
   const pr = resolveThreadPr(thread.branch, gitStatus.data);
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
-  const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
+  const terminalStatus = terminalStatusFromRunningIds(
+    terminalRuntimeStatus.runningTerminalIds.length > 0
+      ? [...terminalRuntimeStatus.runningTerminalIds]
+      : [...terminalRuntimeStatus.openTerminalIds],
+  );
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
@@ -937,7 +947,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const { updateSettings } = useUpdateSettings();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
-  const markThreadUnread = useUiStateStore((state) => state.markThreadUnread);
   const toggleProject = useUiStateStore((state) => state.toggleProject);
   const toggleThreadSelection = useThreadSelectionStore((state) => state.toggleThread);
   const rangeSelectTo = useThreadSelectionStore((state) => state.rangeSelectTo);
@@ -1032,17 +1041,39 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   // thread-list change).
   const sidebarThreadByKeyRef = useRef(sidebarThreadByKey);
   sidebarThreadByKeyRef.current = sidebarThreadByKey;
+  const markThreadUnread = useCallback(
+    (threadKey: string, latestTurnCompletedAt: string | null | undefined) => {
+      if (!latestTurnCompletedAt) {
+        return;
+      }
+      const threadRef = parseScopedThreadKey(threadKey);
+      if (!threadRef) {
+        return;
+      }
+      useThreadReadReceiptStore
+        .getState()
+        .markUnreadOptimistic(threadRef.environmentId, threadRef.threadId, latestTurnCompletedAt);
+      void readEnvironmentApi(threadRef.environmentId)
+        ?.threadRead.markUnread({
+          threadId: threadRef.threadId,
+          latestTurnCompletedAt,
+        })
+        .catch((error: unknown) => {
+          console.warn("Failed to mark thread unread", error);
+        });
+    },
+    [],
+  );
   const projectThreads = sidebarThreads;
   const projectExpanded = useUiStateStore(
     (state) => state.projectExpandedById[project.projectKey] ?? true,
   );
-  const threadLastVisitedAts = useUiStateStore(
+  const threadLastVisitedAts = useThreadReadReceiptStore(
     useShallow((state) =>
       projectThreads.map(
         (thread) =>
-          state.threadLastVisitedAtById[
-            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))
-          ] ?? null,
+          state.receiptByThreadKey[scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))]
+            ?.lastVisitedAt ?? null,
       ),
     ),
   );

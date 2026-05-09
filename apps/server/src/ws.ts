@@ -45,6 +45,7 @@ import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
+import { ThreadReadReceipts } from "./threadReadReceipts.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
@@ -152,6 +153,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const vcsProvisioning = yield* VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager;
+      const threadReadReceipts = yield* ThreadReadReceipts;
       const providerRegistry = yield* ProviderRegistry;
       const config = yield* ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents;
@@ -1063,6 +1065,26 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.terminalClose, terminalManager.close(input), {
             "rpc.aggregate": "terminal",
           }),
+        [WS_METHODS.terminalGetStatusSnapshot]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.terminalGetStatusSnapshot,
+            terminalManager.getStatusSnapshot(input),
+            { "rpc.aggregate": "terminal" },
+          ),
+        [WS_METHODS.threadReadGetSnapshot]: (_input) =>
+          observeRpcEffect(WS_METHODS.threadReadGetSnapshot, threadReadReceipts.getSnapshot, {
+            "rpc.aggregate": "threadRead",
+          }),
+        [WS_METHODS.threadReadMarkVisited]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadReadMarkVisited,
+            threadReadReceipts.markVisited(input),
+            { "rpc.aggregate": "threadRead" },
+          ),
+        [WS_METHODS.threadReadMarkUnread]: (input) =>
+          observeRpcEffect(WS_METHODS.threadReadMarkUnread, threadReadReceipts.markUnread(input), {
+            "rpc.aggregate": "threadRead",
+          }),
         [WS_METHODS.subscribeTerminalEvents]: (input) =>
           observeRpcStream(
             WS_METHODS.subscribeTerminalEvents,
@@ -1073,6 +1095,12 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               ),
             ),
             { "rpc.aggregate": "terminal" },
+          ),
+        [WS_METHODS.subscribeThreadReadReceipts]: (_input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.subscribeThreadReadReceipts,
+            threadReadReceipts.streamWithSnapshot,
+            { "rpc.aggregate": "threadRead" },
           ),
         [WS_METHODS.subscribeServerConfig]: (_input) =>
           observeRpcStreamEffect(

@@ -3,8 +3,10 @@ import path from "node:path";
 import {
   DEFAULT_TERMINAL_ID,
   type TerminalEvent,
+  type TerminalRuntimeStatusSnapshot,
   type TerminalSessionSnapshot,
   type TerminalSessionStatus,
+  type TerminalStatusSnapshotInput,
   type TerminalSubscribeInput,
 } from "@t3tools/contracts";
 import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
@@ -1880,6 +1882,26 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       clear,
       restart,
       close,
+      getStatusSnapshot: (input?: TerminalStatusSnapshotInput) =>
+        readManagerState.pipe(
+          Effect.map((state): TerminalRuntimeStatusSnapshot => {
+            const sessions = Array.from(state.sessions.values())
+              .filter(
+                (session) => input?.threadId === undefined || session.threadId === input.threadId,
+              )
+              .map((session) => ({
+                threadId: session.threadId,
+                terminalId: session.terminalId,
+                status: session.status,
+                hasRunningSubprocess: session.hasRunningSubprocess,
+                updatedAt: session.updatedAt,
+              }));
+            return {
+              sessions,
+              updatedAt: new Date().toISOString(),
+            };
+          }),
+        ),
       subscribe: (input, listener) =>
         Effect.gen(function* () {
           const filteredListener = (event: TerminalEvent) =>
