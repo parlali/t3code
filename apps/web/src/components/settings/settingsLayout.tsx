@@ -1,5 +1,5 @@
 import { Undo2Icon } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type MouseEventHandler, type ReactNode, useEffect, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -50,6 +50,7 @@ export function SettingsRow({
   resetAction,
   control,
   children,
+  onContextMenu,
 }: {
   title: ReactNode;
   description: ReactNode;
@@ -57,9 +58,11 @@ export function SettingsRow({
   resetAction?: ReactNode;
   control?: ReactNode;
   children?: ReactNode;
+  onContextMenu?: MouseEventHandler<HTMLDivElement>;
 }) {
   return (
     <div
+      onContextMenu={onContextMenu}
       className={cn(
         "border-t border-border/60 px-4 first:border-t-0 sm:px-5",
         children ? "pt-4 pb-0" : "py-4",

@@ -1146,19 +1146,18 @@ function mapToRuntimeEvents(
     if (!payload) {
       return [];
     }
+    const realtimeStartedPayload = payload as {
+      readonly realtimeSessionId?: string | null;
+      readonly sessionId?: string | null;
+    };
     return [
       {
         type: "thread.realtime.started",
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
           realtimeSessionId:
-            (
-              payload as {
-                readonly realtimeSessionId?: string | null;
-                readonly sessionId?: string | null;
-              }
-            ).realtimeSessionId ??
-            payload.sessionId ??
+            realtimeStartedPayload.realtimeSessionId ??
+            realtimeStartedPayload.sessionId ??
             undefined,
         },
       },

@@ -580,6 +580,13 @@ const buildAppUnderTest = (options?: {
               threads: [],
               updatedAt: new Date(0).toISOString(),
             }),
+          getArchivedShellSnapshot: () =>
+            Effect.succeed({
+              snapshotSequence: 0,
+              projects: [],
+              threads: [],
+              updatedAt: new Date(0).toISOString(),
+            }),
           getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
           getProjectShellById: () => Effect.succeed(Option.none()),
           getThreadShellById: () => Effect.succeed(Option.none()),
@@ -3228,6 +3235,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         layers: {
           projectionSnapshotQuery: {
             getShellSnapshot: () => Effect.fail(projectionError),
+            getArchivedShellSnapshot: () => Effect.fail(projectionError),
           },
         },
       });

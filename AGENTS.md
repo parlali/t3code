@@ -25,6 +25,16 @@ If a tradeoff is required, choose correctness and robustness over short-term con
 
 Long term maintainability is a core priority. If you add new functionality, first check if there is shared logic that can be extracted to a separate module. Duplicate logic across multiple files is a code smell and should be avoided. Don't be afraid to change existing code. Don't take shortcuts by just adding local logic to solve a problem.
 
+## Upstream Sync Reviews
+
+When the task is to compare this fork with upstream, audit upstream changes, or manually port upstream work, read `docs/upstream-sync.md` before starting.
+
+- Use the document's `Last reviewed upstream` SHA as the comparison baseline, not GitHub's ahead/behind count and not only `git merge-base`.
+- Fetch upstream first, then inspect new upstream work with commands shaped like `git log --oneline <last-reviewed-sha>..upstream/main` and targeted `git show` / `git diff` calls.
+- Treat the sync document as the source of truth for upstream commits already reviewed, manually ported, intentionally skipped, or still pending.
+- On completion of any upstream comparison or manual integration task, rewrite `docs/upstream-sync.md` so the next agent can continue from the new reviewed SHA. Record the date, upstream SHA, local head/commit state, what was ported, what was skipped, known divergences, and verification commands.
+- Do not use synthetic merge marker commits such as `git merge -s ours upstream/main` unless the user explicitly asks for that ancestry change.
+
 ## Package Roles
 
 - `apps/server`: Node.js WebSocket server. Wraps Codex app-server (JSON-RPC over stdio), serves the React web app, and manages provider sessions.
