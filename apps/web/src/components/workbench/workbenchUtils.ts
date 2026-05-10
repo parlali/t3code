@@ -1,7 +1,6 @@
 import type { ProjectEntry } from "@t3tools/contracts";
 import type { TreeNode } from "./ExplorerTree";
 import type { WorkbenchTab } from "./WorkbenchTabBar";
-import type { ParsedHunk } from "./WorkbenchHunkBar";
 
 export function basename(path: string): string {
   return path.split("/").at(-1) ?? path;
@@ -105,35 +104,62 @@ export function buildTree(entries: ReadonlyArray<ProjectEntry>): TreeNode[] {
   return roots;
 }
 
-export function parseHunks(diff: string): ParsedHunk[] {
-  const lines = diff.split("\n");
-  const firstHunkIndex = lines.findIndex((line) => line.startsWith("@@"));
-  if (firstHunkIndex === -1) return [];
-  const header = lines.slice(0, firstHunkIndex);
-  const hunks: ParsedHunk[] = [];
-  let index = firstHunkIndex;
+export interface ChangedLineRange {
+  readonly startLineNumber: number;
+  readonly endLineNumber: number;
+}
 
-  while (index < lines.length) {
-    const headerLine = lines[index];
-    if (!headerLine?.startsWith("@@")) {
-      index += 1;
+interface ChangedLineRanges {
+  readonly original: readonly ChangedLineRange[];
+  readonly modified: readonly ChangedLineRange[];
+}
+
+function appendChangedLineRange(ranges: ChangedLineRange[], lineNumber: number): void {
+  const previous = ranges.at(-1);
+  if (previous && previous.endLineNumber + 1 === lineNumber) {
+    ranges[ranges.length - 1] = { ...previous, endLineNumber: lineNumber };
+    return;
+  }
+  ranges.push({ startLineNumber: lineNumber, endLineNumber: lineNumber });
+}
+
+export function parseChangedLineRanges(diff: string): ChangedLineRanges {
+  const original: ChangedLineRange[] = [];
+  const modified: ChangedLineRange[] = [];
+  const lines = diff.split("\n");
+  let originalLine = 0;
+  let modifiedLine = 0;
+
+  for (const line of lines) {
+    const hunkMatch = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    if (hunkMatch) {
+      originalLine = Number(hunkMatch[1]);
+      modifiedLine = Number(hunkMatch[2]);
       continue;
     }
-    const hunkLines = [headerLine];
-    index += 1;
-    while (index < lines.length && !lines[index]?.startsWith("@@")) {
-      hunkLines.push(lines[index] ?? "");
-      index += 1;
+
+    if (originalLine === 0 && modifiedLine === 0) continue;
+    if (line.startsWith("---") || line.startsWith("+++")) continue;
+
+    if (line.startsWith("-")) {
+      appendChangedLineRange(original, originalLine);
+      originalLine += 1;
+      continue;
     }
-    const match = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(headerLine);
-    const label = match ? `Lines ${match[1]} -> ${match[2]}` : `Hunk ${hunks.length + 1}`;
-    hunks.push({
-      id: `${hunks.length}:${headerLine}`,
-      label,
-      patch: [...header, ...hunkLines].join("\n"),
-    });
+
+    if (line.startsWith("+")) {
+      appendChangedLineRange(modified, modifiedLine);
+      modifiedLine += 1;
+      continue;
+    }
+
+    if (line.startsWith("\\")) continue;
+
+    originalLine += 1;
+    modifiedLine += 1;
   }
-  return hunks;
+
+  return { original, modified };
 }
 
 export const WORKBENCH_EXPLORER_WIDTH_STORAGE_KEY = "t3code:workbench-explorer-width";

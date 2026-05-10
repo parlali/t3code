@@ -1,7 +1,7 @@
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { memo } from "react";
 import { cn } from "../../lib/utils";
-import { VscodeEntryIcon } from "../chat/VscodeEntryIcon";
+import { WorkbenchTreeIcon } from "./WorkbenchTreeIcon";
 
 export interface TreeNode {
   readonly path: string;
@@ -14,7 +14,6 @@ interface ExplorerTreeProps {
   readonly nodes: readonly TreeNode[];
   readonly expanded: ReadonlySet<string>;
   readonly selectedPath: string | null;
-  readonly theme: "light" | "dark";
   readonly onToggle: (path: string) => void;
   readonly onOpenFile: (path: string) => void;
 }
@@ -27,7 +26,7 @@ export const ExplorerTree = memo(function ExplorerTree(props: ExplorerTreeProps)
         <button
           type="button"
           className={cn(
-            "flex h-7 w-full items-center gap-1.5 rounded-sm px-2 text-left text-xs text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+            "flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-sm px-2 text-left text-xs text-muted-foreground hover:bg-accent/70 hover:text-foreground",
             props.selectedPath === node.path && "bg-accent text-foreground",
           )}
           style={{ paddingLeft: 8 + depth * 14 }}
@@ -45,12 +44,7 @@ export const ExplorerTree = memo(function ExplorerTree(props: ExplorerTreeProps)
           ) : (
             <span className="w-3" />
           )}
-          <VscodeEntryIcon
-            pathValue={node.path}
-            kind={node.kind}
-            theme={props.theme}
-            className="size-3.5"
-          />
+          <WorkbenchTreeIcon kind={node.kind} expanded={expanded} className="size-3.5" />
           <span className="min-w-0 truncate">{node.name}</span>
         </button>
         {node.kind === "directory" && expanded

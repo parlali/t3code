@@ -257,6 +257,42 @@ code {
   left: 0 !important;
 }
 
+/* Monaco workbench editor surface */
+.t3-workbench-monaco .monaco-editor,
+.t3-workbench-monaco .monaco-diff-editor {
+  --vscode-focusBorder: transparent;
+}
+
+.t3-workbench-monaco .monaco-editor .margin,
+.t3-workbench-monaco .monaco-editor-background {
+  background: color-mix(in srgb, var(--background) 94%, var(--foreground)) !important;
+}
+
+.t3-workbench-monaco .monaco-editor .current-line,
+.t3-workbench-monaco .monaco-editor .current-line-margin {
+  border-color: transparent !important;
+}
+
+.t3-workbench-monaco .monaco-editor .selected-text {
+  border-radius: 2px;
+}
+
+.t3-workbench-monaco .monaco-scrollable-element > .scrollbar > .slider {
+  border-radius: 2px;
+}
+
+.t3-workbench-monaco .monaco-diff-editor .diffOverview {
+  width: 6px !important;
+}
+
+.t3-workbench-diff-removed-line {
+  background-color: color-mix(in srgb, var(--destructive) 18%, transparent) !important;
+}
+
+.t3-workbench-diff-inserted-line {
+  background-color: color-mix(in srgb, var(--success) 18%, transparent) !important;
+}
+
 /* Reasoning select -- clickable label surface */
 label:has(> select#reasoning-effort) {
   position: relative;

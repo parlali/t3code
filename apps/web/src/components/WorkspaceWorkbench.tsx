@@ -1,4 +1,4 @@
-import { DiffEditor, Editor, type DiffOnMount, type OnMount } from "@monaco-editor/react";
+import { Editor, type BeforeMount, type OnMount } from "@monaco-editor/react";
 import type { EnvironmentId, ProjectEntry, ThreadId, VcsStatusResult } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageSquareIcon } from "lucide-react";
@@ -32,7 +32,8 @@ import {
   WorkbenchExplorerPanel,
   WorkbenchToolbarActions,
   WorkbenchTabBar,
-  WorkbenchHunkBar,
+  WorkbenchBreadcrumbs,
+  WorkbenchDiffEditor,
   type WorkbenchTab,
   basename,
   tabFor,
@@ -40,7 +41,9 @@ import {
   markDirty,
   languageFor,
   buildTree,
-  parseHunks,
+  configureWorkbenchMonaco,
+  workbenchCodeEditorOptions,
+  workbenchEditorTheme,
   clampExplorerWidth,
   WORKBENCH_EXPLORER_WIDTH_STORAGE_KEY,
   WORKBENCH_EXPLORER_COLLAPSED_STORAGE_KEY,
@@ -129,10 +132,13 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     return window.localStorage.getItem(WORKBENCH_EXPLORER_COLLAPSED_STORAGE_KEY) === "1";
   });
   const [explorerResizing, setExplorerResizing] = useState(false);
+  const workbenchRef = useRef<HTMLElement | null>(null);
   const resizingRef = useRef(false);
   const resizeStartRef = useRef<{ readonly clientX: number; readonly width: number } | null>(null);
   const explorerWidthRef = useRef(explorerWidth);
-  const diffContentSubscriptionRef = useRef<{ dispose: () => void } | null>(null);
+  const fileBuffersRef = useRef(fileBuffers);
+  const diffBuffersRef = useRef(diffBuffers);
+  const saveActiveRef = useRef<() => void>(() => undefined);
 
   const { tabs, activeTabId } = tabState;
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
@@ -176,7 +182,6 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       ),
     [changedFiles],
   );
-  const hunks = useMemo(() => parseHunks(diffQuery.data?.diff ?? ""), [diffQuery.data?.diff]);
   const fileQueryContents = fileQuery.data?.contents;
   const diffQueryOriginal = diffQuery.data?.original;
   const diffQueryModified = diffQuery.data?.modified;
@@ -201,13 +206,21 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
 
   useEffect(() => {
     if (fileQueryContents !== undefined && activeKind === "file" && activePath && !activeTabDirty) {
-      setFileBuffers((current) => setBufferValue(current, activePath, fileQueryContents));
+      setFileBuffers((current) => {
+        const next = setBufferValue(current, activePath, fileQueryContents);
+        fileBuffersRef.current = next;
+        return next;
+      });
     }
   }, [activeKind, activePath, activeTabDirty, fileQueryContents]);
 
   useEffect(() => {
     if (diffQueryModified !== undefined && activeKind === "diff" && activePath && !activeTabDirty) {
-      setDiffBuffers((current) => setBufferValue(current, activePath, diffQueryModified));
+      setDiffBuffers((current) => {
+        const next = setBufferValue(current, activePath, diffQueryModified);
+        diffBuffersRef.current = next;
+        return next;
+      });
     }
   }, [activeKind, activePath, activeTabDirty, diffQueryModified]);
 
@@ -235,6 +248,8 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
 
   useEffect(() => {
     setTabState({ tabs: [], activeTabId: null });
+    fileBuffersRef.current = {};
+    diffBuffersRef.current = {};
     setFileBuffers({});
     setDiffBuffers({});
     setDirtyTabs(new Set());
@@ -253,7 +268,9 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   const saveActive = useCallback(async () => {
     if (!activeTab || !cwd) return;
     const contents =
-      activeTab.kind === "file" ? fileBuffers[activeTab.path] : diffBuffers[activeTab.path];
+      activeTab.kind === "file"
+        ? fileBuffersRef.current[activeTab.path]
+        : diffBuffersRef.current[activeTab.path];
     if (contents === undefined) return;
     const api = ensureEnvironmentApi(props.environmentId);
     await api.projects.writeFile({ cwd, relativePath: activeTab.path, contents });
@@ -263,7 +280,13 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       return next;
     });
     await refreshWorkspace();
-  }, [activeTab, cwd, diffBuffers, fileBuffers, props.environmentId, refreshWorkspace]);
+  }, [activeTab, cwd, props.environmentId, refreshWorkspace]);
+
+  useEffect(() => {
+    saveActiveRef.current = () => {
+      void saveActive();
+    };
+  }, [saveActive]);
 
   const stageFile = useCallback(
     async (path: string) => {
@@ -283,46 +306,53 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     [cwd, props.environmentId, refreshWorkspace],
   );
 
-  const applyPatch = useCallback(
-    async (patch: string, patchMode: "stage" | "revert") => {
-      if (!cwd) return;
-      await ensureEnvironmentApi(props.environmentId).vcs.applyPatch({
-        cwd,
-        patch,
-        mode: patchMode,
-      });
-      await refreshWorkspace();
-    },
-    [cwd, props.environmentId, refreshWorkspace],
-  );
-
-  const onEditorMount: OnMount = useCallback((editor) => {
-    editor.focus();
+  const beforeEditorMount: BeforeMount = useCallback((monaco) => {
+    configureWorkbenchMonaco(monaco);
   }, []);
 
-  const onDiffMount: DiffOnMount = useCallback((editor) => {
-    editor.getModifiedEditor().focus();
-    diffContentSubscriptionRef.current?.dispose();
-    diffContentSubscriptionRef.current = editor.getModifiedEditor().onDidChangeModelContent(() => {
-      const tab = activeTabRef.current;
-      if (!tab || tab.kind !== "diff") return;
-      setDiffBuffers((current) =>
-        setBufferValue(current, tab.path, editor.getModifiedEditor().getValue()),
-      );
-      setDirtyTabs((current) => markDirty(current, tab.id));
+  const onEditorMount: OnMount = useCallback((editor, monaco) => {
+    editor.focus();
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      saveActiveRef.current();
     });
   }, []);
 
-  useEffect(() => {
-    return () => {
-      diffContentSubscriptionRef.current?.dispose();
-      diffContentSubscriptionRef.current = null;
-    };
-  }, []);
+  const handleDiffModifiedChange = useCallback(
+    (value: string) => {
+      const tab = activeTabRef.current;
+      if (!tab || tab.kind !== "diff") return;
+      const nextDiffBuffers = setBufferValue(diffBuffersRef.current, tab.path, value);
+      diffBuffersRef.current = nextDiffBuffers;
+      setDiffBuffers(nextDiffBuffers);
+      setDirtyTabs((current) => {
+        if (value !== (diffQueryModified ?? "")) return markDirty(current, tab.id);
+        if (!current.has(tab.id)) return current;
+        const next = new Set(current);
+        next.delete(tab.id);
+        return next;
+      });
+    },
+    [diffQueryModified],
+  );
 
   useEffect(() => {
     explorerWidthRef.current = explorerWidth;
   }, [explorerWidth]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || !workbenchRef.current?.contains(target)) return;
+      if (event.key.toLowerCase() !== "s") return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      saveActiveRef.current();
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -421,7 +451,6 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
             expanded={expanded}
             collapsedChangeDirectories={collapsedChangeDirectories}
             selectedPath={activePath}
-            theme={resolvedTheme}
             listError={listQuery.error ?? null}
             gitError={gitStatus.error ?? null}
             changedFilesCount={changedFiles.length}
@@ -476,7 +505,6 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
             expanded={expanded}
             collapsedChangeDirectories={collapsedChangeDirectories}
             selectedPath={activePath}
-            theme={resolvedTheme}
             listError={listQuery.error ?? null}
             gitError={gitStatus.error ?? null}
             changedFilesCount={changedFiles.length}
@@ -525,9 +553,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
         />
       </div>
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
-        <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-          {activeTab ? activeTab.path : cwd}
-        </div>
+        <WorkbenchBreadcrumbs cwd={cwd} path={activeTab?.path ?? null} />
         <WorkbenchToolbarActions
           activeTabPath={activeTab?.path ?? null}
           activeTabKind={activeTab?.kind ?? null}
@@ -564,7 +590,6 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
             expanded={expanded}
             collapsedChangeDirectories={collapsedChangeDirectories}
             selectedPath={activePath}
-            theme={resolvedTheme}
             listError={listQuery.error ?? null}
             gitError={gitStatus.error ?? null}
             changedFilesCount={changedFiles.length}
@@ -598,6 +623,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
 
   return (
     <section
+      ref={workbenchRef}
       className={cn(
         "flex h-full min-h-0 min-w-0 overflow-hidden bg-background text-foreground",
         !isMobileLayout && !embedded && "border-l border-border",
@@ -608,9 +634,6 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
         {showStandaloneToolbar && mobileToolbar}
         {embeddedMobileBar}
         {!isMobileLayout && desktopHeader}
-        {activeTab?.kind === "diff" && hunks.length > 0 && (
-          <WorkbenchHunkBar hunks={hunks} isMobile={isMobileLayout} onApplyPatch={applyPatch} />
-        )}
         <div className="min-h-0 flex-1">
           {!activeTab ? (
             <WorkbenchMessage>Open a file or change from the explorer.</WorkbenchMessage>
@@ -621,37 +644,38 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
           ) : activeTab.kind === "file" ? (
             <Editor
               key={activeTab.id}
-              theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+              beforeMount={beforeEditorMount}
+              className="t3-workbench-monaco"
+              theme={workbenchEditorTheme(resolvedTheme === "dark" ? "dark" : "light")}
               path={activeTab.path}
               language={languageFor(activeTab.path) ?? "plaintext"}
               value={fileBuffers[activeTab.path] ?? fileQueryContents ?? ""}
               onChange={(value) => {
-                setFileBuffers((current) => setBufferValue(current, activeTab.path, value ?? ""));
+                const nextValue = value ?? "";
+                const nextFileBuffers = setBufferValue(
+                  fileBuffersRef.current,
+                  activeTab.path,
+                  nextValue,
+                );
+                fileBuffersRef.current = nextFileBuffers;
+                setFileBuffers(nextFileBuffers);
                 setDirtyTabs((current) => markDirty(current, activeTab.id));
               }}
               onMount={onEditorMount}
-              options={{
-                minimap: { enabled: !isMobileLayout },
-                fontSize: isMobileLayout ? 12 : 13,
-                scrollBeyondLastLine: false,
-              }}
+              options={workbenchCodeEditorOptions(isMobileLayout)}
             />
           ) : (
-            <DiffEditor
-              key={activeTab.id}
-              theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+            <WorkbenchDiffEditor
+              diff={diffQuery.data?.diff ?? ""}
+              id={activeTab.id}
+              isMobileLayout={isMobileLayout}
               language={languageFor(activeTab.path) ?? "plaintext"}
               original={diffQueryOriginal ?? ""}
               modified={diffBuffers[activeTab.path] ?? diffQueryModified ?? ""}
-              onMount={onDiffMount}
-              options={{
-                renderSideBySide: !isMobileLayout,
-                originalEditable: false,
-                readOnly: false,
-                minimap: { enabled: !isMobileLayout },
-                fontSize: isMobileLayout ? 12 : 13,
-                scrollBeyondLastLine: false,
-              }}
+              onModifiedChange={handleDiffModifiedChange}
+              onSave={() => saveActiveRef.current()}
+              path={activeTab.path}
+              resolvedTheme={resolvedTheme === "dark" ? "dark" : "light"}
             />
           )}
         </div>

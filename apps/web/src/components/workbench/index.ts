@@ -4,7 +4,14 @@ export { ChangesTree } from "./ChangesTree";
 export { WorkbenchExplorerPanel } from "./WorkbenchExplorerPanel";
 export { WorkbenchToolbarActions } from "./WorkbenchToolbarActions";
 export { WorkbenchTabBar, type WorkbenchTab } from "./WorkbenchTabBar";
-export { WorkbenchHunkBar, type ParsedHunk } from "./WorkbenchHunkBar";
+export { WorkbenchBreadcrumbs } from "./WorkbenchBreadcrumbs";
+export { WorkbenchDiffEditor } from "./WorkbenchDiffEditor";
+export { WorkbenchTreeIcon } from "./WorkbenchTreeIcon";
+export {
+  configureWorkbenchMonaco,
+  workbenchCodeEditorOptions,
+  workbenchEditorTheme,
+} from "./monacoWorkbench";
 export {
   basename,
   parentPath,
@@ -14,7 +21,7 @@ export {
   markDirty,
   languageFor,
   buildTree,
-  parseHunks,
+  parseChangedLineRanges,
   clampExplorerWidth,
   WORKBENCH_EXPLORER_WIDTH_STORAGE_KEY,
   WORKBENCH_EXPLORER_COLLAPSED_STORAGE_KEY,

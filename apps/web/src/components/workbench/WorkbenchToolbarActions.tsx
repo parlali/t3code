@@ -68,8 +68,9 @@ export const WorkbenchToolbarActions = memo(function WorkbenchToolbarActions({
   return (
     <>
       <Button
-        size="xs"
-        variant="outline"
+        size="icon-sm"
+        variant="ghost"
+        className="size-7"
         onClick={onSave}
         disabled={!isDirty}
         aria-label="Save file"
@@ -80,8 +81,9 @@ export const WorkbenchToolbarActions = memo(function WorkbenchToolbarActions({
       {activeTabKind === "diff" && (
         <>
           <Button
-            size="xs"
-            variant="outline"
+            size="icon-sm"
+            variant="ghost"
+            className="size-7"
             onClick={() => onStage(activeTabPath)}
             aria-label="Stage file"
             title="Stage file"
@@ -89,8 +91,9 @@ export const WorkbenchToolbarActions = memo(function WorkbenchToolbarActions({
             <CheckIcon className="size-3" />
           </Button>
           <Button
-            size="xs"
-            variant="outline"
+            size="icon-sm"
+            variant="ghost"
+            className="size-7"
             onClick={() => onRevert(activeTabPath)}
             aria-label="Revert file"
             title="Revert file"

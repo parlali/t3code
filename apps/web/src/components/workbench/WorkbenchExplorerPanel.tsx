@@ -22,7 +22,6 @@ interface WorkbenchExplorerPanelProps {
   readonly expanded: ReadonlySet<string>;
   readonly collapsedChangeDirectories: ReadonlySet<string>;
   readonly selectedPath: string | null;
-  readonly theme: "light" | "dark";
   readonly listError: Error | null;
   readonly gitError: Error | null;
   readonly changedFilesCount: number;
@@ -43,7 +42,6 @@ export const WorkbenchExplorerPanel = memo(function WorkbenchExplorerPanel({
   expanded,
   collapsedChangeDirectories,
   selectedPath,
-  theme,
   listError,
   gitError,
   changedFilesCount,
@@ -85,7 +83,6 @@ export const WorkbenchExplorerPanel = memo(function WorkbenchExplorerPanel({
             nodes={tree}
             expanded={expanded}
             selectedPath={selectedPath}
-            theme={theme}
             onToggle={onToggleExpanded}
             onOpenFile={onOpenFile}
           />
@@ -102,7 +99,6 @@ export const WorkbenchExplorerPanel = memo(function WorkbenchExplorerPanel({
             nodes={changedTree}
             collapsedDirectories={collapsedChangeDirectories}
             selectedPath={selectedPath}
-            theme={theme}
             onToggleDirectory={onToggleCollapsedChangeDirectory}
             onOpenFile={onOpenFile}
           />
