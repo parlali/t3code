@@ -24,6 +24,11 @@ export const gitQueryKeys = {
     ["git", "refs", environmentId ?? null, cwd] as const,
   diff: (environmentId: EnvironmentId | null, cwd: string | null, ignoreWhitespace: boolean) =>
     ["git", "diff", environmentId ?? null, cwd, ignoreWhitespace] as const,
+  fileDiff: (
+    environmentId: EnvironmentId | null,
+    cwd: string | null,
+    relativePath: string | null,
+  ) => ["git", "file-diff", environmentId ?? null, cwd, relativePath] as const,
   branchSearch: (environmentId: EnvironmentId | null, cwd: string | null, query: string) =>
     ["git", "refs", environmentId ?? null, cwd, "search", query] as const,
 };
@@ -145,6 +150,31 @@ export function gitDiffQueryOptions(input: {
     enabled: (input.enabled ?? true) && input.environmentId !== null && input.cwd !== null,
     staleTime: Infinity,
     retry: 2,
+  });
+}
+
+export function gitFileDiffQueryOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  relativePath: string | null;
+  enabled?: boolean;
+}) {
+  return queryOptions({
+    queryKey: gitQueryKeys.fileDiff(input.environmentId, input.cwd, input.relativePath),
+    queryFn: async () => {
+      if (!input.cwd || !input.environmentId || !input.relativePath) {
+        throw new Error("Git file diff is unavailable.");
+      }
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.vcs.fileDiff({ cwd: input.cwd, relativePath: input.relativePath });
+    },
+    enabled:
+      (input.enabled ?? true) &&
+      input.environmentId !== null &&
+      input.cwd !== null &&
+      input.relativePath !== null,
+    staleTime: 0,
+    retry: 1,
   });
 }
 

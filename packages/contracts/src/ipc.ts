@@ -14,8 +14,11 @@ import type {
   VcsPullResult,
   VcsRemoveWorktreeInput,
   GitResolvePullRequestResult,
+  VcsApplyPatchInput,
   VcsDiffInput,
   VcsDiffResult,
+  VcsFileDiffResult,
+  VcsFileInput,
   VcsStatusInput,
   VcsStatusResult,
   VcsCreateRefResult,
@@ -24,6 +27,10 @@ import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem
 import type {
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectListEntriesInput,
+  ProjectListEntriesResult,
+  ProjectReadFileInput,
+  ProjectReadFileResult,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project.ts";
@@ -351,6 +358,8 @@ export interface EnvironmentApi {
   };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
+    listEntries: (input: ProjectListEntriesInput) => Promise<ProjectListEntriesResult>;
+    readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
   };
   filesystem: {
@@ -375,6 +384,10 @@ export interface EnvironmentApi {
     switchRef: (input: VcsSwitchRefInput) => Promise<VcsSwitchRefResult>;
     init: (input: VcsInitInput) => Promise<void>;
     diff: (input: VcsDiffInput) => Promise<VcsDiffResult>;
+    fileDiff: (input: VcsFileInput) => Promise<VcsFileDiffResult>;
+    stageFile: (input: VcsFileInput) => Promise<void>;
+    revertFile: (input: VcsFileInput) => Promise<void>;
+    applyPatch: (input: VcsApplyPatchInput) => Promise<void>;
     pull: (input: VcsPullInput) => Promise<VcsPullResult>;
     refreshStatus: (input: VcsStatusInput) => Promise<VcsStatusResult>;
     onStatus: (

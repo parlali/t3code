@@ -10,6 +10,9 @@ import {
   type VcsCreateRefResult,
   type VcsDiffInput,
   type VcsDiffResult,
+  type VcsFileDiffResult,
+  type VcsFileInput,
+  type VcsApplyPatchInput,
   type VcsCreateWorktreeInput,
   type VcsCreateWorktreeResult,
   type VcsInitInput,
@@ -170,6 +173,10 @@ export interface GitVcsDriverShape {
     options?: { readonly remoteName?: string | null },
   ) => Effect.Effect<GitPushResult, GitCommandError>;
   readonly diff: (input: VcsDiffInput) => Effect.Effect<VcsDiffResult, GitCommandError>;
+  readonly fileDiff: (input: VcsFileInput) => Effect.Effect<VcsFileDiffResult, GitCommandError>;
+  readonly stageFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
+  readonly revertFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
+  readonly applyPatch: (input: VcsApplyPatchInput) => Effect.Effect<void, GitCommandError>;
   readonly readRangeContext: (
     cwd: string,
     baseRef: string,

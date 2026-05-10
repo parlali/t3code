@@ -9,8 +9,37 @@ import {
 
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
 const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
-const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
+const THREAD_MAIN_CONTENT_MIN_WIDTH = 28 * 16;
+const THREAD_MESSAGE_PANE_SELECTOR = "[data-thread-message-pane='true']";
 const ThreadSidebar = lazy(() => import("./Sidebar"));
+
+function shouldAcceptThreadSidebarWidth(input: {
+  readonly currentWidth?: number;
+  readonly nextWidth: number;
+  readonly wrapper: HTMLElement;
+}): boolean {
+  const messagePane = input.wrapper.querySelector<HTMLElement>(THREAD_MESSAGE_PANE_SELECTOR);
+  if (!messagePane) {
+    return input.wrapper.clientWidth - input.nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH;
+  }
+
+  const sidebarContainer = input.wrapper.querySelector<HTMLElement>(
+    "[data-slot='sidebar-container']",
+  );
+  const currentSidebarWidth =
+    input.currentWidth ?? sidebarContainer?.getBoundingClientRect().width ?? 0;
+  if (currentSidebarWidth <= 0) {
+    return true;
+  }
+
+  const sidebarDelta = input.nextWidth - currentSidebarWidth;
+  if (sidebarDelta <= 0) {
+    return true;
+  }
+
+  const nextMessagePaneWidth = messagePane.getBoundingClientRect().width - sidebarDelta;
+  return nextMessagePaneWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH;
+}
 
 function ThreadSidebarLoadingState() {
   return (
@@ -75,11 +104,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       <Sidebar
         side="left"
         collapsible="offcanvas"
-        className="border-r border-border bg-card text-foreground"
+        className="border-r border-border bg-card text-foreground group-data-[collapsible=offcanvas]:border-r-0"
         resizable={{
           minWidth: THREAD_SIDEBAR_MIN_WIDTH,
-          shouldAcceptWidth: ({ nextWidth, wrapper }) =>
-            wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
+          shouldAcceptWidth: shouldAcceptThreadSidebarWidth,
           storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >

@@ -39,6 +39,34 @@ describe("terminalRuntimeStatusStore", () => {
     expect(status.runningTerminalIds).toEqual(["default"]);
   });
 
+  it("returns stable empty snapshots for unchanged store state", () => {
+    const state = useTerminalRuntimeStatusStore.getState();
+
+    expect(selectThreadTerminalRuntimeStatus(state, environmentId, threadId)).toBe(
+      selectThreadTerminalRuntimeStatus(state, environmentId, threadId),
+    );
+  });
+
+  it("returns stable derived snapshots for unchanged store state", () => {
+    useTerminalRuntimeStatusStore.getState().syncSnapshot(environmentId, {
+      updatedAt: "2026-05-09T10:00:00.000Z",
+      sessions: [
+        {
+          threadId,
+          terminalId: "default",
+          status: "running",
+          hasRunningSubprocess: true,
+          updatedAt: "2026-05-09T10:00:00.000Z",
+        },
+      ],
+    });
+    const state = useTerminalRuntimeStatusStore.getState();
+
+    expect(selectThreadTerminalRuntimeStatus(state, environmentId, threadId)).toBe(
+      selectThreadTerminalRuntimeStatus(state, environmentId, threadId),
+    );
+  });
+
   it("updates status from terminal activity events", () => {
     useTerminalRuntimeStatusStore.getState().applyTerminalEvent(environmentId, {
       type: "activity",

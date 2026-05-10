@@ -9,7 +9,6 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { useParams } from "@tanstack/react-router";
 import { type ScopedThreadRef, type ThreadId } from "@t3tools/contracts";
 import {
   CheckIcon,
@@ -28,7 +27,7 @@ import { cn } from "~/lib/utils";
 import { buttonVariants } from "~/components/ui/button";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-import { resolveThreadRouteTarget } from "~/threadRoutes";
+import { useThreadRouteTarget } from "~/hooks/useThreadRouteTarget";
 import {
   buildVisibleToastLayout,
   shouldHideCollapsedToastContent,
@@ -342,10 +341,7 @@ interface ToastProviderProps extends Toast.Provider.Props {
 }
 
 function useActiveThreadRefFromRoute(): ScopedThreadRef | null {
-  const routeTarget = useParams({
-    strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
-  });
+  const routeTarget = useThreadRouteTarget();
   const activeDraftSession = useComposerDraftStore((store) =>
     routeTarget?.kind === "draft" ? store.getDraftSession(routeTarget.draftId) : null,
   );

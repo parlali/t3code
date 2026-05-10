@@ -14,6 +14,8 @@ import type {
   FilesystemBrowseResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectListEntriesInput,
+  ProjectListEntriesResult,
 } from "@t3tools/contracts";
 
 export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntriesError>()(
@@ -56,6 +58,13 @@ export interface WorkspaceEntriesShape {
   readonly search: (
     input: ProjectSearchEntriesInput,
   ) => Effect.Effect<ProjectSearchEntriesResult, WorkspaceEntriesError>;
+
+  /**
+   * List indexed workspace entries in deterministic tree order.
+   */
+  readonly list: (
+    input: ProjectListEntriesInput,
+  ) => Effect.Effect<ProjectListEntriesResult, WorkspaceEntriesError>;
 
   /**
    * Drop any cached workspace entries for the given workspace root.

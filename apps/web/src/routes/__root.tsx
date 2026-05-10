@@ -60,6 +60,7 @@ import {
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
+import { recentDiagnosticEvents, recordDiagnosticEvent } from "../diagnostics";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -177,6 +178,16 @@ function HostedStaticEnvironmentBootstrap() {
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
   const message = errorMessage(error);
   const details = errorDetails(error);
+
+  useEffect(() => {
+    recordDiagnosticEvent("route.error", {
+      href: window.location.href,
+      message,
+      details,
+      perfEvents: window.__T3_PERF_EVENTS__?.slice(-25) ?? [],
+      diagnostics: recentDiagnosticEvents(),
+    });
+  }, [details, message]);
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">

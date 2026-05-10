@@ -1,58 +1,30 @@
-import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   Suspense,
   lazy,
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentProps,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import { threadHasStarted } from "../components/ChatView.logic";
-import {
-  DiffPanelHeaderSkeleton,
-  DiffPanelLoadingState,
-  DiffPanelShell,
-  type DiffPanelMode,
-} from "../components/DiffPanelShell";
+import { WorkspaceWorkbench } from "../components/WorkspaceWorkbench";
 import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../composerDraftStore";
-import {
-  type DiffRouteSearch,
-  parseDiffRouteSearch,
-  stripDiffSearchParams,
-} from "../diffRouteSearch";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
-import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
-import { RightPanelSheet } from "../components/RightPanelSheet";
-import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
+import { resolveThreadRouteRef } from "../threadRoutes";
+import { subscribeWorkbenchOpen } from "../workbenchEvents";
+import { SidebarInset } from "~/components/ui/sidebar";
+import { PANE_RESIZE_RAIL_CLASS } from "~/components/ui/pane-chrome";
+import { cn } from "~/lib/utils";
 
-const DiffPanelWithProvider = lazy(() => import("../components/DiffPanelWithProvider"));
 const ChatView = lazy(() => import("../components/ChatView"));
-const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
-const DIFF_INLINE_DEFAULT_WIDTH = "clamp(24rem,34vw,36rem)";
-const DIFF_INLINE_SIDEBAR_MIN_WIDTH = 22 * 16;
-const DIFF_INLINE_SIDEBAR_MAX_WIDTH = 36 * 16;
-const COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX = 208;
-
-const DiffLoadingFallback = (props: { mode: DiffPanelMode }) => {
-  return (
-    <DiffPanelShell mode={props.mode} header={<DiffPanelHeaderSkeleton />}>
-      <DiffPanelLoadingState label="Loading diff viewer..." />
-    </DiffPanelShell>
-  );
-};
-
-const LazyDiffPanel = (props: { mode: DiffPanelMode }) => {
-  return (
-    <Suspense fallback={<DiffLoadingFallback mode={props.mode} />}>
-      <DiffPanelWithProvider mode={props.mode} />
-    </Suspense>
-  );
-};
 
 const ChatViewLoadingFallback = () => (
   <div className="h-full min-h-0 bg-background text-foreground" aria-busy="true" />
@@ -64,101 +36,31 @@ const LazyChatView = (props: ComponentProps<typeof ChatView>) => (
   </Suspense>
 );
 
-const DiffPanelInlineSidebar = (props: {
-  diffOpen: boolean;
-  onCloseDiff: () => void;
-  onOpenDiff: () => void;
-  renderDiffContent: boolean;
-}) => {
-  const { diffOpen, onCloseDiff, onOpenDiff, renderDiffContent } = props;
-  const onOpenChange = useCallback(
-    (open: boolean) => {
-      if (open) {
-        onOpenDiff();
-        return;
-      }
-      onCloseDiff();
-    },
-    [onCloseDiff, onOpenDiff],
-  );
-  const shouldAcceptInlineSidebarWidth = useCallback(
-    ({ nextWidth, wrapper }: { nextWidth: number; wrapper: HTMLElement }) => {
-      const composerForm = document.querySelector<HTMLElement>("[data-chat-composer-form='true']");
-      if (!composerForm) return true;
-      const composerViewport = composerForm.parentElement;
-      if (!composerViewport) return true;
-      const previousSidebarWidth = wrapper.style.getPropertyValue("--sidebar-width");
-      wrapper.style.setProperty("--sidebar-width", `${nextWidth}px`);
+type MobileWorkbenchPane = "chat" | "workbench";
 
-      const viewportStyle = window.getComputedStyle(composerViewport);
-      const viewportPaddingLeft = Number.parseFloat(viewportStyle.paddingLeft) || 0;
-      const viewportPaddingRight = Number.parseFloat(viewportStyle.paddingRight) || 0;
-      const viewportContentWidth = Math.max(
-        0,
-        composerViewport.clientWidth - viewportPaddingLeft - viewportPaddingRight,
-      );
-      const formRect = composerForm.getBoundingClientRect();
-      const composerFooter = composerForm.querySelector<HTMLElement>(
-        "[data-chat-composer-footer='true']",
-      );
-      const composerRightActions = composerForm.querySelector<HTMLElement>(
-        "[data-chat-composer-actions='right']",
-      );
-      const composerRightActionsWidth = composerRightActions?.getBoundingClientRect().width ?? 0;
-      const composerFooterGap = composerFooter
-        ? Number.parseFloat(window.getComputedStyle(composerFooter).columnGap) ||
-          Number.parseFloat(window.getComputedStyle(composerFooter).gap) ||
-          0
-        : 0;
-      const minimumComposerWidth =
-        COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX + composerRightActionsWidth + composerFooterGap;
-      const hasComposerOverflow = composerForm.scrollWidth > composerForm.clientWidth + 0.5;
-      const overflowsViewport = formRect.width > viewportContentWidth + 0.5;
-      const violatesMinimumComposerWidth = composerForm.clientWidth + 0.5 < minimumComposerWidth;
+const INLINE_SPLIT_STORAGE_KEY = "t3code:chat-workbench-split-width";
+const INLINE_CHAT_PANE_DEFAULT_WIDTH = 46 * 16;
+const INLINE_PANE_MIN_WIDTH = 28 * 16;
 
-      if (previousSidebarWidth.length > 0) {
-        wrapper.style.setProperty("--sidebar-width", previousSidebarWidth);
-      } else {
-        wrapper.style.removeProperty("--sidebar-width");
-      }
+function clampInlineChatPaneWidth(width: number, containerWidth: number): number {
+  const boundedMinimum = Math.min(INLINE_PANE_MIN_WIDTH, containerWidth / 2);
+  const boundedMaximum = Math.max(boundedMinimum, containerWidth - boundedMinimum);
+  return Math.min(Math.max(width, boundedMinimum), boundedMaximum);
+}
 
-      return !hasComposerOverflow && !overflowsViewport && !violatesMinimumComposerWidth;
-    },
-    [],
-  );
-
-  return (
-    <SidebarProvider
-      defaultOpen={false}
-      open={diffOpen}
-      onOpenChange={onOpenChange}
-      className="w-auto min-h-0 flex-none bg-transparent"
-      style={{ "--sidebar-width": DIFF_INLINE_DEFAULT_WIDTH } as React.CSSProperties}
-    >
-      <Sidebar
-        side="right"
-        collapsible="offcanvas"
-        className="border-l border-border bg-card text-foreground"
-        resizable={{
-          maxWidth: DIFF_INLINE_SIDEBAR_MAX_WIDTH,
-          minWidth: DIFF_INLINE_SIDEBAR_MIN_WIDTH,
-          shouldAcceptWidth: shouldAcceptInlineSidebarWidth,
-          storageKey: DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
-        }}
-      >
-        {renderDiffContent ? <LazyDiffPanel mode="sidebar" /> : null}
-        <SidebarRail />
-      </Sidebar>
-    </SidebarProvider>
-  );
-};
+function readInitialInlineChatPaneWidth(): number {
+  if (typeof window === "undefined") return INLINE_CHAT_PANE_DEFAULT_WIDTH;
+  const stored = Number.parseFloat(window.localStorage.getItem(INLINE_SPLIT_STORAGE_KEY) ?? "");
+  return Number.isFinite(stored) ? stored : INLINE_CHAT_PANE_DEFAULT_WIDTH;
+}
 
 function ChatThreadRouteView() {
   const navigate = useNavigate();
-  const threadRef = Route.useParams({
-    select: (params) => resolveThreadRouteRef(params),
-  });
-  const search = Route.useSearch();
+  const { environmentId, threadId } = Route.useParams();
+  const threadRef = useMemo(
+    () => resolveThreadRouteRef({ environmentId, threadId }),
+    [environmentId, threadId],
+  );
   const bootstrapComplete = useStore(
     (store) => selectEnvironmentState(store, threadRef?.environmentId ?? null).bootstrapComplete,
   );
@@ -174,127 +76,178 @@ function ChatThreadRouteView() {
     threadRef ? store.getDraftThreadByRef(threadRef) : null,
   );
   const environmentHasDraftThreads = useComposerDraftStore((store) => {
-    if (!threadRef) {
-      return false;
-    }
+    if (!threadRef) return false;
     return store.hasDraftThreadsInEnvironment(threadRef.environmentId);
   });
   const routeThreadExists = threadExists || draftThreadExists;
   const serverThreadStarted = threadHasStarted(serverThread);
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
-  const diffOpen = search.diff === "1";
-  const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
-  const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
-  const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
-    threadKey: currentThreadKey,
-    hasOpenedDiff: diffOpen,
-  }));
-  const hasOpenedDiff =
-    diffPanelMountState.threadKey === currentThreadKey
-      ? diffPanelMountState.hasOpenedDiff
-      : diffOpen;
-  const markDiffOpened = useCallback(() => {
-    setDiffPanelMountState((previous) => {
-      if (previous.threadKey === currentThreadKey && previous.hasOpenedDiff) {
-        return previous;
-      }
-      return {
-        threadKey: currentThreadKey,
-        hasOpenedDiff: true,
-      };
-    });
-  }, [currentThreadKey]);
-  const closeDiff = useCallback(() => {
-    if (!threadRef) {
-      return;
-    }
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(threadRef),
-      search: { diff: undefined },
-    });
-  }, [navigate, threadRef]);
-  const openDiff = useCallback(() => {
-    if (!threadRef) {
-      return;
-    }
-    markDiffOpened();
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(threadRef),
-      search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1" };
-      },
-    });
-  }, [markDiffOpened, navigate, threadRef]);
+  const shouldUseWorkbenchSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const [mobilePane, setMobilePane] = useState<MobileWorkbenchPane>("chat");
+  const inlineLayoutRef = useRef<HTMLDivElement | null>(null);
+  const [inlineChatPaneWidth, setInlineChatPaneWidth] = useState(readInitialInlineChatPaneWidth);
+  const splitResizeRef = useRef<{
+    readonly containerWidth: number;
+    readonly pointerId: number;
+    readonly startWidth: number;
+    readonly startX: number;
+  } | null>(null);
 
   useEffect(() => {
-    if (!threadRef || !bootstrapComplete) {
-      return;
-    }
-
+    if (!threadRef || !bootstrapComplete) return;
     if (!routeThreadExists && environmentHasAnyThreads) {
       void navigate({ to: "/", replace: true });
     }
   }, [bootstrapComplete, environmentHasAnyThreads, navigate, routeThreadExists, threadRef]);
 
   useEffect(() => {
-    if (!threadRef || !serverThreadStarted || !draftThread?.promotedTo) {
-      return;
-    }
+    if (!threadRef || !serverThreadStarted || !draftThread?.promotedTo) return;
     finalizePromotedDraftThreadByRef(threadRef);
   }, [draftThread?.promotedTo, serverThreadStarted, threadRef]);
+
+  useEffect(() => {
+    if (!shouldUseWorkbenchSheet) {
+      setMobilePane("chat");
+      return;
+    }
+
+    return subscribeWorkbenchOpen(() => {
+      setMobilePane("workbench");
+    });
+  }, [shouldUseWorkbenchSheet]);
+
+  useEffect(() => {
+    if (shouldUseWorkbenchSheet) return;
+    const container = inlineLayoutRef.current;
+    if (!container) return;
+
+    const clampToContainer = () => {
+      const containerWidth = container.getBoundingClientRect().width;
+      setInlineChatPaneWidth((current) => clampInlineChatPaneWidth(current, containerWidth));
+    };
+    clampToContainer();
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(clampToContainer);
+    resizeObserver?.observe(container);
+    return () => {
+      resizeObserver?.disconnect();
+    };
+  }, [shouldUseWorkbenchSheet]);
+
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      const resize = splitResizeRef.current;
+      if (!resize || event.pointerId !== resize.pointerId) return;
+      const next = clampInlineChatPaneWidth(
+        resize.startWidth + event.clientX - resize.startX,
+        resize.containerWidth,
+      );
+      setInlineChatPaneWidth(next);
+    };
+
+    const stopResize = (event: PointerEvent) => {
+      const resize = splitResizeRef.current;
+      if (!resize || event.pointerId !== resize.pointerId) return;
+      splitResizeRef.current = null;
+      document.body.style.removeProperty("cursor");
+      document.body.style.removeProperty("user-select");
+      const next = clampInlineChatPaneWidth(
+        resize.startWidth + event.clientX - resize.startX,
+        resize.containerWidth,
+      );
+      window.localStorage.setItem(INLINE_SPLIT_STORAGE_KEY, String(next));
+      setInlineChatPaneWidth(next);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+  }, []);
+
+  const startInlineSplitResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const container = inlineLayoutRef.current;
+    if (!container) return;
+    const containerWidth = container.getBoundingClientRect().width;
+    const currentWidth =
+      event.currentTarget.previousElementSibling?.getBoundingClientRect().width ??
+      INLINE_CHAT_PANE_DEFAULT_WIDTH;
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    splitResizeRef.current = {
+      containerWidth,
+      pointerId: event.pointerId,
+      startWidth: currentWidth,
+      startX: event.clientX,
+    };
+  }, []);
 
   if (!threadRef || !bootstrapComplete || !routeThreadExists) {
     return null;
   }
 
-  const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
-
-  if (!shouldUseDiffSheet) {
-    return (
-      <>
-        <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
+  return (
+    <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
+      <div ref={inlineLayoutRef} className="flex h-full min-h-0 min-w-0">
+        <div
+          data-thread-message-pane="true"
+          className={cn(
+            "flex min-h-0 min-w-0 flex-1 flex-col",
+            shouldUseWorkbenchSheet ? null : "shrink-0 grow-0",
+          )}
+          style={shouldUseWorkbenchSheet ? undefined : { flexBasis: inlineChatPaneWidth }}
+        >
           <LazyChatView
             environmentId={threadRef.environmentId}
             threadId={threadRef.threadId}
-            onDiffPanelOpen={markDiffOpened}
-            reserveTitleBarControlInset={!diffOpen}
             routeKind="server"
+            mobileWorkbenchAvailable={shouldUseWorkbenchSheet}
+            mobileWorkbenchPane={mobilePane}
+            onMobileWorkbenchPaneChange={setMobilePane}
+            {...(shouldUseWorkbenchSheet
+              ? {
+                  mobileWorkbenchContent: (
+                    <WorkspaceWorkbench
+                      environmentId={threadRef.environmentId}
+                      threadId={threadRef.threadId}
+                      embedded
+                      onSwitchToChat={() => setMobilePane("chat")}
+                    />
+                  ),
+                }
+              : {})}
           />
-        </SidebarInset>
-        <DiffPanelInlineSidebar
-          diffOpen={diffOpen}
-          onCloseDiff={closeDiff}
-          onOpenDiff={openDiff}
-          renderDiffContent={shouldRenderDiffContent}
-        />
-      </>
-    );
-  }
-
-  return (
-    <>
-      <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
-        <LazyChatView
-          environmentId={threadRef.environmentId}
-          threadId={threadRef.threadId}
-          onDiffPanelOpen={markDiffOpened}
-          routeKind="server"
-        />
-      </SidebarInset>
-      <RightPanelSheet open={diffOpen} onClose={closeDiff}>
-        {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
-      </RightPanelSheet>
-    </>
+        </div>
+        {!shouldUseWorkbenchSheet ? (
+          <>
+            <div
+              aria-label="Resize chat and workbench panes"
+              aria-orientation="vertical"
+              className={PANE_RESIZE_RAIL_CLASS}
+              role="separator"
+              tabIndex={0}
+              onPointerDown={startInlineSplitResize}
+            />
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <WorkspaceWorkbench
+                environmentId={threadRef.environmentId}
+                threadId={threadRef.threadId}
+              />
+            </div>
+          </>
+        ) : null}
+      </div>
+    </SidebarInset>
   );
 }
 
 export const Route = createFileRoute("/_chat/$environmentId/$threadId")({
-  validateSearch: (search) => parseDiffRouteSearch(search),
-  search: {
-    middlewares: [retainSearchParams<DiffRouteSearch>(["diff"])],
-  },
   component: ChatThreadRouteView,
 });

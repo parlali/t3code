@@ -503,9 +503,40 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     },
   );
 
+  const list: WorkspaceEntriesShape["list"] = Effect.fn("WorkspaceEntries.list")(function* (input) {
+    const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+    return yield* Cache.get(workspaceIndexCache, normalizedCwd).pipe(
+      Effect.map((index) => {
+        const limit = Math.max(0, Math.floor(input.limit));
+        return {
+          entries: index.entries
+            .map(
+              (entry): ProjectEntry => ({
+                path: entry.path,
+                kind: entry.kind,
+                ...(entry.parentPath ? { parentPath: entry.parentPath } : {}),
+              }),
+            )
+            .toSorted((left, right) => {
+              if (left.kind !== right.kind) {
+                return left.kind === "directory" ? -1 : 1;
+              }
+              return left.path.localeCompare(right.path, undefined, {
+                numeric: true,
+                sensitivity: "base",
+              });
+            })
+            .slice(0, limit),
+          truncated: index.truncated || index.entries.length > limit,
+        };
+      }),
+    );
+  });
+
   return {
     browse,
     invalidate,
+    list,
     search,
   } satisfies WorkspaceEntriesShape;
 });

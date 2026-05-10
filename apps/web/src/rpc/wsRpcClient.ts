@@ -75,6 +75,8 @@ export interface WsRpcClient {
   };
   readonly projects: {
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
+    readonly listEntries: RpcUnaryMethod<typeof WS_METHODS.projectsListEntries>;
+    readonly readFile: RpcUnaryMethod<typeof WS_METHODS.projectsReadFile>;
     readonly writeFile: RpcUnaryMethod<typeof WS_METHODS.projectsWriteFile>;
   };
   readonly filesystem: {
@@ -93,6 +95,10 @@ export interface WsRpcClient {
   };
   readonly vcs: {
     readonly diff: RpcUnaryMethod<typeof WS_METHODS.vcsDiff>;
+    readonly fileDiff: RpcUnaryMethod<typeof WS_METHODS.vcsFileDiff>;
+    readonly stageFile: RpcUnaryMethod<typeof WS_METHODS.vcsStageFile>;
+    readonly revertFile: RpcUnaryMethod<typeof WS_METHODS.vcsRevertFile>;
+    readonly applyPatch: RpcUnaryMethod<typeof WS_METHODS.vcsApplyPatch>;
     readonly pull: RpcUnaryMethod<typeof WS_METHODS.vcsPull>;
     readonly refreshStatus: RpcUnaryMethod<typeof WS_METHODS.vcsRefreshStatus>;
     readonly onStatus: (
@@ -209,6 +215,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
     projects: {
       searchEntries: (input) =>
         transport.request((client) => client[WS_METHODS.projectsSearchEntries](input)),
+      listEntries: (input) =>
+        transport.request((client) => client[WS_METHODS.projectsListEntries](input)),
+      readFile: (input) =>
+        transport.request((client) => client[WS_METHODS.projectsReadFile](input)),
       writeFile: (input) =>
         transport.request((client) => client[WS_METHODS.projectsWriteFile](input)),
     },
@@ -229,6 +239,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
     },
     vcs: {
       diff: (input) => transport.request((client) => client[WS_METHODS.vcsDiff](input)),
+      fileDiff: (input) => transport.request((client) => client[WS_METHODS.vcsFileDiff](input)),
+      stageFile: (input) => transport.request((client) => client[WS_METHODS.vcsStageFile](input)),
+      revertFile: (input) => transport.request((client) => client[WS_METHODS.vcsRevertFile](input)),
+      applyPatch: (input) => transport.request((client) => client[WS_METHODS.vcsApplyPatch](input)),
       pull: (input) => transport.request((client) => client[WS_METHODS.vcsPull](input)),
       refreshStatus: (input) =>
         transport.request((client) => client[WS_METHODS.vcsRefreshStatus](input)),

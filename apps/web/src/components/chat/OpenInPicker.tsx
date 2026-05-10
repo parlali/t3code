@@ -85,10 +85,12 @@ export const OpenInPicker = memo(function OpenInPicker({
   keybindings,
   availableEditors,
   openInCwd,
+  display = "group",
 }: {
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
   openInCwd: string | null;
+  display?: "group" | "items" | "menu";
 }) {
   const [preferredEditor, setPreferredEditor] = usePreferredEditor(availableEditors);
   const options = useMemo(
@@ -96,6 +98,8 @@ export const OpenInPicker = memo(function OpenInPicker({
     [availableEditors],
   );
   const primaryOption = options.find(({ value }) => value === preferredEditor) ?? null;
+  const triggerSize = display === "items" ? "sm" : "xs";
+  const iconTriggerSize = display === "items" ? "icon-sm" : "icon-xs";
 
   const openInEditor = useCallback(
     (editorId: EditorId | null) => {
@@ -128,10 +132,27 @@ export const OpenInPicker = memo(function OpenInPicker({
     return () => window.removeEventListener("keydown", handler);
   }, [preferredEditor, keybindings, openInCwd]);
 
-  return (
-    <Group aria-label="Subscription actions">
+  if (display === "menu") {
+    return (
+      <>
+        {options.length === 0 && <MenuItem disabled>No installed editors found</MenuItem>}
+        {options.map(({ label, Icon, value }) => (
+          <MenuItem key={value} onClick={() => openInEditor(value)} disabled={!openInCwd}>
+            <Icon aria-hidden="true" className="text-muted-foreground" />
+            {label}
+            {value === preferredEditor && openFavoriteEditorShortcutLabel && (
+              <MenuShortcut>{openFavoriteEditorShortcutLabel}</MenuShortcut>
+            )}
+          </MenuItem>
+        ))}
+      </>
+    );
+  }
+
+  const groupItems = (
+    <>
       <Button
-        size="xs"
+        size={triggerSize}
         variant="outline"
         disabled={!preferredEditor || !openInCwd}
         onClick={() => openInEditor(preferredEditor)}
@@ -143,7 +164,9 @@ export const OpenInPicker = memo(function OpenInPicker({
       </Button>
       <GroupSeparator className="hidden @3xl/header-actions:block" />
       <Menu>
-        <MenuTrigger render={<Button aria-label="Copy options" size="icon-xs" variant="outline" />}>
+        <MenuTrigger
+          render={<Button aria-label="Editor options" size={iconTriggerSize} variant="outline" />}
+        >
           <ChevronDownIcon aria-hidden="true" className="size-4" />
         </MenuTrigger>
         <MenuPopup align="end">
@@ -159,6 +182,12 @@ export const OpenInPicker = memo(function OpenInPicker({
           ))}
         </MenuPopup>
       </Menu>
-    </Group>
+    </>
   );
+
+  if (display === "items") {
+    return groupItems;
+  }
+
+  return <Group aria-label="Open in editor">{groupItems}</Group>;
 });

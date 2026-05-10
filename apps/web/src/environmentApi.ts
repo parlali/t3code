@@ -27,6 +27,8 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     },
     projects: {
       searchEntries: rpcClient.projects.searchEntries,
+      listEntries: rpcClient.projects.listEntries,
+      readFile: rpcClient.projects.readFile,
       writeFile: rpcClient.projects.writeFile,
     },
     filesystem: {
@@ -39,6 +41,10 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     },
     vcs: {
       diff: rpcClient.vcs.diff,
+      fileDiff: rpcClient.vcs.fileDiff,
+      stageFile: rpcClient.vcs.stageFile,
+      revertFile: rpcClient.vcs.revertFile,
+      applyPatch: rpcClient.vcs.applyPatch,
       pull: rpcClient.vcs.pull,
       refreshStatus: rpcClient.vcs.refreshStatus,
       onStatus: (input, callback, options) => rpcClient.vcs.onStatus(input, callback, options),

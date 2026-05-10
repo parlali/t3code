@@ -34,7 +34,6 @@ import {
   wrappedTerminalLinkRangeIntersectsBufferLine,
 } from "../terminal-links";
 import {
-  isDiffToggleShortcut,
   isTerminalClearShortcut,
   isTerminalCloseShortcut,
   isTerminalNewShortcut,
@@ -464,8 +463,7 @@ export function TerminalViewport({
         isTerminalToggleShortcut(event, currentKeybindings, options) ||
         isTerminalSplitShortcut(event, currentKeybindings, options) ||
         isTerminalNewShortcut(event, currentKeybindings, options) ||
-        isTerminalCloseShortcut(event, currentKeybindings, options) ||
-        isDiffToggleShortcut(event, currentKeybindings, options)
+        isTerminalCloseShortcut(event, currentKeybindings, options)
       ) {
         return false;
       }

@@ -9,6 +9,9 @@ import {
   type VcsCreateRefResult,
   type VcsDiffInput,
   type VcsDiffResult,
+  type VcsFileDiffResult,
+  type VcsFileInput,
+  type VcsApplyPatchInput,
   type VcsCreateWorktreeInput,
   type VcsCreateWorktreeResult,
   type VcsListRefsInput,
@@ -47,6 +50,10 @@ export interface GitWorkflowServiceShape {
   readonly invalidateStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
   readonly diff: (input: VcsDiffInput) => Effect.Effect<VcsDiffResult, GitCommandError>;
+  readonly fileDiff: (input: VcsFileInput) => Effect.Effect<VcsFileDiffResult, GitCommandError>;
+  readonly stageFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
+  readonly revertFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
+  readonly applyPatch: (input: VcsApplyPatchInput) => Effect.Effect<void, GitCommandError>;
   readonly runStackedAction: (
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
@@ -275,6 +282,22 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
       ),
     diff: (input) =>
       ensureGitCommand("GitWorkflowService.diff", input.cwd).pipe(Effect.andThen(git.diff(input))),
+    fileDiff: (input) =>
+      ensureGitCommand("GitWorkflowService.fileDiff", input.cwd).pipe(
+        Effect.andThen(git.fileDiff(input)),
+      ),
+    stageFile: (input) =>
+      ensureGitCommand("GitWorkflowService.stageFile", input.cwd).pipe(
+        Effect.andThen(git.stageFile(input)),
+      ),
+    revertFile: (input) =>
+      ensureGitCommand("GitWorkflowService.revertFile", input.cwd).pipe(
+        Effect.andThen(git.revertFile(input)),
+      ),
+    applyPatch: (input) =>
+      ensureGitCommand("GitWorkflowService.applyPatch", input.cwd).pipe(
+        Effect.andThen(git.applyPatch(input)),
+      ),
     runStackedAction: (input, options) =>
       ensureGit("GitWorkflowService.runStackedAction", input.cwd).pipe(
         Effect.andThen(gitManager.runStackedAction(input, options)),

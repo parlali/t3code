@@ -1,16 +1,15 @@
 "use client";
 
 import { Dialog as CommandDialogPrimitive } from "@base-ui/react/dialog";
-import { useParams } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useRef, type ReactNode } from "react";
 
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { ComposerHandleContext } from "../composerHandleContext";
+import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { resolveShortcutCommand } from "../keybindings";
 import { useServerKeybindings } from "../rpc/serverState";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
-import { resolveThreadRouteTarget } from "../threadRoutes";
 import type { ChatComposerHandle } from "./chat/ChatComposer";
 
 const CommandDialog = CommandDialogPrimitive.Root;
@@ -27,10 +26,7 @@ export function CommandPaletteShell({ children }: { children: ReactNode }) {
   const toggleOpen = useCommandPaletteStore((store) => store.toggleOpen);
   const keybindings = useServerKeybindings();
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
-  const routeTarget = useParams({
-    strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
-  });
+  const routeTarget = useThreadRouteTarget();
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const terminalOpen = useTerminalStateStore((state) =>
     routeThreadRef

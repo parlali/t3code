@@ -39,6 +39,7 @@ const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
 const WORKING_TREE_DIFF_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+const WORKING_TREE_FILE_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(5);
@@ -809,6 +810,77 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         result.stdoutTruncated ? `${result.stdout}${OUTPUT_TRUNCATED_MARKER}` : result.stdout,
       ),
     );
+
+  const normalizeGitRelativePath = Effect.fn("GitVcsDriver.normalizeGitRelativePath")(function* (
+    operation: string,
+    cwd: string,
+    relativePath: string,
+  ) {
+    const trimmed = relativePath.trim();
+    if (trimmed.length === 0 || path.isAbsolute(trimmed)) {
+      return yield* createGitCommandError(
+        operation,
+        cwd,
+        ["path", "--", relativePath],
+        "Git file path must be relative to the repository root.",
+      );
+    }
+
+    const absolutePath = path.resolve(cwd, trimmed);
+    const normalized = path.relative(cwd, absolutePath).replaceAll("\\", "/");
+    if (
+      normalized.length === 0 ||
+      normalized === "." ||
+      normalized === ".." ||
+      normalized.startsWith("../") ||
+      path.isAbsolute(normalized)
+    ) {
+      return yield* createGitCommandError(
+        operation,
+        cwd,
+        ["path", "--", relativePath],
+        "Git file path must stay within the repository root.",
+      );
+    }
+
+    return normalized;
+  });
+
+  const readWorkingTreeTextFile = Effect.fn("GitVcsDriver.readWorkingTreeTextFile")(function* (
+    cwd: string,
+    relativePath: string,
+  ) {
+    const absolutePath = path.resolve(cwd, relativePath);
+    const fileStat = yield* fileSystem
+      .stat(absolutePath)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!fileStat || fileStat.type !== "File") {
+      return "";
+    }
+
+    const fileSize = Number(fileStat.size);
+    if (Number.isFinite(fileSize) && fileSize > WORKING_TREE_FILE_MAX_OUTPUT_BYTES) {
+      return yield* createGitCommandError(
+        "GitVcsDriver.fileDiff.modified",
+        cwd,
+        ["show", "--worktree", "--", relativePath],
+        `Working tree file exceeds ${WORKING_TREE_FILE_MAX_OUTPUT_BYTES} bytes.`,
+      );
+    }
+
+    return yield* fileSystem.readFileString(absolutePath).pipe(
+      Effect.mapError(
+        toGitCommandError(
+          {
+            operation: "GitVcsDriver.fileDiff.modified",
+            cwd,
+            args: ["show", "--worktree", "--", relativePath],
+          },
+          "failed to read working tree file.",
+        ),
+      ),
+    );
+  });
 
   const branchExists = (cwd: string, refName: string): Effect.Effect<boolean, GitCommandError> =>
     executeGit(
@@ -1635,6 +1707,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   });
 
   const diff: GitVcsDriver.GitVcsDriverShape["diff"] = Effect.fn("diff")(function* (input) {
+    const relativePath = input.relativePath
+      ? yield* normalizeGitRelativePath("GitVcsDriver.diff.path", input.cwd, input.relativePath)
+      : null;
     const stdout = yield* runGitStdoutWithOptions(
       "GitVcsDriver.diff",
       input.cwd,
@@ -1644,6 +1719,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         "--minimal",
         "--no-color",
         ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+        ...(relativePath ? ["--", relativePath] : []),
       ],
       {
         maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
@@ -1653,6 +1729,106 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
     return { diff: stdout };
   });
+
+  const fileDiff: GitVcsDriver.GitVcsDriverShape["fileDiff"] = Effect.fn("fileDiff")(
+    function* (input) {
+      const relativePath = yield* normalizeGitRelativePath(
+        "GitVcsDriver.fileDiff.path",
+        input.cwd,
+        input.relativePath,
+      );
+      const diffResult = yield* diff({ cwd: input.cwd, relativePath });
+      const original = yield* runGitStdoutWithOptions(
+        "GitVcsDriver.fileDiff.original",
+        input.cwd,
+        ["show", `HEAD:${relativePath}`],
+        {
+          allowNonZeroExit: true,
+          maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
+          truncateOutputAtMaxBytes: true,
+        },
+      ).pipe(Effect.catch(() => Effect.succeed("")));
+      const modified = yield* readWorkingTreeTextFile(input.cwd, relativePath);
+
+      return {
+        relativePath,
+        original,
+        modified,
+        diff: diffResult.diff,
+      };
+    },
+  );
+
+  const stageFile: GitVcsDriver.GitVcsDriverShape["stageFile"] = Effect.fn("stageFile")(
+    function* (input) {
+      const relativePath = yield* normalizeGitRelativePath(
+        "GitVcsDriver.stageFile.path",
+        input.cwd,
+        input.relativePath,
+      );
+      yield* runGit("GitVcsDriver.stageFile", input.cwd, ["add", "--", relativePath]);
+    },
+  );
+
+  const revertFile: GitVcsDriver.GitVcsDriverShape["revertFile"] = Effect.fn("revertFile")(
+    function* (input) {
+      const relativePath = yield* normalizeGitRelativePath(
+        "GitVcsDriver.revertFile.path",
+        input.cwd,
+        input.relativePath,
+      );
+      const untrackedStdout = yield* runGitStdout("GitVcsDriver.revertFile.untracked", input.cwd, [
+        "ls-files",
+        "--others",
+        "--exclude-standard",
+        "--",
+        relativePath,
+      ]);
+      const isUntracked = untrackedStdout
+        .split(/\r?\n/g)
+        .some((line) => line.trim() === relativePath);
+      if (isUntracked) {
+        yield* fileSystem
+          .remove(path.resolve(input.cwd, relativePath), {
+            force: true,
+            recursive: true,
+          })
+          .pipe(
+            Effect.mapError(
+              toGitCommandError(
+                {
+                  operation: "GitVcsDriver.revertFile.removeUntracked",
+                  cwd: input.cwd,
+                  args: ["rm", "--", relativePath],
+                },
+                "failed to remove untracked file.",
+              ),
+            ),
+          );
+        return;
+      }
+      yield* runGit("GitVcsDriver.revertFile", input.cwd, [
+        "restore",
+        "--worktree",
+        "--",
+        relativePath,
+      ]);
+    },
+  );
+
+  const applyPatch: GitVcsDriver.GitVcsDriverShape["applyPatch"] = Effect.fn("applyPatch")(
+    function* (input) {
+      yield* runGitStdoutWithOptions(
+        "GitVcsDriver.applyPatch",
+        input.cwd,
+        input.mode === "stage" ? ["apply", "--cached", "-"] : ["apply", "--reverse", "-"],
+        {
+          stdin: input.patch,
+          maxOutputBytes: DEFAULT_MAX_OUTPUT_BYTES,
+        },
+      );
+    },
+  );
 
   const readConfigValue: GitVcsDriver.GitVcsDriverShape["readConfigValue"] = (cwd, key) =>
     runGitStdout("GitVcsDriver.readConfigValue", cwd, ["config", "--get", key], true).pipe(
@@ -2148,6 +2324,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     pushCurrentBranch,
     pullCurrentBranch,
     diff,
+    fileDiff,
+    stageFile,
+    revertFile,
+    applyPatch,
     readRangeContext,
     readConfigValue,
     listRefs,

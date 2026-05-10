@@ -90,6 +90,7 @@ interface ProjectScriptsControlProps {
   scripts: ProjectScript[];
   keybindings: ResolvedKeybindingsConfig;
   preferredScriptId?: string | null;
+  display?: "group" | "items" | "menu";
   onRunScript: (script: ProjectScript) => void;
   onAddScript: (input: NewProjectScriptInput) => Promise<void> | void;
   onUpdateScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void> | void;
@@ -151,6 +152,7 @@ export default function ProjectScriptsControl({
   scripts,
   keybindings,
   preferredScriptId = null,
+  display = "group",
   onRunScript,
   onAddScript,
   onUpdateScript,
@@ -178,6 +180,8 @@ export default function ProjectScriptsControl({
   const isEditing = editingScriptId !== null;
   const dropdownItemClassName =
     "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground";
+  const triggerSize = display === "items" ? "sm" : "xs";
+  const iconTriggerSize = display === "items" ? "icon-sm" : "icon-xs";
 
   const captureKeybinding = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Tab") return;
@@ -266,86 +270,106 @@ export default function ProjectScriptsControl({
     void onDeleteScript(editingScriptId);
   }, [editingScriptId, onDeleteScript]);
 
+  const menuItems = (
+    <>
+      {scripts.map((script) => {
+        const shortcutLabel = shortcutLabelForCommand(
+          keybindings,
+          commandForProjectScript(script.id),
+        );
+        return (
+          <MenuItem
+            key={script.id}
+            className={`group ${dropdownItemClassName}`}
+            onClick={() => onRunScript(script)}
+          >
+            <ScriptIcon icon={script.icon} className="size-4" />
+            <span className="truncate">
+              {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
+            </span>
+            <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
+              {shortcutLabel && (
+                <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
+                  {shortcutLabel}
+                </MenuShortcut>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="pointer-events-none absolute top-1/2 right-0 size-6 -translate-y-1/2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100"
+                aria-label={`Edit ${script.name}`}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  openEditDialog(script);
+                }}
+              >
+                <SettingsIcon className="size-3.5" />
+              </Button>
+            </span>
+          </MenuItem>
+        );
+      })}
+      <MenuItem
+        className={dropdownItemClassName}
+        onClick={(event) => {
+          event.preventDefault();
+          openAddDialog();
+        }}
+      >
+        <PlusIcon className="size-4" />
+        Add action
+      </MenuItem>
+    </>
+  );
+
+  const groupItems = primaryScript ? (
+    <>
+      <Button
+        size={triggerSize}
+        variant="outline"
+        onClick={() => onRunScript(primaryScript)}
+        title={`Run ${primaryScript.name}`}
+      >
+        <ScriptIcon icon={primaryScript.icon} />
+        <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+          {primaryScript.name}
+        </span>
+      </Button>
+      <GroupSeparator className="hidden @3xl/header-actions:block" />
+      <Menu highlightItemOnHover={false}>
+        <MenuTrigger
+          render={<Button size={iconTriggerSize} variant="outline" aria-label="Script actions" />}
+        >
+          <ChevronDownIcon className="size-4" />
+        </MenuTrigger>
+        <MenuPopup align="end">{menuItems}</MenuPopup>
+      </Menu>
+    </>
+  ) : (
+    <Button size={triggerSize} variant="outline" onClick={openAddDialog} title="Add action">
+      <PlusIcon className="size-3.5" />
+      <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+        Add action
+      </span>
+    </Button>
+  );
+
   return (
     <>
-      {primaryScript ? (
-        <Group aria-label="Project scripts">
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() => onRunScript(primaryScript)}
-            title={`Run ${primaryScript.name}`}
-          >
-            <ScriptIcon icon={primaryScript.icon} />
-            <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-              {primaryScript.name}
-            </span>
-          </Button>
-          <GroupSeparator className="hidden @3xl/header-actions:block" />
-          <Menu highlightItemOnHover={false}>
-            <MenuTrigger
-              render={<Button size="icon-xs" variant="outline" aria-label="Script actions" />}
-            >
-              <ChevronDownIcon className="size-4" />
-            </MenuTrigger>
-            <MenuPopup align="end">
-              {scripts.map((script) => {
-                const shortcutLabel = shortcutLabelForCommand(
-                  keybindings,
-                  commandForProjectScript(script.id),
-                );
-                return (
-                  <MenuItem
-                    key={script.id}
-                    className={`group ${dropdownItemClassName}`}
-                    onClick={() => onRunScript(script)}
-                  >
-                    <ScriptIcon icon={script.icon} className="size-4" />
-                    <span className="truncate">
-                      {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
-                    </span>
-                    <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
-                      {shortcutLabel && (
-                        <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
-                          {shortcutLabel}
-                        </MenuShortcut>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
-                        aria-label={`Edit ${script.name}`}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          openEditDialog(script);
-                        }}
-                      >
-                        <SettingsIcon className="size-3.5" />
-                      </Button>
-                    </span>
-                  </MenuItem>
-                );
-              })}
-              <MenuItem className={dropdownItemClassName} onClick={openAddDialog}>
-                <PlusIcon className="size-4" />
-                Add action
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
-        </Group>
+      {display === "menu" ? (
+        menuItems
+      ) : display === "items" ? (
+        groupItems
+      ) : primaryScript ? (
+        <Group aria-label="Project scripts">{groupItems}</Group>
       ) : (
-        <Button size="xs" variant="outline" onClick={openAddDialog} title="Add action">
-          <PlusIcon className="size-3.5" />
-          <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-            Add action
-          </span>
-        </Button>
+        groupItems
       )}
 
       <Dialog

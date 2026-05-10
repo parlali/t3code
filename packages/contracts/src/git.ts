@@ -5,6 +5,10 @@ import { VcsDriverKind } from "./vcs.ts";
 
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const GIT_LIST_BRANCHES_MAX_LIMIT = 200;
+const VCS_RELATIVE_PATH_MAX_LENGTH = 512;
+const VcsRelativePath = TrimmedNonEmptyStringSchema.check(
+  Schema.isMaxLength(VCS_RELATIVE_PATH_MAX_LENGTH),
+);
 
 // Domain Types
 
@@ -112,8 +116,22 @@ export type VcsPullInput = typeof VcsPullInput.Type;
 export const VcsDiffInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   ignoreWhitespace: Schema.optional(Schema.Boolean),
+  relativePath: Schema.optional(VcsRelativePath),
 });
 export type VcsDiffInput = typeof VcsDiffInput.Type;
+
+export const VcsFileInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  relativePath: VcsRelativePath,
+});
+export type VcsFileInput = typeof VcsFileInput.Type;
+
+export const VcsApplyPatchInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  patch: Schema.String.check(Schema.isMaxLength(1_000_000)),
+  mode: Schema.Literals(["stage", "revert"]),
+});
+export type VcsApplyPatchInput = typeof VcsApplyPatchInput.Type;
 
 export const GitRunStackedActionInput = Schema.Struct({
   actionId: TrimmedNonEmptyStringSchema,
@@ -326,6 +344,14 @@ export const VcsDiffResult = Schema.Struct({
   diff: Schema.String,
 });
 export type VcsDiffResult = typeof VcsDiffResult.Type;
+
+export const VcsFileDiffResult = Schema.Struct({
+  relativePath: TrimmedNonEmptyStringSchema,
+  original: Schema.String,
+  modified: Schema.String,
+  diff: Schema.String,
+});
+export type VcsFileDiffResult = typeof VcsFileDiffResult.Type;
 
 // RPC / domain errors
 export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()("GitCommandError", {

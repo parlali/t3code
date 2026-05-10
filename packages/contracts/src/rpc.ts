@@ -26,6 +26,9 @@ import {
   GitPreparePullRequestThreadResult,
   VcsDiffInput,
   VcsDiffResult,
+  VcsFileDiffResult,
+  VcsFileInput,
+  VcsApplyPatchInput,
   VcsPullInput,
   GitPullRequestRefInput,
   VcsPullResult,
@@ -55,6 +58,12 @@ import {
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectListEntriesError,
+  ProjectListEntriesInput,
+  ProjectListEntriesResult,
+  ProjectReadFileError,
+  ProjectReadFileInput,
+  ProjectReadFileResult,
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
@@ -108,6 +117,8 @@ export const WS_METHODS = {
   projectsAdd: "projects.add",
   projectsRemove: "projects.remove",
   projectsSearchEntries: "projects.searchEntries",
+  projectsListEntries: "projects.listEntries",
+  projectsReadFile: "projects.readFile",
   projectsWriteFile: "projects.writeFile",
 
   // Shell methods
@@ -118,6 +129,10 @@ export const WS_METHODS = {
 
   // VCS methods
   vcsDiff: "vcs.diff",
+  vcsFileDiff: "vcs.fileDiff",
+  vcsStageFile: "vcs.stageFile",
+  vcsRevertFile: "vcs.revertFile",
+  vcsApplyPatch: "vcs.applyPatch",
   vcsPull: "vcs.pull",
   vcsRefreshStatus: "vcs.refreshStatus",
   vcsListRefs: "vcs.listRefs",
@@ -240,6 +255,18 @@ export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntr
   error: ProjectSearchEntriesError,
 });
 
+export const WsProjectsListEntriesRpc = Rpc.make(WS_METHODS.projectsListEntries, {
+  payload: ProjectListEntriesInput,
+  success: ProjectListEntriesResult,
+  error: ProjectListEntriesError,
+});
+
+export const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
+  payload: ProjectReadFileInput,
+  success: ProjectReadFileResult,
+  error: ProjectReadFileError,
+});
+
 export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
   success: ProjectWriteFileResult,
@@ -273,6 +300,27 @@ export const WsVcsPullRpc = Rpc.make(WS_METHODS.vcsPull, {
 export const WsVcsDiffRpc = Rpc.make(WS_METHODS.vcsDiff, {
   payload: VcsDiffInput,
   success: VcsDiffResult,
+  error: GitCommandError,
+});
+
+export const WsVcsFileDiffRpc = Rpc.make(WS_METHODS.vcsFileDiff, {
+  payload: VcsFileInput,
+  success: VcsFileDiffResult,
+  error: GitCommandError,
+});
+
+export const WsVcsStageFileRpc = Rpc.make(WS_METHODS.vcsStageFile, {
+  payload: VcsFileInput,
+  error: GitCommandError,
+});
+
+export const WsVcsRevertFileRpc = Rpc.make(WS_METHODS.vcsRevertFile, {
+  payload: VcsFileInput,
+  error: GitCommandError,
+});
+
+export const WsVcsApplyPatchRpc = Rpc.make(WS_METHODS.vcsApplyPatch, {
+  payload: VcsApplyPatchInput,
   error: GitCommandError,
 });
 
@@ -489,11 +537,17 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
   WsProjectsSearchEntriesRpc,
+  WsProjectsListEntriesRpc,
+  WsProjectsReadFileRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsSubscribeVcsStatusRpc,
   WsVcsDiffRpc,
+  WsVcsFileDiffRpc,
+  WsVcsStageFileRpc,
+  WsVcsRevertFileRpc,
+  WsVcsApplyPatchRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,

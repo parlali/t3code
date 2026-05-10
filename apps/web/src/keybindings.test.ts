@@ -10,7 +10,6 @@ import {
   formatShortcutLabel,
   isChatNewShortcut,
   isChatNewLocalShortcut,
-  isDiffToggleShortcut,
   modelPickerJumpCommandForIndex,
   modelPickerJumpIndexFromCommand,
   isOpenFavoriteEditorShortcut,
@@ -99,11 +98,6 @@ const DEFAULT_BINDINGS = compile([
     shortcut: modShortcut("w"),
     command: "terminal.close",
     whenAst: whenIdentifier("terminalFocus"),
-  },
-  {
-    shortcut: modShortcut("d"),
-    command: "diff.toggle",
-    whenAst: whenNot(whenIdentifier("terminalFocus")),
   },
   {
     shortcut: modShortcut("k"),
@@ -286,7 +280,6 @@ describe("shortcutLabelForCommand", () => {
 
   it("returns effective labels for non-terminal commands", () => {
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "chat.new", "MacIntel"), "⇧⌘O");
-    assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "diff.toggle", "Linux"), "Ctrl+D");
     assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "commandPalette.toggle", "MacIntel"),
       "⌘K",
@@ -328,7 +321,7 @@ describe("shortcutLabelForCommand", () => {
 
   it("respects when-context while resolving labels", () => {
     const bindings = compile([
-      { shortcut: modShortcut("d"), command: "diff.toggle" },
+      { shortcut: modShortcut("d"), command: "chat.new" },
       {
         shortcut: modShortcut("d"),
         command: "terminal.split",
@@ -337,14 +330,14 @@ describe("shortcutLabelForCommand", () => {
     ]);
 
     assert.strictEqual(
-      shortcutLabelForCommand(bindings, "diff.toggle", {
+      shortcutLabelForCommand(bindings, "chat.new", {
         platform: "Linux",
         context: { terminalFocus: false },
       }),
       "Ctrl+D",
     );
     assert.isNull(
-      shortcutLabelForCommand(bindings, "diff.toggle", {
+      shortcutLabelForCommand(bindings, "chat.new", {
         platform: "Linux",
         context: { terminalFocus: true },
       }),
@@ -475,21 +468,6 @@ describe("chat/editor shortcuts", () => {
         context: { terminalFocus: true },
       }),
       "commandPalette.toggle",
-    );
-  });
-
-  it("matches diff.toggle shortcut outside terminal focus", () => {
-    assert.isTrue(
-      isDiffToggleShortcut(event({ key: "d", metaKey: true }), DEFAULT_BINDINGS, {
-        platform: "MacIntel",
-        context: { terminalFocus: false },
-      }),
-    );
-    assert.isFalse(
-      isDiffToggleShortcut(event({ key: "d", metaKey: true }), DEFAULT_BINDINGS, {
-        platform: "MacIntel",
-        context: { terminalFocus: true },
-      }),
     );
   });
 });

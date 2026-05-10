@@ -148,6 +148,41 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
     );
   });
 
+  describe("working tree file operations", () => {
+    it.effect("rejects file paths outside the repository root", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const error = yield* driver
+          .fileDiff({ cwd, relativePath: "../outside.txt" })
+          .pipe(Effect.flip);
+
+        assert.ok(error.message.includes("must stay within the repository root"));
+      }),
+    );
+
+    it.effect("removes untracked files when reverting them", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        yield* writeTextFile(cwd, "scratch.txt", "temporary\n");
+        yield* driver.revertFile({ cwd, relativePath: "scratch.txt" });
+
+        const exists = yield* fileSystem.stat(path.join(cwd, "scratch.txt")).pipe(
+          Effect.as(true),
+          Effect.catch(() => Effect.succeed(false)),
+        );
+        assert.equal(exists, false);
+      }),
+    );
+  });
+
   describe("refName operations", () => {
     it.effect("creates, checks out, renames, and lists refs", () =>
       Effect.gen(function* () {
