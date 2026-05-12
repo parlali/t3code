@@ -21,13 +21,13 @@ describe("resolveDesktopAppStageLabel", () => {
     ).toBe("Nightly");
   });
 
-  it("uses Alpha for packaged stable builds", () => {
+  it("omits the stage label for packaged stable builds", () => {
     expect(
       resolveDesktopAppStageLabel({
         isDevelopment: false,
         appVersion: "0.0.17",
       }),
-    ).toBe("Alpha");
+    ).toBeNull();
   });
 });
 
@@ -36,12 +36,12 @@ describe("resolveDesktopAppBranding", () => {
     expect(
       resolveDesktopAppBranding({
         isDevelopment: false,
-        appVersion: "0.0.17-nightly.20260414.1",
+        appVersion: "0.0.17",
       }),
     ).toEqual({
       baseName: "T3 Code",
-      stageLabel: "Nightly",
-      displayName: "T3 Code (Nightly)",
+      stageLabel: null,
+      displayName: "T3 Code",
     });
   });
 });

@@ -1,23 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { lazy, Suspense, useEffect, useMemo, type ComponentProps } from "react";
+import { useEffect, useMemo } from "react";
 import { threadHasStarted } from "../components/ChatView.logic";
+import { ChatWorkspaceLayout } from "../components/ChatWorkspaceLayout";
 import { useComposerDraftStore, DraftId } from "../composerDraftStore";
-import { SidebarInset } from "../components/ui/sidebar";
 import { createThreadSelectorAcrossEnvironments } from "../storeSelectors";
 import { useStore } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
-
-const ChatView = lazy(() => import("../components/ChatView"));
-
-const ChatViewLoadingFallback = () => (
-  <div className="h-full min-h-0 bg-background text-foreground" aria-busy="true" />
-);
-
-const LazyChatView = (props: ComponentProps<typeof ChatView>) => (
-  <Suspense fallback={<ChatViewLoadingFallback />}>
-    <ChatView {...props} />
-  </Suspense>
-);
 
 function DraftChatThreadRouteView() {
   const navigate = useNavigate();
@@ -66,13 +54,11 @@ function DraftChatThreadRouteView() {
 
   if (canonicalThreadRef) {
     return (
-      <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
-        <LazyChatView
-          environmentId={canonicalThreadRef.environmentId}
-          threadId={canonicalThreadRef.threadId}
-          routeKind="server"
-        />
-      </SidebarInset>
+      <ChatWorkspaceLayout
+        environmentId={canonicalThreadRef.environmentId}
+        threadId={canonicalThreadRef.threadId}
+        routeKind="server"
+      />
     );
   }
 
@@ -81,14 +67,12 @@ function DraftChatThreadRouteView() {
   }
 
   return (
-    <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
-      <LazyChatView
-        draftId={draftId}
-        environmentId={draftSession.environmentId}
-        threadId={draftSession.threadId}
-        routeKind="draft"
-      />
-    </SidebarInset>
+    <ChatWorkspaceLayout
+      draftId={draftId}
+      environmentId={draftSession.environmentId}
+      threadId={draftSession.threadId}
+      routeKind="draft"
+    />
   );
 }
 

@@ -91,6 +91,18 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
       markUnread: vi.fn(async () => undefined),
       subscribe: vi.fn(() => () => undefined),
     },
+    threadWorkbench: {
+      getState: vi.fn(async () => ({
+        threadId: "thread-1",
+        selection: null,
+        updatedAt: new Date().toISOString(),
+      })),
+      setState: vi.fn(async (input: any) => ({
+        threadId: input.threadId,
+        selection: input.selection,
+        updatedAt: new Date().toISOString(),
+      })),
+    },
     projects: {
       searchEntries: vi.fn(async () => []),
       writeFile: vi.fn(async () => undefined),
@@ -105,6 +117,7 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
         ...BASE_STATUS,
         refName: `${input.cwd}-refreshed`,
       })),
+      commitGraph: vi.fn(async () => ({ rows: [], isRepo: true, truncated: false })),
       onStatus: vi.fn((_: { cwd: string }, listener: (event: VcsStatusResult) => void) =>
         registerListener(listeners, listener),
       ),

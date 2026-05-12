@@ -17,13 +17,19 @@ import { requireEnvironmentConnection } from "../environments/runtime";
 const GIT_BRANCHES_STALE_TIME_MS = 15_000;
 const GIT_BRANCHES_REFETCH_INTERVAL_MS = 60_000;
 const GIT_BRANCHES_PAGE_SIZE = 100;
+const GIT_COMMIT_GRAPH_STALE_TIME_MS = 15_000;
+export const GIT_COMMIT_GRAPH_DEFAULT_LIMIT = 200;
 
 export const gitQueryKeys = {
   all: ["git"] as const,
   refs: (environmentId: EnvironmentId | null, cwd: string | null) =>
     ["git", "refs", environmentId ?? null, cwd] as const,
+  diffScope: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "diff", environmentId ?? null, cwd] as const,
   diff: (environmentId: EnvironmentId | null, cwd: string | null, ignoreWhitespace: boolean) =>
     ["git", "diff", environmentId ?? null, cwd, ignoreWhitespace] as const,
+  fileDiffScope: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "file-diff", environmentId ?? null, cwd] as const,
   fileDiff: (
     environmentId: EnvironmentId | null,
     cwd: string | null,
@@ -31,6 +37,10 @@ export const gitQueryKeys = {
   ) => ["git", "file-diff", environmentId ?? null, cwd, relativePath] as const,
   branchSearch: (environmentId: EnvironmentId | null, cwd: string | null, query: string) =>
     ["git", "refs", environmentId ?? null, cwd, "search", query] as const,
+  commitGraphScope: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "commit-graph", environmentId ?? null, cwd] as const,
+  commitGraph: (environmentId: EnvironmentId | null, cwd: string | null, limit: number) =>
+    ["git", "commit-graph", environmentId ?? null, cwd, limit] as const,
 };
 
 export const gitMutationKeys = {
@@ -55,13 +65,20 @@ export function invalidateGitQueries(
   const environmentId = input?.environmentId ?? null;
   const cwd = input?.cwd ?? null;
   if (cwd !== null) {
-    return queryClient.invalidateQueries({ queryKey: gitQueryKeys.refs(environmentId, cwd) });
+    return Promise.all([
+      queryClient.invalidateQueries({ queryKey: gitQueryKeys.refs(environmentId, cwd) }),
+      queryClient.invalidateQueries({ queryKey: gitQueryKeys.diffScope(environmentId, cwd) }),
+      queryClient.invalidateQueries({ queryKey: gitQueryKeys.fileDiffScope(environmentId, cwd) }),
+      queryClient.invalidateQueries({
+        queryKey: gitQueryKeys.commitGraphScope(environmentId, cwd),
+      }),
+    ]).then(() => undefined);
   }
 
   return queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });
 }
 
-function invalidateGitBranchQueries(
+function invalidateGitCwdQueries(
   queryClient: QueryClient,
   environmentId: EnvironmentId | null,
   cwd: string | null,
@@ -70,7 +87,7 @@ function invalidateGitBranchQueries(
     return Promise.resolve();
   }
 
-  return queryClient.invalidateQueries({ queryKey: gitQueryKeys.refs(environmentId, cwd) });
+  return invalidateGitQueries(queryClient, { environmentId, cwd });
 }
 
 /**
@@ -178,6 +195,29 @@ export function gitFileDiffQueryOptions(input: {
   });
 }
 
+export function gitCommitGraphQueryOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  limit?: number;
+  enabled?: boolean;
+}) {
+  const limit = input.limit ?? GIT_COMMIT_GRAPH_DEFAULT_LIMIT;
+
+  return queryOptions({
+    queryKey: gitQueryKeys.commitGraph(input.environmentId, input.cwd, limit),
+    queryFn: async () => {
+      if (!input.cwd || !input.environmentId) {
+        throw new Error("Git commit graph is unavailable.");
+      }
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.vcs.commitGraph({ cwd: input.cwd, limit });
+    },
+    enabled: (input.enabled ?? true) && input.environmentId !== null && input.cwd !== null,
+    staleTime: GIT_COMMIT_GRAPH_STALE_TIME_MS,
+    retry: 1,
+  });
+}
+
 /**
  * @deprecated Use a VCS-named mutation helper once the UI naming migration lands.
  */
@@ -194,7 +234,7 @@ export function gitInitMutationOptions(input: {
       return api.vcs.init({ cwd: input.cwd });
     },
     onSettled: async () => {
-      await invalidateGitBranchQueries(input.queryClient, input.environmentId, input.cwd);
+      await invalidateGitCwdQueries(input.queryClient, input.environmentId, input.cwd);
     },
   });
 }
@@ -215,7 +255,7 @@ export function gitCheckoutMutationOptions(input: {
       return api.vcs.switchRef({ cwd: input.cwd, refName });
     },
     onSettled: async () => {
-      await invalidateGitBranchQueries(input.queryClient, input.environmentId, input.cwd);
+      await invalidateGitCwdQueries(input.queryClient, input.environmentId, input.cwd);
     },
   });
 }
@@ -256,7 +296,7 @@ export function gitRunStackedActionMutationOptions(input: {
       );
     },
     onSuccess: async () => {
-      await invalidateGitBranchQueries(input.queryClient, input.environmentId, input.cwd);
+      await invalidateGitCwdQueries(input.queryClient, input.environmentId, input.cwd);
     },
   });
 }
@@ -277,7 +317,7 @@ export function gitPullMutationOptions(input: {
       return api.vcs.pull({ cwd: input.cwd });
     },
     onSuccess: async () => {
-      await invalidateGitBranchQueries(input.queryClient, input.environmentId, input.cwd);
+      await invalidateGitCwdQueries(input.queryClient, input.environmentId, input.cwd);
     },
   });
 }
@@ -297,7 +337,7 @@ export function sourceControlPublishRepositoryMutationOptions(input: {
       return api.sourceControl.publishRepository({ cwd: input.cwd, ...args });
     },
     onSuccess: async () => {
-      await invalidateGitBranchQueries(input.queryClient, input.environmentId, input.cwd);
+      await invalidateGitCwdQueries(input.queryClient, input.environmentId, input.cwd);
     },
   });
 }
@@ -372,7 +412,7 @@ export function gitPreparePullRequestThreadMutationOptions(input: {
       });
     },
     onSuccess: async () => {
-      await invalidateGitBranchQueries(input.queryClient, input.environmentId, input.cwd);
+      await invalidateGitCwdQueries(input.queryClient, input.environmentId, input.cwd);
     },
   });
 }

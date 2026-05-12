@@ -16,6 +16,7 @@ import {
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   ProjectListEntriesError,
+  ProjectEntriesSubscribeError,
   ProjectReadFileError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
@@ -48,8 +49,10 @@ import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { ThreadReadReceipts } from "./threadReadReceipts.ts";
+import { ThreadWorkbenchStates } from "./threadWorkbenchState.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
+import { WorkspaceWatcher } from "./workspace/Services/WorkspaceWatcher.ts";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
 import { VcsStatusBroadcaster } from "./vcs/VcsStatusBroadcaster.ts";
 import { VcsProvisioningService } from "./vcs/VcsProvisioningService.ts";
@@ -156,6 +159,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager;
       const threadReadReceipts = yield* ThreadReadReceipts;
+      const threadWorkbenchStates = yield* ThreadWorkbenchStates;
       const providerRegistry = yield* ProviderRegistry;
       const config = yield* ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents;
@@ -163,6 +167,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const startup = yield* ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem;
+      const workspaceWatcher = yield* WorkspaceWatcher;
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
       const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
       const serverEnvironment = yield* ServerEnvironment;
@@ -914,6 +919,20 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "workspace" },
           ),
+        [WS_METHODS.projectsSubscribeEntries]: (input) =>
+          observeRpcStream(
+            WS_METHODS.projectsSubscribeEntries,
+            workspaceWatcher.streamEntries(input).pipe(
+              Stream.mapError(
+                (cause) =>
+                  new ProjectEntriesSubscribeError({
+                    message: `Failed to watch workspace entries: ${cause.detail}`,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
         [WS_METHODS.projectsReadFile]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsReadFile,
@@ -1041,6 +1060,10 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.vcsFileDiff, gitWorkflow.fileDiff(input), {
             "rpc.aggregate": "vcs",
           }),
+        [WS_METHODS.vcsCommitGraph]: (input) =>
+          observeRpcEffect(WS_METHODS.vcsCommitGraph, gitWorkflow.commitGraph(input), {
+            "rpc.aggregate": "vcs",
+          }),
         [WS_METHODS.vcsStageFile]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsStageFile,
@@ -1145,6 +1168,22 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.threadReadMarkUnread, threadReadReceipts.markUnread(input), {
             "rpc.aggregate": "threadRead",
           }),
+        [WS_METHODS.threadWorkbenchGetState]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadWorkbenchGetState,
+            threadWorkbenchStates.getState(input),
+            {
+              "rpc.aggregate": "threadWorkbench",
+            },
+          ),
+        [WS_METHODS.threadWorkbenchSetState]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadWorkbenchSetState,
+            threadWorkbenchStates.setState(input),
+            {
+              "rpc.aggregate": "threadWorkbench",
+            },
+          ),
         [WS_METHODS.subscribeTerminalEvents]: (input) =>
           observeRpcStream(
             WS_METHODS.subscribeTerminalEvents,

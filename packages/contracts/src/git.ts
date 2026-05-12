@@ -5,6 +5,7 @@ import { VcsDriverKind } from "./vcs.ts";
 
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const GIT_LIST_BRANCHES_MAX_LIMIT = 200;
+const GIT_COMMIT_GRAPH_MAX_LIMIT = 500;
 const VCS_RELATIVE_PATH_MAX_LENGTH = 512;
 const VcsRelativePath = TrimmedNonEmptyStringSchema.check(
   Schema.isMaxLength(VCS_RELATIVE_PATH_MAX_LENGTH),
@@ -155,6 +156,12 @@ export const VcsListRefsInput = Schema.Struct({
 });
 export type VcsListRefsInput = typeof VcsListRefsInput.Type;
 
+export const VcsCommitGraphInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  limit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(GIT_COMMIT_GRAPH_MAX_LIMIT))),
+});
+export type VcsCommitGraphInput = typeof VcsCommitGraphInput.Type;
+
 export const VcsCreateWorktreeInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   refName: TrimmedNonEmptyStringSchema,
@@ -281,6 +288,25 @@ export const VcsListRefsResult = Schema.Struct({
   totalCount: NonNegativeInt,
 });
 export type VcsListRefsResult = typeof VcsListRefsResult.Type;
+
+export const VcsCommitGraphCommit = Schema.Struct({
+  sha: TrimmedNonEmptyStringSchema,
+  shortSha: TrimmedNonEmptyStringSchema,
+  parents: Schema.Array(TrimmedNonEmptyStringSchema),
+  subject: Schema.String,
+  authorName: Schema.String,
+  relativeTime: Schema.String,
+  refs: Schema.Array(TrimmedNonEmptyStringSchema),
+  commitUrl: Schema.optional(Schema.String),
+});
+export type VcsCommitGraphCommit = typeof VcsCommitGraphCommit.Type;
+
+export const VcsCommitGraphResult = Schema.Struct({
+  commits: Schema.Array(VcsCommitGraphCommit),
+  isRepo: Schema.Boolean,
+  truncated: Schema.Boolean,
+});
+export type VcsCommitGraphResult = typeof VcsCommitGraphResult.Type;
 
 export const VcsCreateWorktreeResult = Schema.Struct({
   worktree: VcsWorktree,

@@ -15,6 +15,7 @@ import { EnvironmentId, type VcsListRefsResult } from "@t3tools/contracts";
 
 import {
   gitBranchSearchInfiniteQueryOptions,
+  gitCommitGraphQueryOptions,
   gitDiffQueryOptions,
   gitMutationKeys,
   gitPreparePullRequestThreadMutationOptions,
@@ -78,6 +79,29 @@ describe("gitDiffQueryOptions", () => {
     );
 
     expect(diff).toHaveBeenCalledWith({ cwd: "/repo/a", ignoreWhitespace: true });
+  });
+});
+
+describe("gitCommitGraphQueryOptions", () => {
+  it("forwards cwd and limit to the VCS API", async () => {
+    const commitGraph = vi.fn().mockResolvedValue({ rows: [], isRepo: true, truncated: false });
+    const { ensureEnvironmentApi } = await import("../environmentApi");
+    vi.mocked(ensureEnvironmentApi).mockReturnValue({
+      vcs: {
+        commitGraph,
+      },
+    } as never);
+
+    const queryClient = new QueryClient();
+    await queryClient.fetchQuery(
+      gitCommitGraphQueryOptions({
+        environmentId: ENVIRONMENT_A,
+        cwd: "/repo/a",
+        limit: 50,
+      }),
+    );
+
+    expect(commitGraph).toHaveBeenCalledWith({ cwd: "/repo/a", limit: 50 });
   });
 });
 

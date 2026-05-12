@@ -60,6 +60,10 @@ const rpcClientMock = {
     markUnread: vi.fn(),
     subscribe: vi.fn(),
   },
+  threadWorkbench: {
+    getState: vi.fn(),
+    setState: vi.fn(),
+  },
   projects: {
     searchEntries: vi.fn(),
     writeFile: vi.fn(),
@@ -79,6 +83,7 @@ const rpcClientMock = {
     diff: vi.fn(),
     pull: vi.fn(),
     refreshStatus: vi.fn(),
+    commitGraph: vi.fn(),
     onStatus: vi.fn((input: { cwd: string }, listener: (event: VcsStatusResult) => void) =>
       registerListener(gitStatusListeners, listener),
     ),

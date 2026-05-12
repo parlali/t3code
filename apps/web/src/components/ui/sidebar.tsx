@@ -6,6 +6,10 @@ import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { PaneSidebarToggleButton } from "~/components/ui/pane-chrome";
+import {
+  startResizeInteraction,
+  type ResizeInteractionHandle,
+} from "~/components/ui/resize-interaction";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Separator } from "~/components/ui/separator";
 import {
@@ -343,6 +347,7 @@ function SidebarRail({
   const railRef = React.useRef<HTMLButtonElement | null>(null);
   const suppressClickRef = React.useRef(false);
   const resizeStateRef = React.useRef<{
+    interaction: ResizeInteractionHandle;
     moved: boolean;
     pointerId: number;
     pendingWidth: number;
@@ -361,31 +366,24 @@ function SidebarRail({
   const railLabel = canResize ? "Resize Sidebar" : "Toggle Sidebar";
   const railTitle = canResize ? "Drag to resize sidebar" : "Toggle Sidebar";
 
-  const stopResize = React.useCallback(
-    (pointerId: number) => {
-      const resizeState = resizeStateRef.current;
-      if (!resizeState) {
-        return;
-      }
-      if (resizeState.rafId !== null) {
-        window.cancelAnimationFrame(resizeState.rafId);
-      }
-      resizeState.transitionTargets.forEach((element) => {
-        element.style.removeProperty("transition-duration");
-      });
-      if (resolvedResizable?.storageKey && typeof window !== "undefined") {
-        setLocalStorageItem(resolvedResizable.storageKey, resizeState.width, Schema.Finite);
-      }
-      resolvedResizable?.onResize?.(resizeState.width);
-      resizeStateRef.current = null;
-      if (resizeState.rail.hasPointerCapture(pointerId)) {
-        resizeState.rail.releasePointerCapture(pointerId);
-      }
-      document.body.style.removeProperty("cursor");
-      document.body.style.removeProperty("user-select");
-    },
-    [resolvedResizable],
-  );
+  const stopResize = React.useCallback(() => {
+    const resizeState = resizeStateRef.current;
+    if (!resizeState) {
+      return;
+    }
+    if (resizeState.rafId !== null) {
+      window.cancelAnimationFrame(resizeState.rafId);
+    }
+    resizeState.interaction.release();
+    resizeState.transitionTargets.forEach((element) => {
+      element.style.removeProperty("transition-duration");
+    });
+    if (resolvedResizable?.storageKey && typeof window !== "undefined") {
+      setLocalStorageItem(resolvedResizable.storageKey, resizeState.width, Schema.Finite);
+    }
+    resolvedResizable?.onResize?.(resizeState.width);
+    resizeStateRef.current = null;
+  }, [resolvedResizable]);
 
   const handlePointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -417,9 +415,13 @@ function SidebarRail({
         element.style.setProperty("transition-duration", "0ms");
       });
 
-      event.preventDefault();
-      event.stopPropagation();
+      stopResize();
+      const interaction = startResizeInteraction(event, {
+        cursor: "col-resize",
+        stopPropagation: true,
+      });
       resizeStateRef.current = {
+        interaction,
         moved: false,
         pointerId: event.pointerId,
         pendingWidth: initialWidth,
@@ -434,11 +436,8 @@ function SidebarRail({
         wrapper,
       };
       wrapper.style.setProperty("--sidebar-width", `${initialWidth}px`);
-      event.currentTarget.setPointerCapture(event.pointerId);
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
     },
-    [onPointerDown, open, resolvedResizable, sidebarInstance?.side],
+    [onPointerDown, open, resolvedResizable, sidebarInstance?.side, stopResize],
   );
 
   const handlePointerMove = React.useCallback(
@@ -497,7 +496,7 @@ function SidebarRail({
 
       event.preventDefault();
       suppressClickRef.current = resizeState.moved;
-      stopResize(event.pointerId);
+      stopResize();
     },
     [stopResize],
   );
@@ -561,8 +560,8 @@ function SidebarRail({
       resizeState?.transitionTargets.forEach((element) => {
         element.style.removeProperty("transition-duration");
       });
-      document.body.style.removeProperty("cursor");
-      document.body.style.removeProperty("user-select");
+      resizeState?.interaction.release();
+      resizeStateRef.current = null;
     };
   }, []);
 
@@ -571,7 +570,7 @@ function SidebarRail({
       aria-label={railLabel}
       className={cn(
         /* disable pointer events only when offcanvas sidebar is collapsed, that's when the rail sits over the native scrollbar on windows and linux. icon mode stays fully clickable. */
-        "-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 cursor-col-resize transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-px after:bg-border/70 after:transition-colors hover:after:bg-primary/45 group-data-[side=right]:left-0 sm:flex [[data-collapsible=offcanvas][data-state=collapsed]_&]:hidden [[data-collapsible=offcanvas][data-state=collapsed]_&]:pointer-events-none",
+        "-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 touch-none select-none cursor-col-resize transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-px after:bg-border/70 after:transition-colors hover:after:bg-primary/45 group-data-[side=right]:left-0 sm:flex [[data-collapsible=offcanvas][data-state=collapsed]_&]:hidden [[data-collapsible=offcanvas][data-state=collapsed]_&]:pointer-events-none",
         "group-data-[collapsible=offcanvas]:translate-x-0 hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:after:left-full",
         "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
         "[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",

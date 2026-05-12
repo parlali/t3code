@@ -162,7 +162,7 @@ export const OpenInPicker = memo(function OpenInPicker({
           Open
         </span>
       </Button>
-      <GroupSeparator className="hidden @3xl/header-actions:block" />
+      <GroupSeparator className="hidden @3xl/header-actions:block opacity-50" />
       <Menu>
         <MenuTrigger
           render={<Button aria-label="Editor options" size={iconTriggerSize} variant="outline" />}
@@ -182,6 +182,7 @@ export const OpenInPicker = memo(function OpenInPicker({
           ))}
         </MenuPopup>
       </Menu>
+      <GroupSeparator className="hidden @3xl/header-actions:block" />
     </>
   );
 

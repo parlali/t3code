@@ -86,8 +86,8 @@ const makeThreadReadReceipts = Effect.gen(function* () {
   const getSnapshot = sql<ThreadReadReceiptRow>`
     SELECT
       t.thread_id AS "threadId",
-      COALESCE(r.last_visited_at, COALESCE(t.updated_at, t.created_at)) AS "lastVisitedAt",
-      COALESCE(r.updated_at, COALESCE(t.updated_at, t.created_at)) AS "updatedAt"
+      COALESCE(r.last_visited_at, t.created_at) AS "lastVisitedAt",
+      COALESCE(r.updated_at, t.created_at) AS "updatedAt"
     FROM projection_threads t
     LEFT JOIN thread_read_receipts r ON r.thread_id = t.thread_id
     WHERE t.deleted_at IS NULL
@@ -106,10 +106,11 @@ const makeThreadReadReceipts = Effect.gen(function* () {
   const upsertReceipt = (input: {
     readonly threadId: ThreadId;
     readonly lastVisitedAt: string;
+    readonly updatedAt: string;
     readonly allowBackward: boolean;
   }) =>
     Effect.gen(function* () {
-      const updatedAt = new Date().toISOString();
+      const allowBackward = input.allowBackward ? 1 : 0;
       yield* sql`
         INSERT INTO thread_read_receipts (
           thread_id,
@@ -119,17 +120,30 @@ const makeThreadReadReceipts = Effect.gen(function* () {
         VALUES (
           ${input.threadId},
           ${input.lastVisitedAt},
-          ${updatedAt}
+          ${input.updatedAt}
         )
         ON CONFLICT (thread_id)
         DO UPDATE SET
           last_visited_at = CASE
-            WHEN ${input.allowBackward ? 1 : 0} = 1
-              OR excluded.last_visited_at > thread_read_receipts.last_visited_at
+            WHEN ${allowBackward} = 1
+              AND excluded.updated_at >= thread_read_receipts.updated_at
+            THEN excluded.last_visited_at
+            WHEN ${allowBackward} = 0
+              AND excluded.last_visited_at > thread_read_receipts.last_visited_at
+              AND excluded.updated_at >= thread_read_receipts.updated_at
             THEN excluded.last_visited_at
             ELSE thread_read_receipts.last_visited_at
           END,
-          updated_at = excluded.updated_at
+          updated_at = CASE
+            WHEN ${allowBackward} = 1
+              AND excluded.updated_at >= thread_read_receipts.updated_at
+            THEN excluded.updated_at
+            WHEN ${allowBackward} = 0
+              AND excluded.last_visited_at > thread_read_receipts.last_visited_at
+              AND excluded.updated_at >= thread_read_receipts.updated_at
+            THEN excluded.updated_at
+            ELSE thread_read_receipts.updated_at
+          END
       `.pipe(Effect.mapError((cause) => receiptError("ThreadReadReceipts.upsertReceipt", cause)));
 
       const receipt = yield* readReceipt(input.threadId).pipe(
@@ -159,18 +173,22 @@ const makeThreadReadReceipts = Effect.gen(function* () {
 
   return {
     getSnapshot,
-    markVisited: (input) =>
-      upsertReceipt({
+    markVisited: (input) => {
+      const observedAt = input.observedAt ?? input.visitedAt ?? new Date().toISOString();
+      return upsertReceipt({
         threadId: input.threadId,
-        lastVisitedAt: input.visitedAt ?? new Date().toISOString(),
+        lastVisitedAt: input.visitedAt ?? observedAt,
+        updatedAt: observedAt,
         allowBackward: false,
-      }),
+      });
+    },
     markUnread: (input) =>
       unreadTimestamp(input.latestTurnCompletedAt).pipe(
         Effect.flatMap((lastVisitedAt) =>
           upsertReceipt({
             threadId: input.threadId,
             lastVisitedAt,
+            updatedAt: input.observedAt ?? new Date().toISOString(),
             allowBackward: true,
           }),
         ),

@@ -2,11 +2,18 @@ export { ExplorerModeToggle, type ExplorerMode } from "./ExplorerModeToggle";
 export { ExplorerTree, type TreeNode } from "./ExplorerTree";
 export { ChangesTree } from "./ChangesTree";
 export { WorkbenchExplorerPanel } from "./WorkbenchExplorerPanel";
+export { WorkbenchCommitGraph } from "./WorkbenchCommitGraph";
 export { WorkbenchToolbarActions } from "./WorkbenchToolbarActions";
 export { WorkbenchTabBar, type WorkbenchTab } from "./WorkbenchTabBar";
 export { WorkbenchBreadcrumbs } from "./WorkbenchBreadcrumbs";
 export { WorkbenchDiffEditor } from "./WorkbenchDiffEditor";
 export { WorkbenchTreeIcon } from "./WorkbenchTreeIcon";
+export {
+  selectionForTab,
+  tabForSelection,
+  isFileSelectionAvailable,
+  isChangeSelectionAvailable,
+} from "./workbenchSelection";
 export {
   configureWorkbenchMonaco,
   workbenchCodeEditorOptions,

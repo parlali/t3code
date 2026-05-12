@@ -126,7 +126,10 @@ import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { recordClientPerfEvent } from "../observability/perfDiagnostics";
-import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
+import {
+  deriveLogicalProjectKeyFromSettings,
+  selectProjectGroupingSettings,
+} from "../logicalProject";
 import {
   reconnectSavedEnvironment,
   useSavedEnvironmentRegistryStore,
@@ -185,7 +188,6 @@ import {
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useComposerHandleContext } from "../composerHandleContext";
-import { requestWorkbenchOpen } from "../workbenchEvents";
 
 const preloadThreadTerminalDrawer = () => {
   const startedAtMs = performance.now();
@@ -671,7 +673,6 @@ export default function ChatView(props: ChatViewProps) {
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
   );
-  const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
   const composerDraftTarget: ScopedThreadRef | DraftId =
     routeKind === "server" ? routeThreadRef : props.draftId;
   const serverThread = useStore(
@@ -681,9 +682,6 @@ export default function ChatView(props: ChatViewProps) {
     ),
   );
   const setStoreThreadError = useStore((store) => store.setError);
-  const activeThreadLastVisitedAt = useThreadReadReceiptStore((store) =>
-    routeKind === "server" ? store.receiptByThreadKey[routeThreadKey]?.lastVisitedAt : undefined,
-  );
   const settings = useSettings();
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
@@ -1021,10 +1019,7 @@ export default function ChatView(props: ChatViewProps) {
     },
     [],
   );
-  const projectGroupingSettings = useSettings((settings) => ({
-    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
-    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
-  }));
+  const projectGroupingSettings = useSettings(selectProjectGroupingSettings);
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
     const logicalKey = deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
@@ -1180,12 +1175,28 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     if (!serverThread?.id) return;
+    const visitedAt = new Date().toISOString();
+    useThreadReadReceiptStore
+      .getState()
+      .markVisitedOptimistic(serverThread.environmentId, serverThread.id, visitedAt, visitedAt);
+    void readEnvironmentApi(serverThread.environmentId)
+      ?.threadRead.markVisited({
+        threadId: serverThread.id,
+        visitedAt,
+        observedAt: visitedAt,
+      })
+      .catch((error: unknown) => {
+        console.warn("Failed to mark thread visited", error);
+      });
+  }, [serverThread?.environmentId, serverThread?.id]);
+
+  useEffect(() => {
+    if (!serverThread?.id) return;
     if (!latestTurnSettled) return;
     if (!activeLatestTurn?.completedAt) return;
     const turnCompletedAt = Date.parse(activeLatestTurn.completedAt);
     if (Number.isNaN(turnCompletedAt)) return;
-    const lastVisitedAt = activeThreadLastVisitedAt ? Date.parse(activeThreadLastVisitedAt) : NaN;
-    if (!Number.isNaN(lastVisitedAt) && lastVisitedAt >= turnCompletedAt) return;
+    const observedAt = new Date().toISOString();
 
     useThreadReadReceiptStore
       .getState()
@@ -1193,18 +1204,19 @@ export default function ChatView(props: ChatViewProps) {
         serverThread.environmentId,
         serverThread.id,
         activeLatestTurn.completedAt,
+        observedAt,
       );
     void readEnvironmentApi(serverThread.environmentId)
       ?.threadRead.markVisited({
         threadId: serverThread.id,
         visitedAt: activeLatestTurn.completedAt,
+        observedAt,
       })
       .catch((error: unknown) => {
         console.warn("Failed to mark thread visited", error);
       });
   }, [
     activeLatestTurn?.completedAt,
-    activeThreadLastVisitedAt,
     latestTurnSettled,
     serverThread?.environmentId,
     serverThread?.id,
@@ -3612,15 +3624,6 @@ export default function ChatView(props: ChatViewProps) {
   const onExpandTimelineImage = useCallback((preview: ExpandedImagePreview) => {
     setExpandedImage(preview);
   }, []);
-  const onOpenTurnDiff = useCallback(
-    (turnId: TurnId, filePath?: string) => {
-      if (!isServerThread) {
-        return;
-      }
-      requestWorkbenchOpen({ mode: "changes", turnId, ...(filePath ? { path: filePath } : {}) });
-    },
-    [isServerThread],
-  );
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
@@ -3765,17 +3768,13 @@ export default function ChatView(props: ChatViewProps) {
                   timelineEntries={timelineEntries}
                   completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                   completionSummary={completionSummary}
-                  turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
                   activeThreadEnvironmentId={activeThread.environmentId}
-                  routeThreadKey={routeThreadKey}
-                  onOpenTurnDiff={onOpenTurnDiff}
                   revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                   onRevertUserMessage={onRevertUserMessage}
                   onEditUserMessage={onEditUserMessage}
                   isRevertingCheckpoint={isRevertingCheckpoint}
                   onImageExpand={onExpandTimelineImage}
                   markdownCwd={gitCwd ?? undefined}
-                  resolvedTheme={resolvedTheme}
                   timestampFormat={timestampFormat}
                   workspaceRoot={activeWorkspaceRoot}
                   onIsAtEndChange={onIsAtEndChange}

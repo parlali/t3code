@@ -208,14 +208,26 @@ function createMockEnvironmentApi(input: {
       markVisited: async (receipt) => ({
         threadId: receipt.threadId,
         lastVisitedAt: receipt.visitedAt ?? new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        updatedAt: receipt.observedAt ?? new Date().toISOString(),
       }),
       markUnread: async (receipt) => ({
         threadId: receipt.threadId,
         lastVisitedAt: new Date(Date.parse(receipt.latestTurnCompletedAt) - 1).toISOString(),
-        updatedAt: new Date().toISOString(),
+        updatedAt: receipt.observedAt ?? new Date().toISOString(),
       }),
       subscribe: () => () => undefined,
+    },
+    threadWorkbench: {
+      getState: async (input) => ({
+        threadId: input.threadId,
+        selection: null,
+        updatedAt: new Date().toISOString(),
+      }),
+      setState: async (input) => ({
+        threadId: input.threadId,
+        selection: input.selection,
+        updatedAt: new Date().toISOString(),
+      }),
     },
     projects: {} as EnvironmentApi["projects"],
     filesystem: {

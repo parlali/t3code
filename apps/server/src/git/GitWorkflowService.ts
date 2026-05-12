@@ -7,6 +7,8 @@ import {
   type VcsSwitchRefResult,
   type VcsCreateRefInput,
   type VcsCreateRefResult,
+  type VcsCommitGraphInput,
+  type VcsCommitGraphResult,
   type VcsDiffInput,
   type VcsDiffResult,
   type VcsFileDiffResult,
@@ -51,6 +53,9 @@ export interface GitWorkflowServiceShape {
   readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
   readonly diff: (input: VcsDiffInput) => Effect.Effect<VcsDiffResult, GitCommandError>;
   readonly fileDiff: (input: VcsFileInput) => Effect.Effect<VcsFileDiffResult, GitCommandError>;
+  readonly commitGraph: (
+    input: VcsCommitGraphInput,
+  ) => Effect.Effect<VcsCommitGraphResult, GitCommandError>;
   readonly stageFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
   readonly revertFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
   readonly applyPatch: (input: VcsApplyPatchInput) => Effect.Effect<void, GitCommandError>;
@@ -134,6 +139,14 @@ function nonRepositoryListRefs(): VcsListRefsResult {
     hasPrimaryRemote: false,
     nextCursor: null,
     totalCount: 0,
+  };
+}
+
+function nonRepositoryCommitGraph(): VcsCommitGraphResult {
+  return {
+    commits: [],
+    isRepo: false,
+    truncated: false,
   };
 }
 
@@ -285,6 +298,12 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
     fileDiff: (input) =>
       ensureGitCommand("GitWorkflowService.fileDiff", input.cwd).pipe(
         Effect.andThen(git.fileDiff(input)),
+      ),
+    commitGraph: (input) =>
+      detectGitRepositoryForCommand("GitWorkflowService.commitGraph", input.cwd).pipe(
+        Effect.flatMap((isGitRepository) =>
+          isGitRepository ? git.commitGraph(input) : Effect.succeed(nonRepositoryCommitGraph()),
+        ),
       ),
     stageFile: (input) =>
       ensureGitCommand("GitWorkflowService.stageFile", input.cwd).pipe(

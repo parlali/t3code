@@ -25,9 +25,14 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       markUnread: (input) => rpcClient.threadRead.markUnread(input),
       subscribe: (callback) => rpcClient.threadRead.subscribe(callback),
     },
+    threadWorkbench: {
+      getState: rpcClient.threadWorkbench.getState,
+      setState: rpcClient.threadWorkbench.setState,
+    },
     projects: {
       searchEntries: rpcClient.projects.searchEntries,
       listEntries: rpcClient.projects.listEntries,
+      subscribeEntries: rpcClient.projects.subscribeEntries,
       readFile: rpcClient.projects.readFile,
       writeFile: rpcClient.projects.writeFile,
     },
@@ -47,6 +52,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       applyPatch: rpcClient.vcs.applyPatch,
       pull: rpcClient.vcs.pull,
       refreshStatus: rpcClient.vcs.refreshStatus,
+      commitGraph: rpcClient.vcs.commitGraph,
       onStatus: (input, callback, options) => rpcClient.vcs.onStatus(input, callback, options),
       listRefs: rpcClient.vcs.listRefs,
       createWorktree: rpcClient.vcs.createWorktree,

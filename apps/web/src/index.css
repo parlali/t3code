@@ -83,6 +83,22 @@
   animation-duration: 0s !important;
 }
 
+html[data-resize-cursor],
+html[data-resize-cursor] * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+html[data-resize-cursor="col-resize"],
+html[data-resize-cursor="col-resize"] * {
+  cursor: col-resize !important;
+}
+
+html[data-resize-cursor="row-resize"],
+html[data-resize-cursor="row-resize"] * {
+  cursor: row-resize !important;
+}
+
 :root {
   color-scheme: light;
   --radius: 0.625rem;

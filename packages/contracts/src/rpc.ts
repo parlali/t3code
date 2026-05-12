@@ -18,6 +18,8 @@ import {
   VcsCreateRefResult,
   VcsCreateWorktreeInput,
   VcsCreateWorktreeResult,
+  VcsCommitGraphInput,
+  VcsCommitGraphResult,
   VcsInitInput,
   VcsListRefsInput,
   VcsListRefsResult,
@@ -61,6 +63,9 @@ import {
   ProjectListEntriesError,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
+  ProjectEntriesSubscribeError,
+  ProjectEntriesSubscribeInput,
+  ProjectEntriesStreamEvent,
   ProjectReadFileError,
   ProjectReadFileInput,
   ProjectReadFileResult,
@@ -91,6 +96,12 @@ import {
   ThreadReadReceiptStreamEvent,
 } from "./threadReadReceipts.ts";
 import {
+  ThreadWorkbenchGetStateInput,
+  ThreadWorkbenchSetStateInput,
+  ThreadWorkbenchState,
+  ThreadWorkbenchStateError,
+} from "./threadWorkbenchState.ts";
+import {
   ServerConfigStreamEvent,
   ServerConfig,
   ServerLifecycleStreamEvent,
@@ -118,6 +129,7 @@ export const WS_METHODS = {
   projectsRemove: "projects.remove",
   projectsSearchEntries: "projects.searchEntries",
   projectsListEntries: "projects.listEntries",
+  projectsSubscribeEntries: "projects.subscribeEntries",
   projectsReadFile: "projects.readFile",
   projectsWriteFile: "projects.writeFile",
 
@@ -135,6 +147,7 @@ export const WS_METHODS = {
   vcsApplyPatch: "vcs.applyPatch",
   vcsPull: "vcs.pull",
   vcsRefreshStatus: "vcs.refreshStatus",
+  vcsCommitGraph: "vcs.commitGraph",
   vcsListRefs: "vcs.listRefs",
   vcsCreateWorktree: "vcs.createWorktree",
   vcsRemoveWorktree: "vcs.removeWorktree",
@@ -160,6 +173,10 @@ export const WS_METHODS = {
   threadReadGetSnapshot: "threadRead.getSnapshot",
   threadReadMarkVisited: "threadRead.markVisited",
   threadReadMarkUnread: "threadRead.markUnread",
+
+  // Thread workbench state methods
+  threadWorkbenchGetState: "threadWorkbench.getState",
+  threadWorkbenchSetState: "threadWorkbench.setState",
 
   // Server meta
   serverGetConfig: "server.getConfig",
@@ -261,6 +278,13 @@ export const WsProjectsListEntriesRpc = Rpc.make(WS_METHODS.projectsListEntries,
   error: ProjectListEntriesError,
 });
 
+export const WsProjectsSubscribeEntriesRpc = Rpc.make(WS_METHODS.projectsSubscribeEntries, {
+  payload: ProjectEntriesSubscribeInput,
+  success: ProjectEntriesStreamEvent,
+  error: ProjectEntriesSubscribeError,
+  stream: true,
+});
+
 export const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
   payload: ProjectReadFileInput,
   success: ProjectReadFileResult,
@@ -328,6 +352,12 @@ export const WsVcsRefreshStatusRpc = Rpc.make(WS_METHODS.vcsRefreshStatus, {
   payload: VcsStatusInput,
   success: VcsStatusResult,
   error: GitManagerServiceError,
+});
+
+export const WsVcsCommitGraphRpc = Rpc.make(WS_METHODS.vcsCommitGraph, {
+  payload: VcsCommitGraphInput,
+  success: VcsCommitGraphResult,
+  error: GitCommandError,
 });
 
 export const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction, {
@@ -438,6 +468,18 @@ export const WsThreadReadMarkUnreadRpc = Rpc.make(WS_METHODS.threadReadMarkUnrea
   error: ThreadReadReceiptError,
 });
 
+export const WsThreadWorkbenchGetStateRpc = Rpc.make(WS_METHODS.threadWorkbenchGetState, {
+  payload: ThreadWorkbenchGetStateInput,
+  success: ThreadWorkbenchState,
+  error: ThreadWorkbenchStateError,
+});
+
+export const WsThreadWorkbenchSetStateRpc = Rpc.make(WS_METHODS.threadWorkbenchSetState, {
+  payload: ThreadWorkbenchSetStateInput,
+  success: ThreadWorkbenchState,
+  error: ThreadWorkbenchStateError,
+});
+
 export const WsOrchestrationDispatchCommandRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.dispatchCommand,
   {
@@ -538,6 +580,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlPublishRepositoryRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsListEntriesRpc,
+  WsProjectsSubscribeEntriesRpc,
   WsProjectsReadFileRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
@@ -550,6 +593,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsApplyPatchRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
+  WsVcsCommitGraphRpc,
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
@@ -569,6 +613,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadReadGetSnapshotRpc,
   WsThreadReadMarkVisitedRpc,
   WsThreadReadMarkUnreadRpc,
+  WsThreadWorkbenchGetStateRpc,
+  WsThreadWorkbenchSetStateRpc,
   WsSubscribeTerminalEventsRpc,
   WsSubscribeThreadReadReceiptsRpc,
   WsSubscribeServerConfigRpc,

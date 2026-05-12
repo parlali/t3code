@@ -13,10 +13,10 @@ export const BRAND_ASSET_PATHS = {
 
   developmentDesktopIconPng: "assets/dev/blueprint-macos-1024.png",
   developmentWindowsIconIco: "assets/dev/blueprint-windows.ico",
-  developmentWebFaviconIco: "assets/dev/blueprint-web-favicon.ico",
-  developmentWebFavicon16Png: "assets/dev/blueprint-web-favicon-16x16.png",
-  developmentWebFavicon32Png: "assets/dev/blueprint-web-favicon-32x32.png",
-  developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
+  developmentWebFaviconIco: "assets/prod/t3-black-web-favicon.ico",
+  developmentWebFavicon16Png: "assets/prod/t3-black-web-favicon-16x16.png",
+  developmentWebFavicon32Png: "assets/prod/t3-black-web-favicon-32x32.png",
+  developmentWebAppleTouchIconPng: "assets/prod/t3-black-web-apple-touch-180.png",
 } as const;
 
 export type WebAssetBrand = "development" | "production";

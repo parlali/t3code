@@ -18,8 +18,11 @@ import {
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { GitCommandError, type VcsRef } from "@t3tools/contracts";
-import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
+import { GitCommandError, type VcsCommitGraphCommit, type VcsRef } from "@t3tools/contracts";
+import {
+  dedupeRemoteBranchesWithLocalMatches,
+  parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
+} from "@t3tools/shared/git";
 import { compactTraceAttributes } from "../observability/Attributes.ts";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
@@ -46,6 +49,9 @@ const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
 const GIT_LIST_BRANCHES_DEFAULT_LIMIT = 100;
+const GIT_COMMIT_GRAPH_DEFAULT_LIMIT = 200;
+const GIT_COMMIT_GRAPH_MAX_OUTPUT_BYTES = 1_000_000;
+const GIT_COMMIT_GRAPH_FIELD_SEPARATOR = "\u001f";
 const NON_REPOSITORY_STATUS_DETAILS = Object.freeze<GitVcsDriver.GitStatusDetails>({
   isRepo: false,
   hasOriginRemote: false,
@@ -79,6 +85,75 @@ interface ExecuteGitOptions {
   maxOutputBytes?: number | undefined;
   truncateOutputAtMaxBytes?: boolean | undefined;
   progress?: GitVcsDriver.ExecuteGitProgress | undefined;
+}
+
+function parseCommitGraphOutput(output: string): VcsCommitGraphCommit[] {
+  return output.split(/\r?\n/u).flatMap((line): VcsCommitGraphCommit[] => {
+    if (line.length === 0) return [];
+
+    const fields = line.split(GIT_COMMIT_GRAPH_FIELD_SEPARATOR);
+    const [sha, parentsRaw, shortSha, subject, authorName, relativeTime, refsRaw] = fields;
+    if (
+      sha === undefined ||
+      shortSha === undefined ||
+      subject === undefined ||
+      authorName === undefined ||
+      relativeTime === undefined
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        sha,
+        shortSha,
+        parents: parentsRaw ? parentsRaw.split(" ").filter(Boolean) : [],
+        subject,
+        authorName,
+        relativeTime,
+        refs: refsRaw
+          ? refsRaw
+              .split(", ")
+              .map((ref) => ref.trim())
+              .filter(Boolean)
+          : [],
+      },
+    ];
+  });
+}
+
+function normalizeCommitGraphRef(ref: string | null): string | null {
+  const trimmed = ref?.trim() ?? "";
+  if (trimmed.length === 0 || trimmed === "HEAD") return null;
+  if (trimmed.startsWith("refs/")) return trimmed;
+  if (trimmed.includes("/")) return `refs/remotes/${trimmed}`;
+  return trimmed;
+}
+
+function buildCommitGraphExtraRefs(input: {
+  readonly upstreamRef: string | null;
+  readonly primaryRemoteName: string | null;
+  readonly primaryDefaultBranch: string | null;
+}): readonly string[] {
+  const refs = [
+    normalizeCommitGraphRef(input.upstreamRef),
+    input.primaryRemoteName && input.primaryDefaultBranch
+      ? `refs/remotes/${input.primaryRemoteName}/${input.primaryDefaultBranch}`
+      : null,
+  ];
+  return refs.filter((ref, index): ref is string => {
+    if (!ref) return false;
+    return refs.indexOf(ref) === index;
+  });
+}
+
+function buildGitHubCommitUrl(
+  repositoryNameWithOwner: string | null,
+  sha: string,
+): string | undefined {
+  return repositoryNameWithOwner
+    ? `https://github.com/${repositoryNameWithOwner}/commit/${sha}`
+    : undefined;
 }
 
 function parseBranchAb(value: string): { ahead: number; behind: number } {
@@ -1759,6 +1834,95 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   );
 
+  const commitGraph: GitVcsDriver.GitVcsDriverShape["commitGraph"] = Effect.fn("commitGraph")(
+    function* (input) {
+      const limit = input.limit ?? GIT_COMMIT_GRAPH_DEFAULT_LIMIT;
+      const upstreamRef = yield* executeGit(
+        "GitVcsDriver.commitGraph.upstreamRef",
+        input.cwd,
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        { allowNonZeroExit: true, timeoutMs: 5_000 },
+      ).pipe(
+        Effect.map((result) => (result.exitCode === 0 ? result.stdout.trim() : null)),
+        Effect.catch(() => Effect.succeed(null)),
+      );
+      const primaryRemoteName = yield* resolvePrimaryRemoteName(input.cwd).pipe(
+        Effect.catch(() => Effect.succeed(null)),
+      );
+      const primaryDefaultBranch =
+        primaryRemoteName === null
+          ? null
+          : yield* resolveDefaultBranchName(input.cwd, primaryRemoteName).pipe(
+              Effect.catch(() => Effect.succeed(null)),
+            );
+      const primaryRemoteUrl =
+        primaryRemoteName === null
+          ? null
+          : yield* runGitStdout(
+              "GitVcsDriver.commitGraph.primaryRemoteUrl",
+              input.cwd,
+              ["remote", "get-url", primaryRemoteName],
+              true,
+            ).pipe(
+              Effect.map((stdout) => stdout.trim() || null),
+              Effect.catch(() => Effect.succeed(null)),
+            );
+      const githubRepositoryNameWithOwner =
+        parseGitHubRepositoryNameWithOwnerFromRemoteUrl(primaryRemoteUrl);
+      const extraRefs = buildCommitGraphExtraRefs({
+        upstreamRef,
+        primaryRemoteName,
+        primaryDefaultBranch,
+      });
+      const args = [
+        "log",
+        "--topo-order",
+        "--color=never",
+        "--decorate=short",
+        `--max-count=${limit}`,
+        `--pretty=format:%H${GIT_COMMIT_GRAPH_FIELD_SEPARATOR}%P${GIT_COMMIT_GRAPH_FIELD_SEPARATOR}%h${GIT_COMMIT_GRAPH_FIELD_SEPARATOR}%s${GIT_COMMIT_GRAPH_FIELD_SEPARATOR}%an${GIT_COMMIT_GRAPH_FIELD_SEPARATOR}%ar${GIT_COMMIT_GRAPH_FIELD_SEPARATOR}%D`,
+        "--exclude=refs/t3/checkpoints/*",
+        "--branches",
+        "HEAD",
+        ...extraRefs,
+      ];
+      const result = yield* executeGit("GitVcsDriver.commitGraph", input.cwd, args, {
+        allowNonZeroExit: true,
+        maxOutputBytes: GIT_COMMIT_GRAPH_MAX_OUTPUT_BYTES,
+        timeoutMs: 10_000,
+        truncateOutputAtMaxBytes: true,
+      });
+
+      if (result.exitCode !== 0) {
+        const detail = result.stderr.trim();
+        if (
+          detail.includes("does not have any commits yet") ||
+          detail.includes("your current branch") ||
+          detail.includes("bad default revision") ||
+          detail.includes("unknown revision or path") ||
+          detail.includes("ambiguous argument 'HEAD'")
+        ) {
+          return { commits: [], isRepo: true, truncated: false };
+        }
+        return yield* createGitCommandError(
+          "GitVcsDriver.commitGraph",
+          input.cwd,
+          args,
+          detail.length > 0 ? detail : "git log failed.",
+        );
+      }
+
+      return {
+        commits: parseCommitGraphOutput(result.stdout).map((commit) => {
+          const commitUrl = buildGitHubCommitUrl(githubRepositoryNameWithOwner, commit.sha);
+          return commitUrl ? Object.assign({}, commit, { commitUrl }) : commit;
+        }),
+        isRepo: true,
+        truncated: result.stdoutTruncated,
+      };
+    },
+  );
+
   const stageFile: GitVcsDriver.GitVcsDriverShape["stageFile"] = Effect.fn("stageFile")(
     function* (input) {
       const relativePath = yield* normalizeGitRelativePath(
@@ -2325,6 +2489,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     pullCurrentBranch,
     diff,
     fileDiff,
+    commitGraph,
     stageFile,
     revertFile,
     applyPatch,

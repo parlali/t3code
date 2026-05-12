@@ -1,5 +1,5 @@
 import { type TimelineEntry, type WorkLogEntry } from "../../session-logic";
-import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
+import { type ChatMessage, type ProposedPlan } from "../../types";
 import { type MessageId } from "@t3tools/contracts";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
@@ -26,7 +26,6 @@ export type MessagesTimelineRow =
       durationStart: string;
       showCompletionDivider: boolean;
       showAssistantCopyButton: boolean;
-      assistantTurnDiffSummary?: TurnDiffSummary | undefined;
       revertTurnCount?: number | undefined;
     }
   | {
@@ -112,7 +111,6 @@ export function deriveMessagesTimelineRows(input: {
   completionDividerBeforeEntryId: string | null;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
-  turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
@@ -169,10 +167,6 @@ export function deriveMessagesTimelineRows(input: {
       showAssistantCopyButton:
         timelineEntry.message.role === "assistant" &&
         terminalAssistantMessageIds.has(timelineEntry.message.id),
-      assistantTurnDiffSummary:
-        timelineEntry.message.role === "assistant"
-          ? input.turnDiffSummaryByAssistantMessageId.get(timelineEntry.message.id)
-          : undefined,
       revertTurnCount:
         timelineEntry.message.role === "user"
           ? input.revertTurnCountByUserMessageId.get(timelineEntry.message.id)
@@ -232,7 +226,6 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.durationStart === bm.durationStart &&
         a.showCompletionDivider === bm.showCompletionDivider &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
-        a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
         a.revertTurnCount === bm.revertTurnCount
       );
     }

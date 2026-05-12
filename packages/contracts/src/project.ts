@@ -33,11 +33,34 @@ export const ProjectListEntriesInput = Schema.Struct({
 });
 export type ProjectListEntriesInput = typeof ProjectListEntriesInput.Type;
 
+export const ProjectEntriesSubscribeInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+});
+export type ProjectEntriesSubscribeInput = typeof ProjectEntriesSubscribeInput.Type;
+
 export const ProjectListEntriesResult = Schema.Struct({
   entries: Schema.Array(ProjectEntry),
   truncated: Schema.Boolean,
 });
 export type ProjectListEntriesResult = typeof ProjectListEntriesResult.Type;
+
+export const ProjectEntriesReadyEvent = Schema.Struct({
+  type: Schema.Literal("ready"),
+  cwd: TrimmedNonEmptyString,
+});
+export type ProjectEntriesReadyEvent = typeof ProjectEntriesReadyEvent.Type;
+
+export const ProjectEntriesChangedEvent = Schema.Struct({
+  type: Schema.Literal("entries-changed"),
+  cwd: TrimmedNonEmptyString,
+});
+export type ProjectEntriesChangedEvent = typeof ProjectEntriesChangedEvent.Type;
+
+export const ProjectEntriesStreamEvent = Schema.Union([
+  ProjectEntriesReadyEvent,
+  ProjectEntriesChangedEvent,
+]);
+export type ProjectEntriesStreamEvent = typeof ProjectEntriesStreamEvent.Type;
 
 export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSearchEntriesError>()(
   "ProjectSearchEntriesError",
@@ -49,6 +72,14 @@ export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSe
 
 export class ProjectListEntriesError extends Schema.TaggedErrorClass<ProjectListEntriesError>()(
   "ProjectListEntriesError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class ProjectEntriesSubscribeError extends Schema.TaggedErrorClass<ProjectEntriesSubscribeError>()(
+  "ProjectEntriesSubscribeError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),

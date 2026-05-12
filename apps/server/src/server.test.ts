@@ -89,6 +89,7 @@ import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRu
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
 import { ThreadReadReceipts, type ThreadReadReceiptsShape } from "./threadReadReceipts.ts";
+import { ThreadWorkbenchStates, type ThreadWorkbenchStateShape } from "./threadWorkbenchState.ts";
 import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
@@ -109,6 +110,7 @@ import {
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
+import { WorkspaceWatcher } from "./workspace/Services/WorkspaceWatcher.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriver from "./vcs/VcsDriver.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
@@ -332,6 +334,7 @@ const buildAppUnderTest = (options?: {
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunnerShape>;
     terminalManager?: Partial<TerminalManagerShape>;
     threadReadReceipts?: Partial<ThreadReadReceiptsShape>;
+    threadWorkbenchStates?: Partial<ThreadWorkbenchStateShape>;
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
@@ -490,6 +493,9 @@ const buildAppUnderTest = (options?: {
         Layer.provide(WorkspacePathsLive),
         Layer.provide(workspaceEntriesLayer),
       ),
+      Layer.mock(WorkspaceWatcher)({
+        streamEntries: () => Stream.empty,
+      }),
       ProjectFaviconResolverLive,
     );
     const gitWorkflowLayer = GitWorkflowService.layer.pipe(
@@ -588,6 +594,23 @@ const buildAppUnderTest = (options?: {
             }),
           ),
           ...options?.layers?.threadReadReceipts,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ThreadWorkbenchStates)({
+          getState: (input) =>
+            Effect.succeed({
+              threadId: input.threadId,
+              selection: null,
+              updatedAt: TEST_EPOCH_ISO,
+            }),
+          setState: (input) =>
+            Effect.succeed({
+              threadId: input.threadId,
+              selection: input.selection,
+              updatedAt: TEST_EPOCH_ISO,
+            }),
+          ...options?.layers?.threadWorkbenchStates,
         }),
       ),
       Layer.provide(

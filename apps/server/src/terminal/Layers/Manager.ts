@@ -1710,19 +1710,24 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         }),
       );
 
-    const write: TerminalManagerShape["write"] = Effect.fn("terminal.write")(function* (input) {
-      const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
-      const session = yield* requireSession(input.threadId, terminalId);
-      const process = session.process;
-      if (!process || session.status !== "running") {
-        if (session.status === "exited") return;
-        return yield* new TerminalNotRunningError({
-          threadId: input.threadId,
-          terminalId,
-        });
-      }
-      yield* Effect.sync(() => process.write(input.data));
-    });
+    const write: TerminalManagerShape["write"] = Effect.fn("terminal.write")((input) =>
+      withThreadLock(
+        input.threadId,
+        Effect.gen(function* () {
+          const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
+          const session = yield* requireSession(input.threadId, terminalId);
+          const process = session.process;
+          if (!process || session.status !== "running") {
+            if (session.status === "exited") return;
+            return yield* new TerminalNotRunningError({
+              threadId: input.threadId,
+              terminalId,
+            });
+          }
+          yield* Effect.sync(() => process.write(input.data));
+        }),
+      ),
+    );
 
     const resize: TerminalManagerShape["resize"] = Effect.fn("terminal.resize")(function* (input) {
       const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;

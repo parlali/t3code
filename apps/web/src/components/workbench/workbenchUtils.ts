@@ -164,12 +164,21 @@ export function parseChangedLineRanges(diff: string): ChangedLineRanges {
 
 export const WORKBENCH_EXPLORER_WIDTH_STORAGE_KEY = "t3code:workbench-explorer-width";
 export const WORKBENCH_EXPLORER_COLLAPSED_STORAGE_KEY = "t3code:workbench-explorer-collapsed";
+export const WORKBENCH_GRAPH_HEIGHT_RATIO_STORAGE_KEY = "t3code:workbench-graph-height-ratio";
 export const MOBILE_LAYOUT_MEDIA_QUERY = "(max-width: 980px)";
 export const DEFAULT_EXPLORER_WIDTH = 280;
 export const MIN_EXPLORER_WIDTH = 190;
 export const MAX_EXPLORER_WIDTH = 420;
 export const COLLAPSED_EXPLORER_WIDTH = 44;
+export const DEFAULT_GRAPH_HEIGHT_RATIO = 0.43;
+export const MIN_GRAPH_HEIGHT_RATIO = 0.1;
+export const MAX_GRAPH_HEIGHT_RATIO = 0.9;
 
 export function clampExplorerWidth(width: number): number {
   return Math.min(MAX_EXPLORER_WIDTH, Math.max(MIN_EXPLORER_WIDTH, width));
+}
+
+export function clampGraphHeightRatio(ratio: number): number {
+  if (!Number.isFinite(ratio)) return DEFAULT_GRAPH_HEIGHT_RATIO;
+  return Math.min(MAX_GRAPH_HEIGHT_RATIO, Math.max(MIN_GRAPH_HEIGHT_RATIO, ratio));
 }

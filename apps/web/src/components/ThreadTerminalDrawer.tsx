@@ -20,6 +20,10 @@ import {
   useState,
 } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
+import {
+  startResizeInteraction,
+  type ResizeInteractionHandle,
+} from "~/components/ui/resize-interaction";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
 import { restoreTerminalSnapshot } from "~/terminalSnapshotRestore";
@@ -54,6 +58,7 @@ import { readLocalApi } from "~/localApi";
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
 const MULTI_CLICK_SELECTION_ACTION_DELAY_MS = 260;
+const TERMINAL_OUTPUT_FLUSH_MAX_BYTES = 256_000;
 
 function maxDrawerHeight(): number {
   if (typeof window === "undefined") return DEFAULT_THREAD_TERMINAL_HEIGHT;
@@ -413,7 +418,6 @@ export function TerminalViewport({
 
     let pendingInput = "";
     let inputFlushTimer: number | null = null;
-    let inputWriteChain = Promise.resolve();
 
     const flushTerminalInput = () => {
       inputFlushTimer = null;
@@ -426,18 +430,19 @@ export function TerminalViewport({
         chunks.push(data.slice(index, index + 60_000));
       }
 
-      inputWriteChain = inputWriteChain
-        .then(async () => {
+      void (async () => {
+        try {
           for (const chunk of chunks) {
             await terminalApi.write({ threadId, terminalId, data: chunk });
           }
-        })
-        .catch((err: unknown) => {
+        } catch (err) {
+          if (disposed) return;
           writeSystemMessage(
             terminal,
             err instanceof Error ? err.message : "Terminal write failed",
           );
-        });
+        }
+      })();
     };
 
     const queueTerminalInput = (data: string) => {
@@ -598,6 +603,54 @@ export function TerminalViewport({
       attributeFilter: ["class", "style"],
     });
 
+    let pendingOutput = "";
+    let outputFlushFrame: number | null = null;
+
+    const flushTerminalOutput = () => {
+      outputFlushFrame = null;
+      if (pendingOutput.length === 0) {
+        return;
+      }
+      const activeTerminal = terminalRef.current;
+      if (!activeTerminal) {
+        pendingOutput = "";
+        return;
+      }
+      const data = pendingOutput;
+      pendingOutput = "";
+      activeTerminal.write(data);
+      clearSelectionAction();
+    };
+
+    const scheduleTerminalOutputFlush = () => {
+      if (outputFlushFrame !== null) {
+        return;
+      }
+      outputFlushFrame = window.requestAnimationFrame(flushTerminalOutput);
+    };
+
+    const queueTerminalOutput = (data: string) => {
+      pendingOutput += data;
+      if (pendingOutput.length >= TERMINAL_OUTPUT_FLUSH_MAX_BYTES) {
+        if (outputFlushFrame !== null) {
+          window.cancelAnimationFrame(outputFlushFrame);
+        }
+        flushTerminalOutput();
+        return;
+      }
+      scheduleTerminalOutputFlush();
+    };
+
+    const flushPendingTerminalOutput = () => {
+      if (pendingOutput.length === 0) {
+        return;
+      }
+      if (outputFlushFrame !== null) {
+        window.cancelAnimationFrame(outputFlushFrame);
+      }
+      flushTerminalOutput();
+    };
+
     const applyTerminalEvent = (event: TerminalEvent) => {
       const activeTerminal = terminalRef.current;
       if (!activeTerminal) {
@@ -618,10 +671,11 @@ export function TerminalViewport({
             bytes: event.data.length,
           });
         }
-        activeTerminal.write(event.data);
-        clearSelectionAction();
+        queueTerminalOutput(event.data);
         return;
       }
+
+      flushPendingTerminalOutput();
 
       if (event.type === "started" || event.type === "restarted") {
         recordClientPerfEvent("terminal.event.started", {
@@ -816,6 +870,9 @@ export function TerminalViewport({
       unsubscribeTerminalEvents();
       if (resizeFrame !== null) {
         window.cancelAnimationFrame(resizeFrame);
+      }
+      if (outputFlushFrame !== null) {
+        window.cancelAnimationFrame(outputFlushFrame);
       }
       resizeObserver?.disconnect();
       if (inputFlushTimer !== null) {
@@ -1023,6 +1080,7 @@ export default function ThreadTerminalDrawer({
   const lastSyncedHeightRef = useRef(clampDrawerHeight(height));
   const onHeightChangeRef = useRef(onHeightChange);
   const resizeStateRef = useRef<{
+    interaction: ResizeInteractionHandle;
     pointerId: number;
     startY: number;
     startHeight: number;
@@ -1175,10 +1233,11 @@ export default function ThreadTerminalDrawer({
 
   const handleResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeStateRef.current?.interaction.release();
+    const interaction = startResizeInteraction(event, { cursor: "row-resize" });
     didResizeDuringDragRef.current = false;
     resizeStateRef.current = {
+      interaction,
       pointerId: event.pointerId,
       startY: event.clientY,
       startHeight: drawerHeightRef.current,
@@ -1205,9 +1264,7 @@ export default function ThreadTerminalDrawer({
       const resizeState = resizeStateRef.current;
       if (!resizeState || resizeState.pointerId !== event.pointerId) return;
       resizeStateRef.current = null;
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
+      resizeState.interaction.release();
       if (!didResizeDuringDragRef.current) {
         return;
       }
@@ -1249,6 +1306,8 @@ export default function ThreadTerminalDrawer({
 
   useEffect(() => {
     return () => {
+      resizeStateRef.current?.interaction.release();
+      resizeStateRef.current = null;
       syncHeight(drawerHeightRef.current);
     };
   }, [syncHeight]);
@@ -1259,7 +1318,7 @@ export default function ThreadTerminalDrawer({
       style={{ height: `${drawerHeight}px` }}
     >
       <div
-        className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize"
+        className="absolute inset-x-0 top-0 z-20 h-1.5 touch-none select-none cursor-row-resize"
         onPointerDown={handleResizePointerDown}
         onPointerMove={handleResizePointerMove}
         onPointerUp={handleResizePointerEnd}

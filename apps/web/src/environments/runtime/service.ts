@@ -940,7 +940,7 @@ function syncThreadUiFromStore() {
       environmentId,
       environmentThreads.map((thread) => ({
         threadId: thread.id,
-        seedVisitedAt: thread.updatedAt ?? thread.createdAt,
+        seedVisitedAt: thread.createdAt,
       })),
     );
   }

@@ -12,7 +12,6 @@ import {
   reorderProjects,
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
-  setThreadChangedFilesExpanded,
   syncProjects,
   syncThreads,
   type UiState,
@@ -23,7 +22,6 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectExpandedById: {},
     projectOrder: [],
     threadLastVisitedAtById: {},
-    threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
     ...overrides,
   };
@@ -344,25 +342,12 @@ describe("uiStateStore pure functions", () => {
         [thread1]: "2026-02-25T12:35:00.000Z",
         [thread2]: "2026-02-25T12:36:00.000Z",
       },
-      threadChangedFilesExpandedById: {
-        [thread1]: {
-          "turn-1": false,
-        },
-        [thread2]: {
-          "turn-2": false,
-        },
-      },
     });
 
     const next = syncThreads(initialState, [{ key: thread1 }]);
 
     expect(next.threadLastVisitedAtById).toEqual({
       [thread1]: "2026-02-25T12:35:00.000Z",
-    });
-    expect(next.threadChangedFilesExpandedById).toEqual({
-      [thread1]: {
-        "turn-1": false,
-      },
     });
   });
 
@@ -403,45 +388,11 @@ describe("uiStateStore pure functions", () => {
       threadLastVisitedAtById: {
         [thread1]: "2026-02-25T12:35:00.000Z",
       },
-      threadChangedFilesExpandedById: {
-        [thread1]: {
-          "turn-1": false,
-        },
-      },
     });
 
     const next = clearThreadUi(initialState, thread1);
 
     expect(next.threadLastVisitedAtById).toEqual({});
-    expect(next.threadChangedFilesExpandedById).toEqual({});
-  });
-
-  it("setThreadChangedFilesExpanded stores collapsed turns per thread", () => {
-    const thread1 = ThreadId.make("thread-1");
-    const initialState = makeUiState();
-
-    const next = setThreadChangedFilesExpanded(initialState, thread1, "turn-1", false);
-
-    expect(next.threadChangedFilesExpandedById).toEqual({
-      [thread1]: {
-        "turn-1": false,
-      },
-    });
-  });
-
-  it("setThreadChangedFilesExpanded removes thread overrides when expanded again", () => {
-    const thread1 = ThreadId.make("thread-1");
-    const initialState = makeUiState({
-      threadChangedFilesExpandedById: {
-        [thread1]: {
-          "turn-1": false,
-        },
-      },
-    });
-
-    const next = setThreadChangedFilesExpanded(initialState, thread1, "turn-1", true);
-
-    expect(next.threadChangedFilesExpandedById).toEqual({});
   });
 });
 

@@ -1736,7 +1736,7 @@ export default function GitActionsControl({
           </span>
         </Button>
       )}
-      <GroupSeparator className="hidden @3xl/header-actions:block" />
+      <GroupSeparator className="hidden @3xl/header-actions:block opacity-50" />
       <Menu
         onOpenChange={(open) => {
           if (open) {

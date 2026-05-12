@@ -37,11 +37,13 @@ interface ThreadReadReceiptStoreState {
     environmentId: EnvironmentId,
     threadId: ThreadId,
     visitedAt: string,
+    observedAt?: string,
   ) => void;
   readonly markUnreadOptimistic: (
     environmentId: EnvironmentId,
     threadId: ThreadId,
     latestTurnCompletedAt: string | null | undefined,
+    observedAt?: string,
   ) => void;
   readonly removeThread: (environmentId: EnvironmentId, threadId: ThreadId) => void;
   readonly removeOrphanedThreads: (activeThreadKeys: ReadonlySet<string>) => void;
@@ -81,6 +83,13 @@ function shouldMoveVisitedForward(previous: string | undefined, next: string): b
   return Date.parse(next) > Date.parse(previous);
 }
 
+function isNewerMutation(previousUpdatedAt: string | undefined, nextUpdatedAt: string): boolean {
+  if (!previousUpdatedAt) {
+    return true;
+  }
+  return Date.parse(nextUpdatedAt) >= Date.parse(previousUpdatedAt);
+}
+
 export const useThreadReadReceiptStore = create<ThreadReadReceiptStoreState>()((set) => ({
   receiptByThreadKey: {},
   syncSnapshot: (environmentId, snapshot) =>
@@ -90,7 +99,12 @@ export const useThreadReadReceiptStore = create<ThreadReadReceiptStoreState>()((
         Object.entries(state.receiptByThreadKey).filter(([key]) => !key.startsWith(prefix)),
       ) as Record<string, ThreadReadReceiptEntry>;
       for (const receipt of snapshot.receipts) {
-        next[keyFor(environmentId, receipt.threadId)] = entryFromReceipt(receipt);
+        const key = keyFor(environmentId, receipt.threadId);
+        const previous = state.receiptByThreadKey[key];
+        next[key] =
+          previous && !isNewerMutation(previous.updatedAt, receipt.updatedAt)
+            ? previous
+            : entryFromReceipt(receipt);
       }
       return { receiptByThreadKey: next };
     }),
@@ -99,12 +113,19 @@ export const useThreadReadReceiptStore = create<ThreadReadReceiptStoreState>()((
       useThreadReadReceiptStore.getState().syncSnapshot(environmentId, event.snapshot);
       return;
     }
-    set((state) => ({
-      receiptByThreadKey: {
-        ...state.receiptByThreadKey,
-        [keyFor(environmentId, event.receipt.threadId)]: entryFromReceipt(event.receipt),
-      },
-    }));
+    set((state) => {
+      const key = keyFor(environmentId, event.receipt.threadId);
+      const previous = state.receiptByThreadKey[key];
+      if (previous && !isNewerMutation(previous.updatedAt, event.receipt.updatedAt)) {
+        return state;
+      }
+      return {
+        receiptByThreadKey: {
+          ...state.receiptByThreadKey,
+          [key]: entryFromReceipt(event.receipt),
+        },
+      };
+    });
   },
   syncThreadSeeds: (environmentId, seeds) =>
     set((state) => {
@@ -124,11 +145,15 @@ export const useThreadReadReceiptStore = create<ThreadReadReceiptStoreState>()((
       }
       return changed ? { receiptByThreadKey: next } : state;
     }),
-  markVisitedOptimistic: (environmentId, threadId, visitedAt) =>
+  markVisitedOptimistic: (environmentId, threadId, visitedAt, observedAt) =>
     set((state) => {
       const key = keyFor(environmentId, threadId);
       const previous = state.receiptByThreadKey[key];
-      if (!shouldMoveVisitedForward(previous?.lastVisitedAt, visitedAt)) {
+      const updatedAt = observedAt ?? visitedAt;
+      if (
+        !isNewerMutation(previous?.updatedAt, updatedAt) ||
+        !shouldMoveVisitedForward(previous?.lastVisitedAt, visitedAt)
+      ) {
         return state;
       }
       return {
@@ -137,25 +162,30 @@ export const useThreadReadReceiptStore = create<ThreadReadReceiptStoreState>()((
           [key]: {
             threadId,
             lastVisitedAt: visitedAt,
-            updatedAt: new Date().toISOString(),
+            updatedAt,
           },
         },
       };
     }),
-  markUnreadOptimistic: (environmentId, threadId, latestTurnCompletedAt) =>
+  markUnreadOptimistic: (environmentId, threadId, latestTurnCompletedAt, observedAt) =>
     set((state) => {
       const nextVisitedAt = unreadVisitedAt(latestTurnCompletedAt);
       if (!nextVisitedAt) {
         return state;
       }
       const key = keyFor(environmentId, threadId);
+      const previous = state.receiptByThreadKey[key];
+      const updatedAt = observedAt ?? new Date().toISOString();
+      if (!isNewerMutation(previous?.updatedAt, updatedAt)) {
+        return state;
+      }
       return {
         receiptByThreadKey: {
           ...state.receiptByThreadKey,
           [key]: {
             threadId,
             lastVisitedAt: nextVisitedAt,
-            updatedAt: new Date().toISOString(),
+            updatedAt,
           },
         },
       };

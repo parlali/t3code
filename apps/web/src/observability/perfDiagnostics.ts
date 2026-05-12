@@ -21,10 +21,12 @@ export function recordClientPerfEvent(name: string, data: Record<string, unknown
     data,
   };
 
-  const events = (window.__T3_PERF_EVENTS__ ??= []);
-  events.push(event);
-  if (events.length > MAX_EVENTS) {
-    events.splice(0, events.length - MAX_EVENTS);
+  if (typeof window !== "undefined") {
+    const events = (window.__T3_PERF_EVENTS__ ??= []);
+    events.push(event);
+    if (events.length > MAX_EVENTS) {
+      events.splice(0, events.length - MAX_EVENTS);
+    }
   }
 
   console.info("[t3:perf]", event);

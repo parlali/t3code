@@ -21,28 +21,23 @@ import {
   type WorkspaceEntriesShape,
 } from "../Services/WorkspaceEntries.ts";
 import { WorkspacePaths } from "../Services/WorkspacePaths.ts";
+import {
+  IGNORED_WORKSPACE_DIRECTORY_NAMES,
+  isPathInIgnoredWorkspaceDirectory,
+} from "../ignoredPaths.ts";
 
 const WORKSPACE_CACHE_TTL_MS = 15_000;
 const WORKSPACE_CACHE_MAX_KEYS = 4;
 const WORKSPACE_INDEX_MAX_ENTRIES = 25_000;
 const WORKSPACE_SCAN_READDIR_CONCURRENCY = 32;
-const IGNORED_DIRECTORY_NAMES = new Set([
-  ".git",
-  ".convex",
-  "node_modules",
-  ".next",
-  ".turbo",
-  "dist",
-  "build",
-  "out",
-  ".cache",
-]);
 
 interface WorkspaceIndex {
   scannedAt: number;
   entries: SearchableWorkspaceEntry[];
   truncated: boolean;
 }
+
+type GitIgnoreMode = "all" | "directories";
 
 interface SearchableWorkspaceEntry extends ProjectEntry {
   normalizedPath: string;
@@ -123,12 +118,6 @@ function scoreEntry(entry: SearchableWorkspaceEntry, query: string): number | nu
   }
 
   return Math.min(...scores);
-}
-
-function isPathInIgnoredDirectory(relativePath: string): boolean {
-  const firstSegment = relativePath.split("/")[0];
-  if (!firstSegment) return false;
-  return IGNORED_DIRECTORY_NAMES.has(firstSegment);
 }
 
 function directoryAncestorsOf(relativePath: string): string[] {
@@ -216,7 +205,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
 
       const listedPaths = [...listedFiles.paths]
         .map((entry) => toPosixPath(entry))
-        .filter((entry) => entry.length > 0 && !isPathInIgnoredDirectory(entry));
+        .filter((entry) => entry.length > 0 && !isPathInIgnoredWorkspaceDirectory(entry));
       const filePaths = yield* vcs.driver.filterIgnoredPaths(cwd, listedPaths).pipe(
         Effect.map((paths) => [...paths]),
         Effect.catch(() => filterVcsIgnoredPaths(cwd, listedPaths)),
@@ -225,7 +214,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       const directorySet = new Set<string>();
       for (const filePath of filePaths) {
         for (const directoryPath of directoryAncestorsOf(filePath)) {
-          if (!isPathInIgnoredDirectory(directoryPath)) {
+          if (!isPathInIgnoredWorkspaceDirectory(directoryPath)) {
             directorySet.add(directoryPath);
           }
         }
@@ -292,7 +281,10 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
 
   const buildWorkspaceIndexFromFilesystem = Effect.fn(
     "WorkspaceEntries.buildWorkspaceIndexFromFilesystem",
-  )(function* (cwd: string): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
+  )(function* (
+    cwd: string,
+    options: { readonly gitIgnoreMode: GitIgnoreMode },
+  ): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
     const shouldFilterWithGitIgnore = yield* isInsideVcsWorkTree(cwd);
 
     let pendingDirectories: string[] = [""];
@@ -319,7 +311,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
           if (!dirent.name || dirent.name === "." || dirent.name === "..") {
             continue;
           }
-          if (dirent.isDirectory() && IGNORED_DIRECTORY_NAMES.has(dirent.name)) {
+          if (dirent.isDirectory() && IGNORED_WORKSPACE_DIRECTORY_NAMES.has(dirent.name)) {
             continue;
           }
           if (!dirent.isDirectory() && !dirent.isFile()) {
@@ -329,7 +321,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
           const relativePath = toPosixPath(
             relativeDir ? path.join(relativeDir, dirent.name) : dirent.name,
           );
-          if (isPathInIgnoredDirectory(relativePath)) {
+          if (isPathInIgnoredWorkspaceDirectory(relativePath)) {
             continue;
           }
           candidates.push({ dirent, relativePath });
@@ -340,13 +332,27 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       const candidatePaths = candidateEntriesByDirectory.flatMap((candidateEntries) =>
         candidateEntries.map((entry) => entry.relativePath),
       );
+      const gitIgnoreCandidatePaths =
+        options.gitIgnoreMode === "all"
+          ? candidatePaths
+          : candidateEntriesByDirectory.flatMap((candidateEntries) =>
+              candidateEntries
+                .filter((entry) => entry.dirent.isDirectory())
+                .map((entry) => entry.relativePath),
+            );
       const allowedPathSet = shouldFilterWithGitIgnore
-        ? new Set(yield* filterVcsIgnoredPaths(cwd, candidatePaths))
+        ? new Set(yield* filterVcsIgnoredPaths(cwd, gitIgnoreCandidatePaths))
         : null;
 
       for (const candidateEntries of candidateEntriesByDirectory) {
         for (const candidate of candidateEntries) {
-          if (allowedPathSet && !allowedPathSet.has(candidate.relativePath)) {
+          const shouldApplyGitIgnore =
+            options.gitIgnoreMode === "all" || candidate.dirent.isDirectory();
+          if (
+            allowedPathSet &&
+            shouldApplyGitIgnore &&
+            !allowedPathSet.has(candidate.relativePath)
+          ) {
             continue;
           }
 
@@ -381,24 +387,33 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     };
   });
 
-  const buildWorkspaceIndex = Effect.fn("WorkspaceEntries.buildWorkspaceIndex")(function* (
-    cwd: string,
-  ): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
-    const vcsIndexed = yield* buildWorkspaceIndexFromVcs(cwd);
-    if (vcsIndexed) {
-      return vcsIndexed;
-    }
-    return yield* buildWorkspaceIndexFromFilesystem(cwd);
-  });
-
-  const workspaceIndexCache = yield* Cache.makeWith<string, WorkspaceIndex, WorkspaceEntriesError>(
-    buildWorkspaceIndex,
-    {
-      capacity: WORKSPACE_CACHE_MAX_KEYS,
-      timeToLive: (exit) =>
-        Exit.isSuccess(exit) ? Duration.millis(WORKSPACE_CACHE_TTL_MS) : Duration.zero,
+  const buildWorkspaceSearchIndex = Effect.fn("WorkspaceEntries.buildWorkspaceSearchIndex")(
+    function* (cwd: string): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
+      const vcsIndexed = yield* buildWorkspaceIndexFromVcs(cwd);
+      if (vcsIndexed) {
+        return vcsIndexed;
+      }
+      return yield* buildWorkspaceIndexFromFilesystem(cwd, { gitIgnoreMode: "all" });
     },
   );
+
+  const buildWorkspaceListIndex = Effect.fn("WorkspaceEntries.buildWorkspaceListIndex")(function* (
+    cwd: string,
+  ): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
+    // The editor file browser must mirror the real filesystem. Git ignore rules
+    // are only used to prune ignored directories that are unsafe to crawl.
+    return yield* buildWorkspaceIndexFromFilesystem(cwd, { gitIgnoreMode: "directories" });
+  });
+
+  const workspaceSearchIndexCache = yield* Cache.makeWith<
+    string,
+    WorkspaceIndex,
+    WorkspaceEntriesError
+  >(buildWorkspaceSearchIndex, {
+    capacity: WORKSPACE_CACHE_MAX_KEYS,
+    timeToLive: (exit) =>
+      Exit.isSuccess(exit) ? Duration.millis(WORKSPACE_CACHE_TTL_MS) : Duration.zero,
+  });
 
   const normalizeWorkspaceRoot = Effect.fn("WorkspaceEntries.normalizeWorkspaceRoot")(function* (
     cwd: string,
@@ -421,9 +436,9 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       const normalizedCwd = yield* normalizeWorkspaceRoot(cwd).pipe(
         Effect.catch(() => Effect.succeed(cwd)),
       );
-      yield* Cache.invalidate(workspaceIndexCache, cwd);
+      yield* Cache.invalidate(workspaceSearchIndexCache, cwd);
       if (normalizedCwd !== cwd) {
-        yield* Cache.invalidate(workspaceIndexCache, normalizedCwd);
+        yield* Cache.invalidate(workspaceSearchIndexCache, normalizedCwd);
       }
     },
   );
@@ -471,7 +486,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
   const search: WorkspaceEntriesShape["search"] = Effect.fn("WorkspaceEntries.search")(
     function* (input) {
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
-      return yield* Cache.get(workspaceIndexCache, normalizedCwd).pipe(
+      return yield* Cache.get(workspaceSearchIndexCache, normalizedCwd).pipe(
         Effect.map((index) => {
           const normalizedQuery = normalizeSearchQuery(input.query, {
             trimLeadingPattern: /^[@./]+/,
@@ -505,7 +520,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
 
   const list: WorkspaceEntriesShape["list"] = Effect.fn("WorkspaceEntries.list")(function* (input) {
     const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
-    return yield* Cache.get(workspaceIndexCache, normalizedCwd).pipe(
+    return yield* buildWorkspaceListIndex(normalizedCwd).pipe(
       Effect.map((index) => {
         const limit = Math.max(0, Math.floor(input.limit));
         return {

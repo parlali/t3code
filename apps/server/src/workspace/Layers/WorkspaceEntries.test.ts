@@ -69,6 +69,12 @@ const searchWorkspaceEntries = (input: { cwd: string; query: string; limit: numb
     return yield* workspaceEntries.search(input);
   });
 
+const listWorkspaceEntries = (input: { cwd: string; limit: number }) =>
+  Effect.gen(function* () {
+    const workspaceEntries = yield* WorkspaceEntries;
+    return yield* workspaceEntries.list(input);
+  });
+
 const appendSeparator = (input: string) =>
   input.endsWith("/") || input.endsWith("\\")
     ? input
@@ -278,6 +284,51 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
         yield* searchWorkspaceEntries({ cwd, query: "", limit: 200 });
 
         expect(peakReads).toBeLessThanOrEqual(32);
+      }),
+    );
+  });
+
+  describe("list", () => {
+    it.effect("includes gitignored files while pruning gitignored directories", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({
+          prefix: "t3code-workspace-list-ignored-file-",
+          git: true,
+        });
+        yield* writeTextFile(cwd, ".gitignore", ".env\nsecrets/\n");
+        yield* writeTextFile(cwd, ".env", "TOKEN=local\n");
+        yield* writeTextFile(cwd, "src/keep.ts", "export {};\n");
+        yield* writeTextFile(cwd, "secrets/local.json", "{}");
+
+        const result = yield* listWorkspaceEntries({ cwd, limit: 100 });
+        const paths = result.entries.map((entry) => entry.path);
+
+        expect(paths).toContain(".env");
+        expect(paths).toContain(".gitignore");
+        expect(paths).toContain("src");
+        expect(paths).toContain("src/keep.ts");
+        expect(paths).not.toContain("secrets");
+        expect(paths.some((entryPath) => entryPath.startsWith("secrets/"))).toBe(false);
+        expect(result.truncated).toBe(false);
+      }),
+    );
+
+    it.effect("re-reads the filesystem so externally created files appear on the next list", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({
+          prefix: "t3code-workspace-list-fresh-files-",
+          git: true,
+        });
+        yield* writeTextFile(cwd, ".gitignore", ".env\n");
+        yield* writeTextFile(cwd, "src/existing.ts", "export {};\n");
+
+        const beforeWrite = yield* listWorkspaceEntries({ cwd, limit: 100 });
+        expect(beforeWrite.entries.map((entry) => entry.path)).not.toContain(".env");
+
+        yield* writeTextFile(cwd, ".env", "TOKEN=local\n");
+
+        const afterWrite = yield* listWorkspaceEntries({ cwd, limit: 100 });
+        expect(afterWrite.entries.map((entry) => entry.path)).toContain(".env");
       }),
     );
   });

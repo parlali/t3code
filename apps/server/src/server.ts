@@ -34,6 +34,7 @@ import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { TerminalManagerLive } from "./terminal/Layers/Manager.ts";
 import { ThreadReadReceiptsLive } from "./threadReadReceipts.ts";
+import { ThreadWorkbenchStatesLive } from "./threadWorkbenchState.ts";
 import * as GitManager from "./git/GitManager.ts";
 import { KeybindingsLive } from "./keybindings.ts";
 import { ServerRuntimeStartup, ServerRuntimeStartupLive } from "./serverRuntimeStartup.ts";
@@ -50,6 +51,7 @@ import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdent
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
+import { WorkspaceWatcherLive } from "./workspace/Layers/WorkspaceWatcher.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
@@ -254,10 +256,16 @@ const WorkspaceFileSystemLayerLive = WorkspaceFileSystemLive.pipe(
   Layer.provide(WorkspaceEntriesLayerLive),
 );
 
+const WorkspaceWatcherLayerLive = WorkspaceWatcherLive.pipe(
+  Layer.provide(WorkspacePathsLive),
+  Layer.provide(WorkspaceEntriesLayerLive),
+);
+
 const WorkspaceLayerLive = Layer.mergeAll(
   WorkspacePathsLive,
   WorkspaceEntriesLayerLive,
   WorkspaceFileSystemLayerLive,
+  WorkspaceWatcherLayerLive,
 );
 
 const AuthLayerLive = ServerAuthLive.pipe(
@@ -279,6 +287,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(ThreadReadReceiptsLive),
+  Layer.provideMerge(ThreadWorkbenchStatesLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),

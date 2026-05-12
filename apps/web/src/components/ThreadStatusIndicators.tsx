@@ -9,10 +9,7 @@ import {
 } from "../environments/runtime";
 import { useGitStatus } from "../lib/gitStatusState";
 import { type AppState, selectProjectByRef, useStore } from "../store";
-import {
-  selectThreadTerminalRuntimeStatus,
-  useTerminalRuntimeStatusStore,
-} from "../terminalRuntimeStatusStore";
+import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadReadReceiptStore } from "../threadReadReceiptStore";
 import { resolveChangeRequestPresentation } from "../sourceControlPresentation";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "./Sidebar.logic";
@@ -83,10 +80,8 @@ export function resolveThreadPr(
   return gitStatus.pr ?? null;
 }
 
-export function terminalStatusFromRunningIds(
-  runningTerminalIds: string[],
-): TerminalStatusIndicator | null {
-  if (runningTerminalIds.length === 0) {
+export function terminalStatusFromOpenState(terminalOpen: boolean): TerminalStatusIndicator | null {
+  if (!terminalOpen) {
     return null;
   }
   return {
@@ -194,12 +189,13 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
 
 /**
  * Non-interactive trailing status icons for a thread row in compact contexts
- * like the command palette. Shows a terminal-running indicator and a remote
+ * like the command palette. Shows a terminal-open indicator and a remote
  * environment indicator, matching the sidebar's trailing indicators.
  */
 export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSummary }) {
-  const terminalRuntimeStatus = useTerminalRuntimeStatusStore((state) =>
-    selectThreadTerminalRuntimeStatus(state, thread.environmentId, thread.id),
+  const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+  const terminalOpen = useTerminalStateStore(
+    (state) => selectThreadTerminalState(state.terminalStateByThreadKey, threadRef).terminalOpen,
   );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isRemoteThread =
@@ -213,11 +209,7 @@ export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSumma
   const threadEnvironmentLabel = isRemoteThread
     ? (remoteEnvLabel ?? remoteEnvSavedLabel ?? "Remote")
     : null;
-  const terminalStatus = terminalStatusFromRunningIds(
-    terminalRuntimeStatus.runningTerminalIds.length > 0
-      ? [...terminalRuntimeStatus.runningTerminalIds]
-      : [...terminalRuntimeStatus.openTerminalIds],
-  );
+  const terminalStatus = terminalStatusFromOpenState(terminalOpen);
 
   if (!terminalStatus && !isRemoteThread) {
     return null;

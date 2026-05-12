@@ -341,7 +341,7 @@ export default function ProjectScriptsControl({
           {primaryScript.name}
         </span>
       </Button>
-      <GroupSeparator className="hidden @3xl/header-actions:block" />
+      <GroupSeparator className="hidden @3xl/header-actions:block opacity-50" />
       <Menu highlightItemOnHover={false}>
         <MenuTrigger
           render={<Button size={iconTriggerSize} variant="outline" aria-label="Script actions" />}
@@ -350,14 +350,18 @@ export default function ProjectScriptsControl({
         </MenuTrigger>
         <MenuPopup align="end">{menuItems}</MenuPopup>
       </Menu>
+      <GroupSeparator className="hidden @3xl/header-actions:block" />
     </>
   ) : (
-    <Button size={triggerSize} variant="outline" onClick={openAddDialog} title="Add action">
-      <PlusIcon className="size-3.5" />
-      <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-        Add action
-      </span>
-    </Button>
+    <>
+      <Button size={triggerSize} variant="outline" onClick={openAddDialog} title="Add action">
+        <PlusIcon className="size-3.5" />
+        <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+          Add action
+        </span>
+      </Button>
+      <GroupSeparator className="hidden @3xl/header-actions:block" />
+    </>
   );
 
   return (

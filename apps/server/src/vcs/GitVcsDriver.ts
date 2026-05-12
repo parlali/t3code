@@ -12,6 +12,8 @@ import {
   type VcsDiffResult,
   type VcsFileDiffResult,
   type VcsFileInput,
+  type VcsCommitGraphInput,
+  type VcsCommitGraphResult,
   type VcsApplyPatchInput,
   type VcsCreateWorktreeInput,
   type VcsCreateWorktreeResult,
@@ -174,6 +176,9 @@ export interface GitVcsDriverShape {
   ) => Effect.Effect<GitPushResult, GitCommandError>;
   readonly diff: (input: VcsDiffInput) => Effect.Effect<VcsDiffResult, GitCommandError>;
   readonly fileDiff: (input: VcsFileInput) => Effect.Effect<VcsFileDiffResult, GitCommandError>;
+  readonly commitGraph: (
+    input: VcsCommitGraphInput,
+  ) => Effect.Effect<VcsCommitGraphResult, GitCommandError>;
   readonly stageFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
   readonly revertFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
   readonly applyPatch: (input: VcsApplyPatchInput) => Effect.Effect<void, GitCommandError>;

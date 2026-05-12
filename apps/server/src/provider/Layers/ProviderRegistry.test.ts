@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it, assert, live } from "@effect/vitest";
-import { Effect, Exit, Layer, PubSub, Ref, Schema, Scope, Sink, Stream } from "effect";
+import { Effect, Exit, Fiber, Layer, PubSub, Ref, Schema, Scope, Sink, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import {
   ClaudeSettings,
@@ -178,6 +179,29 @@ function failingSpawnerLayer(description: string) {
           module: "ChildProcess",
           method: "spawn",
           description,
+        }),
+      ),
+    ),
+  );
+}
+
+function hangingScopedSpawnerLayer(killCalls: Ref.Ref<number>) {
+  return Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make(() =>
+      Effect.succeed(
+        ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(1),
+          exitCode: Effect.never,
+          isRunning: Effect.succeed(true),
+          kill: () => Ref.update(killCalls, (current) => current + 1),
+          unref: Effect.succeed(Effect.void),
+          stdin: Sink.drain,
+          stdout: Stream.never,
+          stderr: Stream.never,
+          all: Stream.never,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
         }),
       ),
     ),
@@ -394,6 +418,28 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             "Codex CLI (`codex`) is not installed or not on PATH.",
           );
         }),
+      );
+
+      it.effect("closes the app-server probe scope when provider status times out", () =>
+        Effect.gen(function* () {
+          const killCalls = yield* Ref.make(0);
+          const statusFiber = yield* checkCodexProviderStatus(defaultCodexSettings).pipe(
+            Effect.provide(hangingScopedSpawnerLayer(killCalls)),
+            Effect.forkChild,
+          );
+
+          yield* Effect.yieldNow;
+          yield* TestClock.adjust("11 seconds");
+          yield* Effect.yieldNow;
+
+          const status = yield* Fiber.join(statusFiber);
+          assert.strictEqual(status.status, "error");
+          assert.strictEqual(
+            status.message,
+            "Timed out while checking Codex app-server provider status.",
+          );
+          assert.strictEqual(yield* Ref.get(killCalls), 1);
+        }).pipe(Effect.provide(TestClock.layer())),
       );
     });
 

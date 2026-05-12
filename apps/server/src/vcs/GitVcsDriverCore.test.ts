@@ -184,6 +184,76 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("refName operations", () => {
+    it.effect("returns graph rows for recent commits", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* git(cwd, ["checkout", "-b", "feature/graph"]);
+        yield* writeTextFile(cwd, "feature.txt", "feature\n");
+        yield* git(cwd, ["add", "feature.txt"]);
+        yield* git(cwd, ["commit", "-m", "feature graph commit"]);
+        yield* git(cwd, ["checkout", initialBranch]);
+        yield* writeTextFile(cwd, "main.txt", "main\n");
+        yield* git(cwd, ["add", "main.txt"]);
+        yield* git(cwd, ["commit", "-m", "main graph commit"]);
+        yield* git(cwd, ["merge", "--no-ff", "feature/graph", "-m", "merge graph branch"]);
+
+        const graph = yield* driver.commitGraph({ cwd, limit: 20 });
+
+        assert.equal(graph.isRepo, true);
+        assert.equal(graph.truncated, false);
+        assert.ok(graph.commits.length > 0);
+        assert.include(
+          graph.commits.map((commit) => commit.subject),
+          "merge graph branch",
+        );
+        const mergeCommit = graph.commits.find((commit) => commit.subject === "merge graph branch");
+        assert.equal(mergeCommit?.parents.length, 2);
+      }),
+    );
+
+    it.effect("returns an empty graph for repositories without commits", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* driver.initRepo({ cwd });
+
+        const graph = yield* driver.commitGraph({ cwd });
+
+        assert.deepStrictEqual(graph, { commits: [], isRepo: true, truncated: false });
+      }),
+    );
+
+    it.effect("omits remote topic branches that are not tracked by the current workspace", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const remote = yield* makeTmpDir("git-vcs-driver-remote-");
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* git(remote, ["init", "--bare"]);
+        yield* git(cwd, ["remote", "add", "origin", remote]);
+        yield* git(cwd, ["push", "-u", "origin", initialBranch]);
+        yield* git(cwd, ["checkout", "-b", "remote/noise"]);
+        yield* writeTextFile(cwd, "noise.txt", "noise\n");
+        yield* git(cwd, ["add", "noise.txt"]);
+        yield* git(cwd, ["commit", "-m", "remote-only graph noise"]);
+        yield* git(cwd, ["push", "origin", "remote/noise"]);
+        yield* git(cwd, ["checkout", initialBranch]);
+        yield* git(cwd, ["branch", "-D", "remote/noise"]);
+        yield* git(cwd, ["fetch", "origin"]);
+
+        const graph = yield* driver.commitGraph({ cwd, limit: 20 });
+        const subjects = graph.commits.map((commit) => commit.subject);
+
+        assert.include(subjects, "initial commit");
+        assert.notInclude(subjects, "remote-only graph noise");
+      }),
+    );
+
     it.effect("creates, checks out, renames, and lists refs", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

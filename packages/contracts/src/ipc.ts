@@ -7,6 +7,8 @@ import type {
   GitPullRequestRefInput,
   VcsCreateWorktreeInput,
   VcsCreateWorktreeResult,
+  VcsCommitGraphInput,
+  VcsCommitGraphResult,
   VcsInitInput,
   VcsListRefsInput,
   VcsListRefsResult,
@@ -29,6 +31,8 @@ import type {
   ProjectSearchEntriesResult,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
+  ProjectEntriesSubscribeInput,
+  ProjectEntriesStreamEvent,
   ProjectReadFileInput,
   ProjectReadFileResult,
   ProjectWriteFileInput,
@@ -60,6 +64,11 @@ import type {
   ThreadReadReceiptSnapshot,
   ThreadReadReceiptStreamEvent,
 } from "./threadReadReceipts.ts";
+import type {
+  ThreadWorkbenchGetStateInput,
+  ThreadWorkbenchSetStateInput,
+  ThreadWorkbenchState,
+} from "./threadWorkbenchState.ts";
 import type { ServerUpsertKeybindingInput } from "./server.ts";
 import type {
   ClientOrchestrationCommand,
@@ -113,11 +122,11 @@ export type DesktopUpdateStatus =
 export type DesktopRuntimeArch = "arm64" | "x64" | "other";
 export type DesktopTheme = "light" | "dark" | "system";
 export type DesktopUpdateChannel = "latest" | "nightly";
-export type DesktopAppStageLabel = "Alpha" | "Dev" | "Nightly";
+export type DesktopAppStageLabel = "Dev" | "Nightly";
 
 export interface DesktopAppBranding {
   baseName: string;
-  stageLabel: DesktopAppStageLabel;
+  stageLabel: DesktopAppStageLabel | null;
   displayName: string;
 }
 
@@ -356,9 +365,20 @@ export interface EnvironmentApi {
     markUnread: (input: ThreadReadReceiptMarkUnreadInput) => Promise<ThreadReadReceipt>;
     subscribe: (callback: (event: ThreadReadReceiptStreamEvent) => void) => () => void;
   };
+  threadWorkbench: {
+    getState: (input: ThreadWorkbenchGetStateInput) => Promise<ThreadWorkbenchState>;
+    setState: (input: ThreadWorkbenchSetStateInput) => Promise<ThreadWorkbenchState>;
+  };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     listEntries: (input: ProjectListEntriesInput) => Promise<ProjectListEntriesResult>;
+    subscribeEntries: (
+      input: ProjectEntriesSubscribeInput,
+      callback: (event: ProjectEntriesStreamEvent) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
     readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
   };
@@ -390,6 +410,7 @@ export interface EnvironmentApi {
     applyPatch: (input: VcsApplyPatchInput) => Promise<void>;
     pull: (input: VcsPullInput) => Promise<VcsPullResult>;
     refreshStatus: (input: VcsStatusInput) => Promise<VcsStatusResult>;
+    commitGraph: (input: VcsCommitGraphInput) => Promise<VcsCommitGraphResult>;
     onStatus: (
       input: VcsStatusInput,
       callback: (status: VcsStatusResult) => void,

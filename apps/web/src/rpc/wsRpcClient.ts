@@ -73,9 +73,14 @@ export interface WsRpcClient {
     readonly markUnread: RpcUnaryMethod<typeof WS_METHODS.threadReadMarkUnread>;
     readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeThreadReadReceipts>;
   };
+  readonly threadWorkbench: {
+    readonly getState: RpcUnaryMethod<typeof WS_METHODS.threadWorkbenchGetState>;
+    readonly setState: RpcUnaryMethod<typeof WS_METHODS.threadWorkbenchSetState>;
+  };
   readonly projects: {
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
     readonly listEntries: RpcUnaryMethod<typeof WS_METHODS.projectsListEntries>;
+    readonly subscribeEntries: RpcInputStreamMethod<typeof WS_METHODS.projectsSubscribeEntries>;
     readonly readFile: RpcUnaryMethod<typeof WS_METHODS.projectsReadFile>;
     readonly writeFile: RpcUnaryMethod<typeof WS_METHODS.projectsWriteFile>;
   };
@@ -101,6 +106,7 @@ export interface WsRpcClient {
     readonly applyPatch: RpcUnaryMethod<typeof WS_METHODS.vcsApplyPatch>;
     readonly pull: RpcUnaryMethod<typeof WS_METHODS.vcsPull>;
     readonly refreshStatus: RpcUnaryMethod<typeof WS_METHODS.vcsRefreshStatus>;
+    readonly commitGraph: RpcUnaryMethod<typeof WS_METHODS.vcsCommitGraph>;
     readonly onStatus: (
       input: RpcInput<typeof WS_METHODS.subscribeVcsStatus>,
       listener: (status: VcsStatusResult) => void,
@@ -212,11 +218,26 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
           },
         ),
     },
+    threadWorkbench: {
+      getState: (input) =>
+        transport.request((client) => client[WS_METHODS.threadWorkbenchGetState](input)),
+      setState: (input) =>
+        transport.request((client) => client[WS_METHODS.threadWorkbenchSetState](input)),
+    },
     projects: {
       searchEntries: (input) =>
         transport.request((client) => client[WS_METHODS.projectsSearchEntries](input)),
       listEntries: (input) =>
         transport.request((client) => client[WS_METHODS.projectsListEntries](input)),
+      subscribeEntries: (input, listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.projectsSubscribeEntries](input),
+          listener,
+          {
+            ...options,
+            tag: WS_METHODS.projectsSubscribeEntries,
+          },
+        ),
       readFile: (input) =>
         transport.request((client) => client[WS_METHODS.projectsReadFile](input)),
       writeFile: (input) =>
@@ -246,6 +267,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       pull: (input) => transport.request((client) => client[WS_METHODS.vcsPull](input)),
       refreshStatus: (input) =>
         transport.request((client) => client[WS_METHODS.vcsRefreshStatus](input)),
+      commitGraph: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsCommitGraph](input)),
       onStatus: (input, listener, options) => {
         let current: VcsStatusResult | null = null;
         return transport.subscribe(

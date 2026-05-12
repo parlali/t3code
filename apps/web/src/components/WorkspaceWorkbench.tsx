@@ -1,13 +1,26 @@
 import { Editor, type BeforeMount, type OnMount } from "@monaco-editor/react";
-import type { EnvironmentId, ProjectEntry, ThreadId, VcsStatusResult } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectEntriesStreamEvent,
+  ProjectEntry,
+  ThreadWorkbenchSelection,
+  ThreadId,
+  VcsStatusResult,
+} from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageSquareIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useComposerDraftStore } from "../composerDraftStore";
 import { ensureEnvironmentApi } from "../environmentApi";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useTheme } from "../hooks/useTheme";
 import { buildTurnDiffTree } from "../lib/turnDiffTree";
-import { gitFileDiffQueryOptions, gitQueryKeys } from "../lib/gitReactQuery";
+import {
+  gitCommitGraphQueryOptions,
+  gitFileDiffQueryOptions,
+  gitQueryKeys,
+} from "../lib/gitReactQuery";
 import { refreshGitStatus, useGitStatus } from "../lib/gitStatusState";
 import {
   projectListEntriesQueryOptions,
@@ -26,7 +39,7 @@ import {
   PANE_RESIZE_RAIL_CLASS,
   PaneSidebarToggleButton,
 } from "./ui/pane-chrome";
-import { Sheet, SheetClose, SheetPopup, SheetTrigger } from "./ui/sheet";
+import { startResizeInteraction, type ResizeInteractionHandle } from "./ui/resize-interaction";
 import {
   type ExplorerMode,
   WorkbenchExplorerPanel,
@@ -42,6 +55,10 @@ import {
   languageFor,
   buildTree,
   configureWorkbenchMonaco,
+  isChangeSelectionAvailable,
+  isFileSelectionAvailable,
+  selectionForTab,
+  tabForSelection,
   workbenchCodeEditorOptions,
   workbenchEditorTheme,
   clampExplorerWidth,
@@ -84,15 +101,15 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   const { resolvedTheme } = useTheme();
   const isMobileLayout = useMediaQuery(MOBILE_LAYOUT_MEDIA_QUERY);
   const [mobileExplorerOpen, setMobileExplorerOpen] = useState(false);
-  const activeThread = useStore(
-    useMemo(
-      () =>
-        createThreadSelectorByRef({ environmentId: props.environmentId, threadId: props.threadId }),
-      [props.environmentId, props.threadId],
-    ),
+  const threadRef = useMemo(
+    () => scopeThreadRef(props.environmentId, props.threadId),
+    [props.environmentId, props.threadId],
   );
-  const activeProjectEnvironmentId = activeThread?.environmentId ?? null;
-  const activeProjectId = activeThread?.projectId ?? null;
+  const activeThread = useStore(useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]));
+  const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
+  const activeProjectEnvironmentId =
+    activeThread?.environmentId ?? draftThread?.environmentId ?? null;
+  const activeProjectId = activeThread?.projectId ?? draftThread?.projectId ?? null;
   const activeProjectRef = useMemo(
     () =>
       activeProjectEnvironmentId && activeProjectId
@@ -103,7 +120,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   const activeProject = useStore(
     useMemo(() => createProjectSelectorByRef(activeProjectRef), [activeProjectRef]),
   );
-  const cwd = activeThread?.worktreePath ?? activeProject?.cwd ?? null;
+  const cwd = activeThread?.worktreePath ?? draftThread?.worktreePath ?? activeProject?.cwd ?? null;
   const gitStatus = useGitStatus({
     environmentId: props.environmentId,
     cwd,
@@ -134,11 +151,16 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   const [explorerResizing, setExplorerResizing] = useState(false);
   const workbenchRef = useRef<HTMLElement | null>(null);
   const resizingRef = useRef(false);
-  const resizeStartRef = useRef<{ readonly clientX: number; readonly width: number } | null>(null);
+  const resizeStartRef = useRef<{
+    readonly clientX: number;
+    readonly interaction: ResizeInteractionHandle;
+    readonly width: number;
+  } | null>(null);
   const explorerWidthRef = useRef(explorerWidth);
   const fileBuffersRef = useRef(fileBuffers);
   const diffBuffersRef = useRef(diffBuffers);
   const saveActiveRef = useRef<() => void>(() => undefined);
+  const workbenchSelectionVersionRef = useRef(0);
 
   const { tabs, activeTabId } = tabState;
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
@@ -168,6 +190,12 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       relativePath: activeKind === "diff" ? activePath : null,
     }),
   );
+  const commitGraphQuery = useQuery(
+    gitCommitGraphQueryOptions({
+      environmentId: props.environmentId,
+      cwd,
+    }),
+  );
   const treeEntries = listQuery.data?.entries ?? EMPTY_TREE_ENTRIES;
   const tree = useMemo(() => buildTree(treeEntries), [treeEntries]);
   const changedFiles = gitStatus.data?.workingTree.files ?? EMPTY_CHANGED_FILES;
@@ -186,14 +214,36 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   const diffQueryOriginal = diffQuery.data?.original;
   const diffQueryModified = diffQuery.data?.modified;
 
-  const openTab = useCallback((tab: WorkbenchTab) => {
-    setTabState((current) => ({
-      tabs: current.tabs.some((entry) => entry.id === tab.id)
-        ? current.tabs
-        : [...current.tabs, tab],
-      activeTabId: tab.id,
-    }));
-  }, []);
+  const persistWorkbenchSelection = useCallback(
+    (selection: ThreadWorkbenchSelection | null) => {
+      workbenchSelectionVersionRef.current += 1;
+      try {
+        const api = ensureEnvironmentApi(props.environmentId);
+        void api.threadWorkbench
+          .setState({
+            threadId: props.threadId,
+            selection,
+          })
+          .catch(() => undefined);
+      } catch {
+        // Selection persistence should never block local workbench navigation.
+      }
+    },
+    [props.environmentId, props.threadId],
+  );
+
+  const openTab = useCallback(
+    (tab: WorkbenchTab, options?: { readonly persist?: boolean }) => {
+      setTabState((current) => ({
+        tabs: current.tabs.some((entry) => entry.id === tab.id)
+          ? current.tabs
+          : [...current.tabs, tab],
+        activeTabId: tab.id,
+      }));
+      if (options?.persist !== false) persistWorkbenchSelection(selectionForTab(tab));
+    },
+    [persistWorkbenchSelection],
+  );
 
   useEffect(() => {
     return subscribeWorkbenchOpen((request) => {
@@ -224,29 +274,42 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     }
   }, [activeKind, activePath, activeTabDirty, diffQueryModified]);
 
-  const closeTab = useCallback((tabId: string) => {
-    setTabState((current) => {
-      const tabs = current.tabs.filter((tab) => tab.id !== tabId);
-      return {
-        tabs,
-        activeTabId:
-          current.activeTabId === tabId ? (tabs.at(-1)?.id ?? null) : current.activeTabId,
-      };
-    });
-    setDirtyTabs((current) => {
-      const next = new Set(current);
-      next.delete(tabId);
-      return next;
-    });
-  }, []);
+  const closeTab = useCallback(
+    (tabId: string) => {
+      const nextTabs = tabs.filter((tab) => tab.id !== tabId);
+      const nextActiveTabId = activeTabId === tabId ? (nextTabs.at(-1)?.id ?? null) : activeTabId;
+      setTabState({
+        tabs: nextTabs,
+        activeTabId: nextActiveTabId,
+      });
+      setDirtyTabs((current) => {
+        const next = new Set(current);
+        next.delete(tabId);
+        return next;
+      });
+      if (activeTabId === tabId) {
+        const nextActiveTab = nextTabs.find((tab) => tab.id === nextActiveTabId) ?? null;
+        persistWorkbenchSelection(nextActiveTab ? selectionForTab(nextActiveTab) : null);
+      }
+    },
+    [activeTabId, persistWorkbenchSelection, tabs],
+  );
 
-  const selectTab = useCallback((tabId: string) => {
-    setTabState((current) =>
-      current.activeTabId === tabId ? current : { ...current, activeTabId: tabId },
-    );
-  }, []);
+  const selectTab = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((tab) => tab.id === tabId);
+      if (!tab) return;
+      setTabState((current) =>
+        current.activeTabId === tabId ? current : { ...current, activeTabId: tabId },
+      );
+      persistWorkbenchSelection(selectionForTab(tab));
+    },
+    [persistWorkbenchSelection, tabs],
+  );
 
   useEffect(() => {
+    workbenchSelectionVersionRef.current += 1;
+    const restoreVersion = workbenchSelectionVersionRef.current;
     setTabState({ tabs: [], activeTabId: null });
     fileBuffersRef.current = {};
     diffBuffersRef.current = {};
@@ -255,7 +318,34 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     setDirtyTabs(new Set());
     setExpanded(new Set());
     setCollapsedChangeDirectories(new Set());
-  }, [cwd]);
+
+    if (!cwd) return;
+
+    let cancelled = false;
+    try {
+      const api = ensureEnvironmentApi(props.environmentId);
+      void api.threadWorkbench
+        .getState({ threadId: props.threadId })
+        .then((state) => {
+          if (
+            cancelled ||
+            workbenchSelectionVersionRef.current !== restoreVersion ||
+            state.selection === null
+          ) {
+            return;
+          }
+          setMode(state.selection.source);
+          openTab(tabForSelection(state.selection), { persist: false });
+        })
+        .catch(() => undefined);
+    } catch {
+      return;
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cwd, openTab, props.environmentId, props.threadId]);
 
   const refreshWorkspace = useCallback(async () => {
     await Promise.all([
@@ -264,6 +354,19 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       refreshGitStatus({ environmentId: props.environmentId, cwd }),
     ]);
   }, [cwd, props.environmentId, queryClient]);
+
+  useEffect(() => {
+    if (!cwd) return;
+    const api = ensureEnvironmentApi(props.environmentId);
+    const handleEntriesChanged = (event: ProjectEntriesStreamEvent) => {
+      if (event.type === "entries-changed") {
+        void refreshWorkspace();
+      }
+    };
+    return api.projects.subscribeEntries({ cwd }, handleEntriesChanged, {
+      onResubscribe: () => void refreshWorkspace(),
+    });
+  }, [cwd, props.environmentId, refreshWorkspace]);
 
   const saveActive = useCallback(async () => {
     if (!activeTab || !cwd) return;
@@ -365,14 +468,18 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     const onPointerMove = (event: PointerEvent) => {
       if (!resizingRef.current) return;
       const start = resizeStartRef.current;
-      if (!start) return;
+      if (!start || start.interaction.pointerId !== event.pointerId) return;
+      event.preventDefault();
       const next = clampExplorerWidth(start.width + event.clientX - start.clientX);
       setExplorerWidth(next);
     };
-    const stop = () => {
+    const stop = (event: PointerEvent) => {
       if (!resizingRef.current) return;
+      const start = resizeStartRef.current;
+      if (!start || start.interaction.pointerId !== event.pointerId) return;
       resizingRef.current = false;
       setExplorerResizing(false);
+      start.interaction.release();
       resizeStartRef.current = null;
       window.localStorage.setItem(
         WORKBENCH_EXPLORER_WIDTH_STORAGE_KEY,
@@ -381,9 +488,14 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
     return () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      resizeStartRef.current?.interaction.release();
+      resizeStartRef.current = null;
+      resizingRef.current = false;
     };
   }, []);
 
@@ -413,6 +525,78 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     [isMobileLayout, mode, openTab],
   );
 
+  const clearUnavailableActiveSelection = useCallback(
+    (tabId: string) => {
+      setTabState((current) => {
+        if (current.activeTabId !== tabId) return current;
+        return {
+          tabs: current.tabs.filter((tab) => tab.id !== tabId),
+          activeTabId: null,
+        };
+      });
+      setDirtyTabs((current) => {
+        if (!current.has(tabId)) return current;
+        const next = new Set(current);
+        next.delete(tabId);
+        return next;
+      });
+      persistWorkbenchSelection(null);
+    },
+    [persistWorkbenchSelection],
+  );
+
+  useEffect(() => {
+    if (!cwd || !activeTab) return;
+
+    if (activeTab.kind === "file") {
+      if (!listQuery.isSuccess || listQuery.isPlaceholderData) return;
+      if (!isFileSelectionAvailable(treeEntries, activeTab.path)) {
+        clearUnavailableActiveSelection(activeTab.id);
+      }
+      return;
+    }
+
+    if (gitStatus.isPending || gitStatus.data === null) return;
+    if (!isChangeSelectionAvailable(gitStatus.data.workingTree.files, activeTab.path)) {
+      clearUnavailableActiveSelection(activeTab.id);
+    }
+  }, [
+    activeTab,
+    clearUnavailableActiveSelection,
+    cwd,
+    gitStatus.data,
+    gitStatus.isPending,
+    listQuery.isPlaceholderData,
+    listQuery.isSuccess,
+    treeEntries,
+  ]);
+
+  const toggleMobileExplorer = useCallback(() => {
+    setMobileExplorerOpen((open) => !open);
+  }, []);
+
+  const closeMobileExplorer = useCallback(() => {
+    setMobileExplorerOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileLayout && mobileExplorerOpen) {
+      setMobileExplorerOpen(false);
+    }
+  }, [isMobileLayout, mobileExplorerOpen]);
+
+  useEffect(() => {
+    if (!mobileExplorerOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setMobileExplorerOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileExplorerOpen]);
+
   const mobileToolbar = (
     <div className={`${PANE_HEADER_CLASS} ${PANE_HEADER_PADDING_CLASS} gap-1.5`}>
       {onSwitchToChat && (
@@ -428,38 +612,13 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
         </Button>
       )}
 
-      <Sheet open={mobileExplorerOpen} onOpenChange={setMobileExplorerOpen}>
-        <SheetTrigger
-          render={<PaneSidebarToggleButton expanded={false} label="Open file browser" />}
-        />
-        <SheetPopup side="left" showCloseButton={false} className="w-72 max-w-[85vw]">
-          <SheetClose
-            render={
-              <PaneSidebarToggleButton
-                expanded
-                label="Close file browser"
-                className="absolute right-3 top-3 z-10"
-              />
-            }
-          />
-          <WorkbenchExplorerPanel
-            cwd={cwd}
-            mode={mode}
-            onModeChange={setMode}
-            tree={tree}
-            changedTree={changedTree}
-            expanded={expanded}
-            collapsedChangeDirectories={collapsedChangeDirectories}
-            selectedPath={activePath}
-            listError={listQuery.error ?? null}
-            gitError={gitStatus.error ?? null}
-            changedFilesCount={changedFiles.length}
-            onToggleExpanded={handleToggleExpanded}
-            onToggleCollapsedChangeDirectory={handleToggleCollapsedChangeDirectory}
-            onOpenFile={handleOpenFileFromExplorer}
-          />
-        </SheetPopup>
-      </Sheet>
+      <PaneSidebarToggleButton
+        expanded={mobileExplorerOpen}
+        label={mobileExplorerOpen ? "Close file browser" : "Open file browser"}
+        aria-expanded={mobileExplorerOpen}
+        aria-controls="workbench-mobile-explorer"
+        onClick={toggleMobileExplorer}
+      />
 
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {activeTab ? (
@@ -507,10 +666,18 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
             selectedPath={activePath}
             listError={listQuery.error ?? null}
             gitError={gitStatus.error ?? null}
+            commitGraphCommits={commitGraphQuery.data?.commits ?? []}
+            commitGraphError={commitGraphQuery.error ?? null}
             changedFilesCount={changedFiles.length}
+            commitGraphTruncated={commitGraphQuery.data?.truncated ?? false}
+            isRefreshing={
+              listQuery.isFetching || gitStatus.isPending || commitGraphQuery.isFetching
+            }
+            isCommitGraphLoading={commitGraphQuery.isPending}
             onToggleExpanded={handleToggleExpanded}
             onToggleCollapsedChangeDirectory={handleToggleCollapsedChangeDirectory}
             onOpenFile={(path) => openTab(tabFor(mode === "files" ? "file" : "diff", path))}
+            onRefresh={refreshWorkspace}
             showCollapseButton
             onCollapse={() => setExplorerCollapsed(true)}
           />
@@ -520,10 +687,16 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
         <div
           className={PANE_RESIZE_RAIL_CLASS}
           onPointerDown={(event) => {
-            event.currentTarget.setPointerCapture(event.pointerId);
+            if (event.button !== 0) return;
+            resizeStartRef.current?.interaction.release();
+            const interaction = startResizeInteraction(event, { cursor: "col-resize" });
             setExplorerResizing(true);
             resizingRef.current = true;
-            resizeStartRef.current = { clientX: event.clientX, width: explorerWidthRef.current };
+            resizeStartRef.current = {
+              clientX: event.clientX,
+              interaction,
+              width: explorerWidthRef.current,
+            };
           }}
         />
       )}
@@ -569,36 +742,13 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
 
   const embeddedMobileBar = embedded && isMobileLayout && (
     <div className={`${PANE_HEADER_CLASS} ${PANE_HEADER_PADDING_CLASS} gap-1.5`}>
-      <Sheet open={mobileExplorerOpen} onOpenChange={setMobileExplorerOpen}>
-        <SheetTrigger render={<PaneSidebarToggleButton expanded={false} label="Browse files" />} />
-        <SheetPopup side="left" showCloseButton={false} className="w-72 max-w-[85vw]">
-          <SheetClose
-            render={
-              <PaneSidebarToggleButton
-                expanded
-                label="Close file browser"
-                className="absolute right-3 top-3 z-10"
-              />
-            }
-          />
-          <WorkbenchExplorerPanel
-            cwd={cwd}
-            mode={mode}
-            onModeChange={setMode}
-            tree={tree}
-            changedTree={changedTree}
-            expanded={expanded}
-            collapsedChangeDirectories={collapsedChangeDirectories}
-            selectedPath={activePath}
-            listError={listQuery.error ?? null}
-            gitError={gitStatus.error ?? null}
-            changedFilesCount={changedFiles.length}
-            onToggleExpanded={handleToggleExpanded}
-            onToggleCollapsedChangeDirectory={handleToggleCollapsedChangeDirectory}
-            onOpenFile={handleOpenFileFromExplorer}
-          />
-        </SheetPopup>
-      </Sheet>
+      <PaneSidebarToggleButton
+        expanded={mobileExplorerOpen}
+        label={mobileExplorerOpen ? "Close file browser" : "Browse files"}
+        aria-expanded={mobileExplorerOpen}
+        aria-controls="workbench-mobile-explorer"
+        onClick={toggleMobileExplorer}
+      />
 
       <div className="flex min-w-0 flex-1 items-center">
         <span className="min-w-0 truncate text-xs text-muted-foreground">
@@ -619,22 +769,66 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     </div>
   );
 
+  const mobileExplorerOverlay = isMobileLayout && (
+    <div className="pointer-events-none absolute inset-0 z-20" aria-hidden={!mobileExplorerOpen}>
+      <div
+        className={cn(
+          "absolute inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200",
+          mobileExplorerOpen ? "pointer-events-auto opacity-100" : "opacity-0",
+        )}
+        onClick={closeMobileExplorer}
+      />
+      <div
+        id="workbench-mobile-explorer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="File browser"
+        className={cn(
+          "absolute inset-y-0 left-0 flex w-[min(calc(100vw_-_0.75rem),42rem)] max-w-none flex-col border-r border-border bg-popover shadow-lg transition-transform duration-200 ease-out",
+          mobileExplorerOpen ? "pointer-events-auto translate-x-0" : "-translate-x-full",
+        )}
+      >
+        <WorkbenchExplorerPanel
+          cwd={cwd}
+          mode={mode}
+          onModeChange={setMode}
+          tree={tree}
+          changedTree={changedTree}
+          expanded={expanded}
+          collapsedChangeDirectories={collapsedChangeDirectories}
+          selectedPath={activePath}
+          listError={listQuery.error ?? null}
+          gitError={gitStatus.error ?? null}
+          commitGraphCommits={commitGraphQuery.data?.commits ?? []}
+          commitGraphError={commitGraphQuery.error ?? null}
+          changedFilesCount={changedFiles.length}
+          commitGraphTruncated={commitGraphQuery.data?.truncated ?? false}
+          isRefreshing={listQuery.isFetching || gitStatus.isPending || commitGraphQuery.isFetching}
+          isCommitGraphLoading={commitGraphQuery.isPending}
+          onToggleExpanded={handleToggleExpanded}
+          onToggleCollapsedChangeDirectory={handleToggleCollapsedChangeDirectory}
+          onOpenFile={handleOpenFileFromExplorer}
+          onRefresh={refreshWorkspace}
+          showCollapseButton
+          onCollapse={closeMobileExplorer}
+        />
+      </div>
+    </div>
+  );
+
   const showStandaloneToolbar = isMobileLayout && !embedded;
 
   return (
     <section
       ref={workbenchRef}
-      className={cn(
-        "flex h-full min-h-0 min-w-0 overflow-hidden bg-background text-foreground",
-        !isMobileLayout && !embedded && "border-l border-border",
-      )}
+      className="flex h-full min-h-0 min-w-0 overflow-hidden bg-background text-foreground"
     >
       {!isMobileLayout && desktopSidebar}
       <div className="flex min-w-0 flex-1 flex-col">
         {showStandaloneToolbar && mobileToolbar}
         {embeddedMobileBar}
         {!isMobileLayout && desktopHeader}
-        <div className="min-h-0 flex-1">
+        <div className="relative min-h-0 flex-1">
           {!activeTab ? (
             <WorkbenchMessage>Open a file or change from the explorer.</WorkbenchMessage>
           ) : activeTab.kind === "file" && fileQuery.isError ? (
@@ -678,6 +872,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
               resolvedTheme={resolvedTheme === "dark" ? "dark" : "light"}
             />
           )}
+          {mobileExplorerOverlay}
         </div>
       </div>
     </section>

@@ -17,12 +17,14 @@ export type ThreadReadReceiptSnapshot = typeof ThreadReadReceiptSnapshot.Type;
 export const ThreadReadReceiptMarkVisitedInput = Schema.Struct({
   threadId: ThreadId,
   visitedAt: Schema.optional(IsoDateTime),
+  observedAt: Schema.optional(IsoDateTime),
 });
 export type ThreadReadReceiptMarkVisitedInput = typeof ThreadReadReceiptMarkVisitedInput.Type;
 
 export const ThreadReadReceiptMarkUnreadInput = Schema.Struct({
   threadId: ThreadId,
   latestTurnCompletedAt: IsoDateTime,
+  observedAt: Schema.optional(IsoDateTime),
 });
 export type ThreadReadReceiptMarkUnreadInput = typeof ThreadReadReceiptMarkUnreadInput.Type;
 

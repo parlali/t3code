@@ -89,6 +89,18 @@ function createTestClient() {
       markUnread: vi.fn(async () => undefined),
       subscribe: vi.fn(() => () => undefined),
     },
+    threadWorkbench: {
+      getState: vi.fn(async () => ({
+        threadId: "thread-1",
+        selection: null,
+        updatedAt: new Date().toISOString(),
+      })),
+      setState: vi.fn(async (input: any) => ({
+        threadId: input.threadId,
+        selection: input.selection,
+        updatedAt: new Date().toISOString(),
+      })),
+    },
     projects: {
       searchEntries: vi.fn(async () => []),
       writeFile: vi.fn(async () => undefined),

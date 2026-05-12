@@ -14,7 +14,7 @@ import {
   ChangeRequestStatusIcon,
   prStatusIndicator,
   resolveThreadPr,
-  terminalStatusFromRunningIds,
+  terminalStatusFromOpenState,
   ThreadStatusLabel,
 } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
@@ -71,10 +71,6 @@ import {
   useStore,
 } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
-import {
-  selectThreadTerminalRuntimeStatus,
-  useTerminalRuntimeStatusStore,
-} from "../terminalRuntimeStatusStore";
 import { useThreadReadReceiptStore } from "../threadReadReceiptStore";
 import { useUiStateStore } from "../uiStateStore";
 import {
@@ -176,6 +172,7 @@ import {
   derivePhysicalProjectKey,
   deriveProjectGroupingOverrideKey,
   getProjectOrderKey,
+  selectProjectGroupingSettings,
 } from "../logicalProject";
 import {
   useSavedEnvironmentRegistryStore,
@@ -330,8 +327,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const hasSelection = useThreadSelectionStore((state) => state.selectedThreadKeys.size > 0);
-  const terminalRuntimeStatus = useTerminalRuntimeStatusStore((state) =>
-    selectThreadTerminalRuntimeStatus(state, thread.environmentId, thread.id),
+  const terminalOpen = useTerminalStateStore(
+    (state) => selectThreadTerminalState(state.terminalStateByThreadKey, threadRef).terminalOpen,
   );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isRemoteThread =
@@ -372,11 +369,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   });
   const pr = resolveThreadPr(thread.branch, gitStatus.data);
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
-  const terminalStatus = terminalStatusFromRunningIds(
-    terminalRuntimeStatus.runningTerminalIds.length > 0
-      ? [...terminalRuntimeStatus.runningTerminalIds]
-      : [...terminalRuntimeStatus.openTerminalIds],
-  );
+  const terminalStatus = terminalStatusFromOpenState(terminalOpen);
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
@@ -938,10 +931,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const defaultThreadEnvMode = useSettings<ThreadEnvMode>(
     (settings) => settings.defaultThreadEnvMode,
   );
-  const projectGroupingSettings = useSettings((settings) => ({
-    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
-    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
-  }));
+  const projectGroupingSettings = useSettings(selectProjectGroupingSettings);
   const { updateSettings } = useUpdateSettings();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -1048,13 +1038,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (!threadRef) {
         return;
       }
+      const observedAt = new Date().toISOString();
       useThreadReadReceiptStore
         .getState()
-        .markUnreadOptimistic(threadRef.environmentId, threadRef.threadId, latestTurnCompletedAt);
+        .markUnreadOptimistic(
+          threadRef.environmentId,
+          threadRef.threadId,
+          latestTurnCompletedAt,
+          observedAt,
+        );
       void readEnvironmentApi(threadRef.environmentId)
         ?.threadRead.markUnread({
           threadId: threadRef.threadId,
           latestTurnCompletedAt,
+          observedAt,
         })
         .catch((error: unknown) => {
           console.warn("Failed to mark thread unread", error);
@@ -2429,9 +2426,11 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
               <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
                 Code
               </span>
-              <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
-                {APP_STAGE_LABEL}
-              </span>
+              {APP_STAGE_LABEL ? (
+                <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+                  {APP_STAGE_LABEL}
+                </span>
+              ) : null}
             </Link>
           }
         />
@@ -2758,10 +2757,7 @@ export default function Sidebar() {
   const sidebarThreadSortOrder = useSettings((s) => s.sidebarThreadSortOrder);
   const sidebarProjectSortOrder = useSettings((s) => s.sidebarProjectSortOrder);
   const sidebarProjectGroupingMode = useSettings((s) => s.sidebarProjectGroupingMode);
-  const projectGroupingSettings = useSettings((settings) => ({
-    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
-    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
-  }));
+  const projectGroupingSettings = useSettings(selectProjectGroupingSettings);
   const { updateSettings } = useUpdateSettings();
   const { handleNewThread } = useNewThreadHandler();
   const { archiveThread, deleteThread } = useThreadActions();
