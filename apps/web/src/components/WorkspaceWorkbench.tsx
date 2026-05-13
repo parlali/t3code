@@ -73,8 +73,27 @@ interface WorkbenchTabState {
   readonly activeTabId: string | null;
 }
 
+interface CommitGraphInvalidationSnapshot {
+  readonly scope: string;
+  readonly refreshKey: string;
+}
+
 const EMPTY_TREE_ENTRIES: readonly ProjectEntry[] = Object.freeze([]);
 const EMPTY_CHANGED_FILES: VcsStatusResult["workingTree"]["files"] = Object.freeze([]);
+const GIT_STATUS_GRAPH_REFRESH_KEY_SEPARATOR = "\u001f";
+
+function commitGraphRefreshKey(status: VcsStatusResult | null): string | null {
+  if (status === null) return null;
+  return [
+    status.isRepo ? "repo" : "not-repo",
+    status.refName ?? "",
+    status.headSha ?? "",
+    status.hasUpstream ? "upstream" : "no-upstream",
+    status.aheadCount,
+    status.behindCount,
+    status.aheadOfDefaultCount ?? 0,
+  ].join(GIT_STATUS_GRAPH_REFRESH_KEY_SEPARATOR);
+}
 
 function WorkbenchMessage(props: { readonly children: ReactNode }) {
   return (
@@ -125,6 +144,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     environmentId: props.environmentId,
     cwd,
   });
+  const lastGraphInvalidationStatusRef = useRef<CommitGraphInvalidationSnapshot | null>(null);
   const [mode, setMode] = useState<ExplorerMode>("changes");
   const [tabState, setTabState] = useState<WorkbenchTabState>({
     tabs: [],
@@ -196,6 +216,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       cwd,
     }),
   );
+  const graphRefreshKey = useMemo(() => commitGraphRefreshKey(gitStatus.data), [gitStatus.data]);
   const treeEntries = listQuery.data?.entries ?? EMPTY_TREE_ENTRIES;
   const tree = useMemo(() => buildTree(treeEntries), [treeEntries]);
   const changedFiles = gitStatus.data?.workingTree.files ?? EMPTY_CHANGED_FILES;
@@ -354,6 +375,23 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       refreshGitStatus({ environmentId: props.environmentId, cwd }),
     ]);
   }, [cwd, props.environmentId, queryClient]);
+
+  useEffect(() => {
+    if (!cwd || graphRefreshKey === null) return;
+    const scope = [props.environmentId, cwd].join(GIT_STATUS_GRAPH_REFRESH_KEY_SEPARATOR);
+    const lastSnapshot = lastGraphInvalidationStatusRef.current;
+
+    if (!lastSnapshot || lastSnapshot.scope !== scope) {
+      lastGraphInvalidationStatusRef.current = { scope, refreshKey: graphRefreshKey };
+      return;
+    }
+
+    if (lastSnapshot.refreshKey === graphRefreshKey) return;
+    lastGraphInvalidationStatusRef.current = { scope, refreshKey: graphRefreshKey };
+    void queryClient.invalidateQueries({
+      queryKey: gitQueryKeys.commitGraphScope(props.environmentId, cwd),
+    });
+  }, [cwd, graphRefreshKey, props.environmentId, queryClient]);
 
   useEffect(() => {
     if (!cwd) return;

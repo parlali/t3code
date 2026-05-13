@@ -135,6 +135,10 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         rpcClient
           ? rpcClient.server.updateSettings(patch)
           : Promise.reject(unavailableLocalBackendError()),
+      getProviderUsage: (input) =>
+        rpcClient
+          ? rpcClient.server.getProviderUsage(input)
+          : Promise.reject(unavailableLocalBackendError()),
       discoverSourceControl: () =>
         rpcClient
           ? rpcClient.server.discoverSourceControl()

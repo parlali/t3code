@@ -2,10 +2,12 @@ import {
   type EnvironmentId,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetTurnDiffInput,
+  type ProviderUsageInput,
   ThreadId,
 } from "@t3tools/contracts";
 import { queryOptions } from "@tanstack/react-query";
 import { Option, Schema } from "effect";
+import { ensureLocalApi } from "../localApi";
 import { ensureEnvironmentApi } from "../environmentApi";
 
 interface CheckpointDiffQueryInput {
@@ -31,6 +33,7 @@ export const providerQueryKeys = {
       input.ignoreWhitespace,
       input.cacheScope ?? null,
     ] as const,
+  usage: (instanceId?: string | null) => ["providers", "usage", instanceId ?? null] as const,
 };
 
 function decodeCheckpointDiffRequest(input: CheckpointDiffQueryInput) {
@@ -131,5 +134,14 @@ export function checkpointDiffQueryOptions(input: CheckpointDiffQueryInput) {
       isCheckpointTemporarilyUnavailable(error)
         ? Math.min(5_000, 250 * 2 ** (attempt - 1))
         : Math.min(1_000, 100 * 2 ** (attempt - 1)),
+  });
+}
+
+export function providerUsageQueryOptions(input?: ProviderUsageInput) {
+  return queryOptions({
+    queryKey: providerQueryKeys.usage(input?.instanceId ?? null),
+    queryFn: () => ensureLocalApi().server.getProviderUsage(input),
+    staleTime: 30_000,
+    retry: 1,
   });
 }

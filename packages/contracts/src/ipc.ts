@@ -39,6 +39,7 @@ import type {
   ProjectWriteFileResult,
 } from "./project.ts";
 import type { ProviderInstanceId } from "./providerInstance.ts";
+import type { ProviderUsageInput, ProviderUsageSnapshot } from "./providerUsage.ts";
 import type {
   ServerConfig,
   ServerProviderUpdatedPayload,
@@ -328,6 +329,7 @@ export interface LocalApi {
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
+    getProviderUsage: (input?: ProviderUsageInput) => Promise<ProviderUsageSnapshot>;
     discoverSourceControl: () => Promise<SourceControlDiscoveryResult>;
   };
 }

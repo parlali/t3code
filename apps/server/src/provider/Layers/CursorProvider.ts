@@ -45,6 +45,7 @@ const CURSOR_ACP_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
 const CURSOR_ACP_MODEL_CAPABILITY_TIMEOUT = "4 seconds";
 const CURSOR_ACP_MODEL_DISCOVERY_CONCURRENCY = 4;
 const CURSOR_PARAMETERIZED_MODEL_PICKER_MIN_VERSION_DATE = 2026_04_08;
+const CURSOR_CAPABILITY_DISCOVERY_PENDING_MESSAGE = "Cursor model options are still loading.";
 export const CURSOR_PARAMETERIZED_MODEL_PICKER_CAPABILITIES = {
   _meta: {
     parameterizedModelPicker: true,
@@ -96,8 +97,15 @@ interface CursorSessionSelectOption {
 interface CursorAcpDiscoveredModel {
   readonly slug: string;
   readonly name: string;
-  readonly capabilities: ModelCapabilities;
+  readonly capabilities: ModelCapabilities | null;
 }
+
+type CursorProviderSnapshotWithDiscoveryStatus = Pick<
+  ServerProvider,
+  "auth" | "enabled" | "models" | "status"
+> & {
+  readonly message?: string | undefined;
+};
 
 function flattenSessionConfigSelectOptions(
   configOption: EffectAcpSchema.SessionConfigOption | undefined,
@@ -359,8 +367,22 @@ function buildCursorDiscoveredModels(
   });
 }
 
-function hasCursorModelCapabilities(model: Pick<ServerProviderModel, "capabilities">): boolean {
-  return (model.capabilities?.optionDescriptors?.length ?? 0) > 0;
+function hasCursorModelCapabilities(
+  model: Pick<ServerProviderModel, "capabilities">,
+): model is Pick<ServerProviderModel, "capabilities"> & { capabilities: ModelCapabilities } {
+  return model.capabilities !== null && model.capabilities !== undefined;
+}
+
+function getCapturedCursorCapabilitiesBySlug(
+  models: ReadonlyArray<ServerProviderModel>,
+): Map<string, ModelCapabilities> {
+  const capabilitiesBySlug = new Map<string, ModelCapabilities>();
+  for (const model of models) {
+    if (!model.isCustom && hasCursorModelCapabilities(model)) {
+      capabilitiesBySlug.set(model.slug, model.capabilities);
+    }
+  }
+  return capabilitiesBySlug;
 }
 
 export function buildCursorDiscoveredModelsFromConfigOptions(
@@ -385,9 +407,7 @@ export function buildCursorDiscoveredModelsFromConfigOptions(
       slug: modelChoice.value.trim(),
       name: modelChoice.name.trim(),
       capabilities:
-        currentModelValue === modelChoice.value.trim()
-          ? currentModelCapabilities
-          : EMPTY_CAPABILITIES,
+        currentModelValue === modelChoice.value.trim() ? currentModelCapabilities : null,
     })),
   );
 }
@@ -574,7 +594,7 @@ export const discoverCursorModelCapabilitiesViaAcp = (
 
         const currentModelValue =
           modelOption.type === "select" ? modelOption.currentValue?.trim() || undefined : undefined;
-        const capabilitiesBySlug = new Map<string, ModelCapabilities>();
+        const capabilitiesBySlug = getCapturedCursorCapabilitiesBySlug(existingModels);
         if (currentModelValue) {
           capabilitiesBySlug.set(
             currentModelValue,
@@ -583,16 +603,16 @@ export const discoverCursorModelCapabilitiesViaAcp = (
         }
 
         const targetModelSlugs = new Set(
-          existingModels
-            .filter((model) => !model.isCustom && !hasCursorModelCapabilities(model))
-            .map((model) => model.slug),
+          modelChoices
+            .map((modelChoice) => modelChoice.value.trim())
+            .filter((modelSlug) => modelSlug.length > 0 && !capabilitiesBySlug.has(modelSlug)),
         );
         if (targetModelSlugs.size === 0) {
           return buildCursorDiscoveredModels(
             modelChoices.map((modelChoice) => ({
               slug: modelChoice.value.trim(),
               name: modelChoice.name.trim(),
-              capabilities: capabilitiesBySlug.get(modelChoice.value.trim()) ?? EMPTY_CAPABILITIES,
+              capabilities: capabilitiesBySlug.get(modelChoice.value.trim()) ?? null,
             })),
           );
         }
@@ -667,7 +687,7 @@ export const discoverCursorModelCapabilitiesViaAcp = (
           modelChoices.map((modelChoice) => ({
             slug: modelChoice.value.trim(),
             name: modelChoice.name.trim(),
-            capabilities: capabilitiesBySlug.get(modelChoice.value.trim()) ?? EMPTY_CAPABILITIES,
+            capabilities: capabilitiesBySlug.get(modelChoice.value.trim()) ?? null,
           })),
         );
       }).pipe(Effect.withSpan("cursor-acp-model-capability-discovery", {})),
@@ -721,24 +741,89 @@ export function buildCursorProviderSnapshot(input: {
   readonly discoveryWarning?: string;
 }): ServerProviderDraft {
   const message = joinProviderMessages(input.parsed.message, input.discoveryWarning);
-  return buildServerProvider({
-    presentation: CURSOR_PRESENTATION,
-    enabled: input.cursorSettings.enabled,
-    checkedAt: input.checkedAt,
-    models: providerModelsFromSettings(
-      input.discoveredModels ?? [],
-      PROVIDER,
-      input.cursorSettings.customModels,
-      EMPTY_CAPABILITIES,
-    ),
-    probe: {
-      installed: true,
-      version: input.parsed.version,
-      status:
-        input.discoveryWarning && input.parsed.status === "ready" ? "warning" : input.parsed.status,
-      auth: input.parsed.auth,
-      ...(message ? { message } : {}),
-    },
+  const models = providerModelsFromSettings(
+    input.discoveredModels ?? [],
+    PROVIDER,
+    input.cursorSettings.customModels,
+    EMPTY_CAPABILITIES,
+  );
+  return withCursorCapabilityDiscoveryStatus(
+    buildServerProvider({
+      presentation: CURSOR_PRESENTATION,
+      enabled: input.cursorSettings.enabled,
+      checkedAt: input.checkedAt,
+      models,
+      probe: {
+        installed: true,
+        version: input.parsed.version,
+        status:
+          input.discoveryWarning && input.parsed.status === "ready"
+            ? "warning"
+            : input.parsed.status,
+        auth: input.parsed.auth,
+        ...(message ? { message } : {}),
+      },
+    }),
+  );
+}
+
+function withCursorCapabilityDiscoveryStatus<
+  Snapshot extends CursorProviderSnapshotWithDiscoveryStatus,
+>(snapshot: Snapshot): Snapshot {
+  if (
+    !snapshot.enabled ||
+    snapshot.status === "disabled" ||
+    snapshot.status === "error" ||
+    snapshot.auth.status === "unauthenticated"
+  ) {
+    return snapshot;
+  }
+
+  if (hasUncapturedCursorModels(snapshot)) {
+    if (
+      snapshot.status === "ready" ||
+      snapshot.message === CURSOR_CAPABILITY_DISCOVERY_PENDING_MESSAGE
+    ) {
+      return {
+        ...snapshot,
+        status: "warning",
+        message: CURSOR_CAPABILITY_DISCOVERY_PENDING_MESSAGE,
+      } as Snapshot;
+    }
+    return snapshot;
+  }
+
+  if (snapshot.message !== CURSOR_CAPABILITY_DISCOVERY_PENDING_MESSAGE) {
+    return snapshot;
+  }
+
+  const { message: _message, ...snapshotWithoutPendingMessage } = snapshot;
+  return {
+    ...snapshotWithoutPendingMessage,
+    status: "ready",
+  } as Snapshot;
+}
+
+export function mergeCursorProviderSnapshotCapabilities(input: {
+  readonly previous: ServerProvider;
+  readonly next: ServerProvider;
+}): ServerProvider {
+  const previousCapabilitiesBySlug = getCapturedCursorCapabilitiesBySlug(input.previous.models);
+  if (previousCapabilitiesBySlug.size === 0) {
+    return withCursorCapabilityDiscoveryStatus(input.next);
+  }
+
+  const models = input.next.models.map((model) => {
+    if (model.isCustom || hasCursorModelCapabilities(model)) {
+      return model;
+    }
+    const previousCapabilities = previousCapabilitiesBySlug.get(model.slug);
+    return previousCapabilities ? { ...model, capabilities: previousCapabilities } : model;
+  });
+
+  return withCursorCapabilityDiscoveryStatus({
+    ...input.next,
+    models,
   });
 }
 
@@ -1236,15 +1321,17 @@ export const enrichCursorSnapshot = (input: {
         return Effect.void;
       }
       return publishSnapshot(
-        stampIdentity({
-          ...snapshot,
-          models: providerModelsFromSettings(
-            discoveredModels,
-            PROVIDER,
-            settings.customModels,
-            EMPTY_CAPABILITIES,
-          ),
-        }),
+        withCursorCapabilityDiscoveryStatus(
+          stampIdentity({
+            ...snapshot,
+            models: providerModelsFromSettings(
+              discoveredModels,
+              PROVIDER,
+              settings.customModels,
+              EMPTY_CAPABILITIES,
+            ),
+          }),
+        ),
       );
     }),
     Effect.catchCause((cause) =>

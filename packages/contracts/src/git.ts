@@ -232,6 +232,7 @@ const VcsStatusLocalShape = {
   hasPrimaryRemote: Schema.Boolean,
   isDefaultRef: Schema.Boolean,
   refName: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  headSha: Schema.optional(Schema.NullOr(TrimmedNonEmptyStringSchema)),
   hasWorkingTreeChanges: Schema.Boolean,
   workingTree: Schema.Struct({
     files: Schema.Array(

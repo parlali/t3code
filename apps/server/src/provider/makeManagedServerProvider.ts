@@ -24,6 +24,10 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     readonly getSnapshot: Effect.Effect<ServerProvider>;
     readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
   }) => Effect.Effect<void>;
+  readonly mergeSnapshot?: (input: {
+    readonly previous: ServerProvider;
+    readonly next: ServerProvider;
+  }) => ServerProvider;
   readonly refreshInterval?: Duration.Input;
 }): Effect.fn.Return<ServerProviderShape, ServerSettingsError, Scope.Scope> {
   const refreshSemaphore = yield* Semaphore.make(1);
@@ -100,13 +104,16 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       return yield* Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot));
     }
 
-    const nextSnapshot = yield* input.checkProvider;
-    const nextGeneration = yield* Ref.modify(snapshotStateRef, (state) => {
+    const checkedSnapshot = yield* input.checkProvider;
+    const [nextSnapshot, nextGeneration] = yield* Ref.modify(snapshotStateRef, (state) => {
+      const nextSnapshot = input.mergeSnapshot
+        ? input.mergeSnapshot({ previous: state.snapshot, next: checkedSnapshot })
+        : checkedSnapshot;
       const generation = input.enrichSnapshot
         ? state.enrichmentGeneration + 1
         : state.enrichmentGeneration;
       return [
-        generation,
+        [nextSnapshot, generation],
         {
           snapshot: nextSnapshot,
           enrichmentGeneration: generation,

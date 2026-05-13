@@ -4,7 +4,12 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, FileSystem, Path } from "effect";
 import { describe, expect, it } from "vitest";
 import type * as EffectAcpSchema from "effect-acp/schema";
-import type { CursorSettings, ServerProviderModel } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type CursorSettings,
+  type ServerProviderModel,
+} from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
 
 import {
@@ -16,6 +21,7 @@ import {
   discoverCursorModelsViaAcp,
   getCursorFallbackModels,
   getCursorParameterizedModelPickerUnsupportedMessage,
+  mergeCursorProviderSnapshotCapabilities,
   parseCursorAboutOutput,
   parseCursorCliConfigChannel,
   parseCursorVersionDate,
@@ -334,8 +340,6 @@ const baseCursorSettings: CursorSettings = {
   customModels: [],
 };
 
-const emptyCapabilities = createModelCapabilities({ optionDescriptors: [] });
-
 describe("getCursorFallbackModels", () => {
   it("does not publish any built-in cursor models before ACP discovery", () => {
     expect(
@@ -459,7 +463,7 @@ describe("buildCursorDiscoveredModelsFromConfigOptions", () => {
         slug: "default",
         name: "Auto",
         isCustom: false,
-        capabilities: emptyCapabilities,
+        capabilities: null,
       },
       {
         slug: "composer-2",
@@ -473,27 +477,82 @@ describe("buildCursorDiscoveredModelsFromConfigOptions", () => {
         slug: "gpt-5.4",
         name: "GPT-5.4",
         isCustom: false,
-        capabilities: emptyCapabilities,
+        capabilities: null,
       },
       {
         slug: "claude-sonnet-4-6",
         name: "Sonnet 4.6",
         isCustom: false,
-        capabilities: emptyCapabilities,
+        capabilities: null,
       },
       {
         slug: "claude-opus-4-6",
         name: "Opus 4.6",
         isCustom: false,
-        capabilities: emptyCapabilities,
+        capabilities: null,
       },
       {
         slug: "gpt-5.3-codex-spark",
         name: "Codex 5.3 Spark",
         isCustom: false,
-        capabilities: emptyCapabilities,
+        capabilities: null,
       },
     ]);
+  });
+});
+
+describe("mergeCursorProviderSnapshotCapabilities", () => {
+  it("preserves enriched capabilities across base snapshot refreshes", () => {
+    const enrichedCapabilities = createModelCapabilities({
+      optionDescriptors: [booleanDescriptor("fastMode", "Fast", false)],
+    });
+    const previous = {
+      ...buildCursorProviderSnapshot({
+        checkedAt: "2026-01-01T00:00:00.000Z",
+        cursorSettings: baseCursorSettings,
+        parsed: {
+          version: "2026.04.09-f2b0fcd",
+          status: "ready",
+          auth: { status: "authenticated" },
+        },
+        discoveredModels: [
+          {
+            slug: "composer-2",
+            name: "Composer 2",
+            isCustom: false,
+            capabilities: enrichedCapabilities,
+          },
+        ],
+      }),
+      instanceId: ProviderInstanceId.make("cursor"),
+      driver: ProviderDriverKind.make("cursor"),
+    } as const;
+    const next = {
+      ...buildCursorProviderSnapshot({
+        checkedAt: "2026-01-01T00:05:00.000Z",
+        cursorSettings: baseCursorSettings,
+        parsed: {
+          version: "2026.04.09-f2b0fcd",
+          status: "ready",
+          auth: { status: "authenticated" },
+        },
+        discoveredModels: [
+          {
+            slug: "composer-2",
+            name: "Composer 2",
+            isCustom: false,
+            capabilities: null,
+          },
+        ],
+      }),
+      instanceId: ProviderInstanceId.make("cursor"),
+      driver: ProviderDriverKind.make("cursor"),
+    } as const;
+
+    expect(mergeCursorProviderSnapshotCapabilities({ previous, next })).toMatchObject({
+      status: "ready",
+      models: [{ slug: "composer-2", capabilities: enrichedCapabilities }],
+    });
   });
 });
 
@@ -572,14 +631,14 @@ describe("discoverCursorModelCapabilitiesViaAcp", () => {
       makeExitLogFixture("cursor-capabilities-exit-log-"),
     );
     const existingModels: ReadonlyArray<ServerProviderModel> = [
-      { slug: "default", name: "Auto", isCustom: false, capabilities: emptyCapabilities },
-      { slug: "composer-2", name: "Composer 2", isCustom: false, capabilities: emptyCapabilities },
-      { slug: "gpt-5.4", name: "GPT-5.4", isCustom: false, capabilities: emptyCapabilities },
+      { slug: "default", name: "Auto", isCustom: false, capabilities: null },
+      { slug: "composer-2", name: "Composer 2", isCustom: false, capabilities: null },
+      { slug: "gpt-5.4", name: "GPT-5.4", isCustom: false, capabilities: null },
       {
         slug: "claude-opus-4-6",
         name: "Opus 4.6",
         isCustom: false,
-        capabilities: emptyCapabilities,
+        capabilities: null,
       },
     ];
 

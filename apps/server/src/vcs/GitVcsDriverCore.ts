@@ -57,6 +57,7 @@ const NON_REPOSITORY_STATUS_DETAILS = Object.freeze<GitVcsDriver.GitStatusDetail
   hasOriginRemote: false,
   isDefaultBranch: false,
   branch: null,
+  headSha: null,
   upstreamRef: null,
   hasWorkingTreeChanges: false,
   workingTree: { files: [], insertions: 0, deletions: 0 },
@@ -119,31 +120,6 @@ function parseCommitGraphOutput(output: string): VcsCommitGraphCommit[] {
           : [],
       },
     ];
-  });
-}
-
-function normalizeCommitGraphRef(ref: string | null): string | null {
-  const trimmed = ref?.trim() ?? "";
-  if (trimmed.length === 0 || trimmed === "HEAD") return null;
-  if (trimmed.startsWith("refs/")) return trimmed;
-  if (trimmed.includes("/")) return `refs/remotes/${trimmed}`;
-  return trimmed;
-}
-
-function buildCommitGraphExtraRefs(input: {
-  readonly upstreamRef: string | null;
-  readonly primaryRemoteName: string | null;
-  readonly primaryDefaultBranch: string | null;
-}): readonly string[] {
-  const refs = [
-    normalizeCommitGraphRef(input.upstreamRef),
-    input.primaryRemoteName && input.primaryDefaultBranch
-      ? `refs/remotes/${input.primaryRemoteName}/${input.primaryDefaultBranch}`
-      : null,
-  ];
-  return refs.filter((ref, index): ref is string => {
-    if (!ref) return false;
-    return refs.indexOf(ref) === index;
   });
 }
 
@@ -1363,6 +1339,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         : null;
 
     let refName: string | null = null;
+    let headSha: string | null = null;
     let upstreamRef: string | null = null;
     let aheadCount = 0;
     let behindCount = 0;
@@ -1374,6 +1351,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       if (line.startsWith("# branch.head ")) {
         const value = line.slice("# branch.head ".length).trim();
         refName = value.startsWith("(") ? null : value;
+        continue;
+      }
+      if (line.startsWith("# branch.oid ")) {
+        const value = line.slice("# branch.oid ".length).trim();
+        headSha = value.length > 0 && !value.startsWith("(") ? value : null;
         continue;
       }
       if (line.startsWith("# branch.upstream ")) {
@@ -1451,6 +1433,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       hasOriginRemote: hasPrimaryRemote,
       isDefaultBranch,
       branch: refName,
+      headSha,
       upstreamRef,
       hasWorkingTreeChanges,
       workingTree: {
@@ -1488,6 +1471,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         hasPrimaryRemote: details.hasOriginRemote,
         isDefaultRef: details.isDefaultBranch,
         refName: details.branch,
+        headSha: details.headSha,
         hasWorkingTreeChanges: details.hasWorkingTreeChanges,
         workingTree: details.workingTree,
         hasUpstream: details.hasUpstream,
@@ -1837,24 +1821,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const commitGraph: GitVcsDriver.GitVcsDriverShape["commitGraph"] = Effect.fn("commitGraph")(
     function* (input) {
       const limit = input.limit ?? GIT_COMMIT_GRAPH_DEFAULT_LIMIT;
-      const upstreamRef = yield* executeGit(
-        "GitVcsDriver.commitGraph.upstreamRef",
-        input.cwd,
-        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-        { allowNonZeroExit: true, timeoutMs: 5_000 },
-      ).pipe(
-        Effect.map((result) => (result.exitCode === 0 ? result.stdout.trim() : null)),
-        Effect.catch(() => Effect.succeed(null)),
-      );
       const primaryRemoteName = yield* resolvePrimaryRemoteName(input.cwd).pipe(
         Effect.catch(() => Effect.succeed(null)),
       );
-      const primaryDefaultBranch =
-        primaryRemoteName === null
-          ? null
-          : yield* resolveDefaultBranchName(input.cwd, primaryRemoteName).pipe(
-              Effect.catch(() => Effect.succeed(null)),
-            );
       const primaryRemoteUrl =
         primaryRemoteName === null
           ? null
@@ -1869,11 +1838,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             );
       const githubRepositoryNameWithOwner =
         parseGitHubRepositoryNameWithOwnerFromRemoteUrl(primaryRemoteUrl);
-      const extraRefs = buildCommitGraphExtraRefs({
-        upstreamRef,
-        primaryRemoteName,
-        primaryDefaultBranch,
-      });
       const args = [
         "log",
         "--topo-order",
@@ -1882,9 +1846,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         `--max-count=${limit}`,
         `--pretty=format:%H${GIT_COMMIT_GRAPH_FIELD_SEPARATOR}%P${GIT_COMMIT_GRAPH_FIELD_SEPARATOR}%h${GIT_COMMIT_GRAPH_FIELD_SEPARATOR}%s${GIT_COMMIT_GRAPH_FIELD_SEPARATOR}%an${GIT_COMMIT_GRAPH_FIELD_SEPARATOR}%ar${GIT_COMMIT_GRAPH_FIELD_SEPARATOR}%D`,
         "--exclude=refs/t3/checkpoints/*",
-        "--branches",
         "HEAD",
-        ...extraRefs,
       ];
       const result = yield* executeGit("GitVcsDriver.commitGraph", input.cwd, args, {
         allowNonZeroExit: true,

@@ -112,6 +112,7 @@ function nonRepositoryLocalStatus(): VcsStatusLocalResult {
     hasPrimaryRemote: false,
     isDefaultRef: false,
     refName: null,
+    headSha: null,
     hasWorkingTreeChanges: false,
     workingTree: {
       files: [],

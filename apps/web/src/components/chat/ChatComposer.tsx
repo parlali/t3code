@@ -179,6 +179,18 @@ function isInsideComposerFloatingLayer(element: Element): boolean {
   return element.closest(COMPOSER_FLOATING_LAYER_SELECTOR) !== null;
 }
 
+function isProviderReadyForComposerSend(status: ServerProvider | null): boolean {
+  if (!status) {
+    return false;
+  }
+  return (
+    status.enabled &&
+    status.installed &&
+    status.status === "ready" &&
+    status.availability !== "unavailable"
+  );
+}
+
 const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
@@ -302,6 +314,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isSendBusy: boolean;
   isConnecting: boolean;
   isEnvironmentUnavailable: boolean;
+  isProviderUnavailable: boolean;
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
@@ -323,6 +336,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isSendBusy={props.isSendBusy}
         isConnecting={props.isConnecting}
         isEnvironmentUnavailable={props.isEnvironmentUnavailable}
+        isProviderUnavailable={props.isProviderUnavailable}
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
@@ -716,6 +730,8 @@ export const ChatComposer = memo(
       () => selectedProviderEntry?.snapshot ?? null,
       [selectedProviderEntry],
     );
+    const selectedProviderUnavailableForSend =
+      !isProviderReadyForComposerSend(selectedProviderStatus);
     const selectedProviderModels = useMemo<ReadonlyArray<ServerProvider["models"][number]>>(
       () => selectedProviderEntry?.models ?? [],
       [selectedProviderEntry],
@@ -973,7 +989,7 @@ export const ChatComposer = memo(
       if (showPlanFollowUpPrompt) {
         return prompt.trim().length > 0 ? "plan:refine" : "plan:implement";
       }
-      return `idle:${composerSendState.hasSendableContent}:${isSendBusy}:${isConnecting}:${isPreparingWorktree}`;
+      return `idle:${composerSendState.hasSendableContent}:${isSendBusy}:${isConnecting}:${isPreparingWorktree}:${selectedProviderUnavailableForSend}`;
     }, [
       activePendingIsResponding,
       activePendingProgress,
@@ -983,6 +999,7 @@ export const ChatComposer = memo(
       isSendBusy,
       phase,
       prompt,
+      selectedProviderUnavailableForSend,
       showPlanFollowUpPrompt,
     ]);
 
@@ -1053,7 +1070,11 @@ export const ChatComposer = memo(
       [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
     );
     const collapsedComposerPrimaryActionDisabled =
-      phase === "running" || isSendBusy || isConnecting || !composerSendState.hasSendableContent;
+      phase === "running" ||
+      isSendBusy ||
+      isConnecting ||
+      selectedProviderUnavailableForSend ||
+      !composerSendState.hasSendableContent;
     const collapsedComposerPrimaryActionLabel = "Send message";
     const showMobilePendingAnswerActions =
       isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
@@ -2079,6 +2100,7 @@ export const ChatComposer = memo(
                         isSendBusy={isSendBusy}
                         isConnecting={isConnecting}
                         isEnvironmentUnavailable={environmentUnavailable !== null}
+                        isProviderUnavailable={false}
                         isPreparingWorktree={false}
                         hasSendableContent={false}
                         preserveComposerFocusOnPointerDown
@@ -2289,6 +2311,7 @@ export const ChatComposer = memo(
                       isSendBusy={isSendBusy}
                       isConnecting={isConnecting}
                       isEnvironmentUnavailable={environmentUnavailable !== null}
+                      isProviderUnavailable={false}
                       isPreparingWorktree={false}
                       hasSendableContent={false}
                       preserveComposerFocusOnPointerDown
@@ -2405,6 +2428,7 @@ export const ChatComposer = memo(
                     isSendBusy={isSendBusy}
                     isConnecting={isConnecting}
                     isEnvironmentUnavailable={environmentUnavailable !== null}
+                    isProviderUnavailable={selectedProviderUnavailableForSend}
                     isPreparingWorktree={isPreparingWorktree}
                     hasSendableContent={composerSendState.hasSendableContent}
                     preserveComposerFocusOnPointerDown={isMobileViewport}

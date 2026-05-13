@@ -1,6 +1,6 @@
 import type { ContextMenuItem, VcsCommitGraphCommit } from "@t3tools/contracts";
 import { GitGraphIcon } from "lucide-react";
-import { memo, useCallback, useMemo, type MouseEvent } from "react";
+import { memo, useCallback, useMemo, type CSSProperties, type MouseEvent } from "react";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { readLocalApi } from "../../localApi";
@@ -16,10 +16,19 @@ const ROW_HEIGHT = 22;
 const SWIMLANE_WIDTH = 11;
 const SWIMLANE_CURVE_RADIUS = 5;
 const CIRCLE_RADIUS = 4;
-const CIRCLE_STROKE_WIDTH = 2;
-const TEXT_GAP = 8;
-const GRAPH_LEFT_OFFSET = 2;
+const CIRCLE_STROKE_WIDTH = 1.75;
+const LABEL_GAP = 4;
 const GRAPH_BACKGROUND = "hsl(var(--background))";
+const GRAPH_ROW_STYLE = {
+  height: ROW_HEIGHT,
+  contentVisibility: "auto",
+  containIntrinsicSize: `${ROW_HEIGHT}px`,
+} satisfies CSSProperties;
+const GRAPH_ROW_INNER_STYLE = { height: ROW_HEIGHT } satisfies CSSProperties;
+const GRAPH_ROW_TEXT_STYLE = {
+  height: ROW_HEIGHT,
+  marginLeft: LABEL_GAP,
+} satisfies CSSProperties;
 
 type CommitGraphAction = "copy-hash" | "copy-short-hash" | "open-github";
 
@@ -58,13 +67,62 @@ function verticalPath(x: number, y1: number, y2: number): string {
   return `M ${x} ${y1} V ${y2}`;
 }
 
+function laneShiftPath(fromX: number, toX: number): string {
+  if (fromX === toX) return verticalPath(fromX, 0, ROW_HEIGHT);
+
+  const curveStartY = ROW_HEIGHT / 2 - SWIMLANE_CURVE_RADIUS;
+  const curveEndY = ROW_HEIGHT / 2 + SWIMLANE_CURVE_RADIUS;
+  return [
+    `M ${fromX} 0`,
+    `V ${curveStartY}`,
+    `C ${fromX} ${ROW_HEIGHT / 2} ${toX} ${ROW_HEIGHT / 2} ${toX} ${curveEndY}`,
+    `V ${ROW_HEIGHT}`,
+  ].join(" ");
+}
+
+function laneToNodePath(fromX: number, nodeX: number): string {
+  if (fromX === nodeX) return verticalPath(fromX, 0, ROW_HEIGHT / 2);
+
+  const curveStartY = ROW_HEIGHT / 2 - SWIMLANE_CURVE_RADIUS;
+  return [
+    `M ${fromX} 0`,
+    `V ${curveStartY}`,
+    `C ${fromX} ${ROW_HEIGHT / 2} ${nodeX} ${ROW_HEIGHT / 2} ${nodeX} ${ROW_HEIGHT / 2}`,
+  ].join(" ");
+}
+
+function nodeToLanePath(nodeX: number, laneXValue: number): string {
+  if (nodeX === laneXValue) return verticalPath(nodeX, ROW_HEIGHT / 2, ROW_HEIGHT);
+
+  const direction = Math.sign(laneXValue - nodeX) || 1;
+  const controlDistance = Math.max(SWIMLANE_WIDTH * 0.75, Math.abs(laneXValue - nodeX) / 2);
+  const firstControlX = nodeX + direction * controlDistance;
+  return [
+    `M ${nodeX} ${ROW_HEIGHT / 2}`,
+    `C ${firstControlX} ${ROW_HEIGHT / 2} ${laneXValue} ${
+      ROW_HEIGHT / 2 + SWIMLANE_CURVE_RADIUS
+    } ${laneXValue} ${ROW_HEIGHT}`,
+  ].join(" ");
+}
+
+function graphWidthForRow(row: CommitGraphRowLayout): number {
+  return SWIMLANE_WIDTH * (Math.max(row.inputSwimlanes.length, row.outputSwimlanes.length, 1) + 1);
+}
+
 function buildGraphPaths(row: CommitGraphRowLayout): readonly GraphPath[] {
   const paths: GraphPath[] = [];
   const { commit, inputSwimlanes, outputSwimlanes } = row;
   const parents = uniqueParents(commit);
   const inputIndex = inputSwimlanes.findIndex((lane) => lane.id === commit.sha);
   const circleIndex = inputIndex !== -1 ? inputIndex : inputSwimlanes.length;
-  let outputSwimlaneIndex = 0;
+
+  const outputIndexById = new Map<string, number>();
+  for (let i = 0; i < outputSwimlanes.length; i++) {
+    const id = outputSwimlanes[i]!.id;
+    if (!outputIndexById.has(id)) {
+      outputIndexById.set(id, i);
+    }
+  }
 
   for (let index = 0; index < inputSwimlanes.length; index++) {
     const lane = inputSwimlanes[index]!;
@@ -74,26 +132,16 @@ function buildGraphPaths(row: CommitGraphRowLayout): readonly GraphPath[] {
         paths.push({
           id: `current:${lane.id}:${index}:${circleIndex}`,
           color: lane.color,
-          d: [
-            `M ${laneX(index)} 0`,
-            `A ${SWIMLANE_WIDTH} ${SWIMLANE_WIDTH} 0 0 1 ${SWIMLANE_WIDTH * index} ${
-              ROW_HEIGHT / 2
-            }`,
-            `H ${laneX(circleIndex)}`,
-          ].join(" "),
+          d: laneToNodePath(laneX(index), laneX(circleIndex)),
         });
-      } else {
-        outputSwimlaneIndex++;
       }
       continue;
     }
 
-    const outputLane = outputSwimlanes[outputSwimlaneIndex];
-    if (!outputLane || lane.id !== outputLane.id) {
-      continue;
-    }
+    const outputIdx = outputIndexById.get(lane.id);
+    if (outputIdx === undefined) continue;
 
-    if (index === outputSwimlaneIndex) {
+    if (index === outputIdx) {
       paths.push({
         id: `vertical:${lane.id}:${index}`,
         color: lane.color,
@@ -101,23 +149,11 @@ function buildGraphPaths(row: CommitGraphRowLayout): readonly GraphPath[] {
       });
     } else {
       paths.push({
-        id: `shift:${lane.id}:${index}:${outputSwimlaneIndex}`,
+        id: `shift:${lane.id}:${index}:${outputIdx}`,
         color: lane.color,
-        d: [
-          `M ${laneX(index)} 0`,
-          "V 6",
-          `A ${SWIMLANE_CURVE_RADIUS} ${SWIMLANE_CURVE_RADIUS} 0 0 1 ${
-            laneX(index) - SWIMLANE_CURVE_RADIUS
-          } ${ROW_HEIGHT / 2}`,
-          `H ${laneX(outputSwimlaneIndex) + SWIMLANE_CURVE_RADIUS}`,
-          `A ${SWIMLANE_CURVE_RADIUS} ${SWIMLANE_CURVE_RADIUS} 0 0 0 ${laneX(
-            outputSwimlaneIndex,
-          )} ${ROW_HEIGHT / 2 + SWIMLANE_CURVE_RADIUS}`,
-          `V ${ROW_HEIGHT}`,
-        ].join(" "),
+        d: laneShiftPath(laneX(index), laneX(outputIdx)),
       });
     }
-    outputSwimlaneIndex++;
   }
 
   for (let parentIndex = 1; parentIndex < parents.length; parentIndex++) {
@@ -128,12 +164,7 @@ function buildGraphPaths(row: CommitGraphRowLayout): readonly GraphPath[] {
     paths.push({
       id: `merge-parent:${commit.sha}:${parentId}:${parentOutputIndex}`,
       color: outputSwimlanes[parentOutputIndex]!.color,
-      d: [
-        `M ${SWIMLANE_WIDTH * parentOutputIndex} ${ROW_HEIGHT / 2}`,
-        `A ${SWIMLANE_WIDTH} ${SWIMLANE_WIDTH} 0 0 1 ${laneX(parentOutputIndex)} ${ROW_HEIGHT}`,
-        `M ${SWIMLANE_WIDTH * parentOutputIndex} ${ROW_HEIGHT / 2}`,
-        `H ${laneX(circleIndex)}`,
-      ].join(" "),
+      d: nodeToLanePath(laneX(circleIndex), laneX(parentOutputIndex)),
     });
   }
 
@@ -146,10 +177,14 @@ function buildGraphPaths(row: CommitGraphRowLayout): readonly GraphPath[] {
   }
 
   if (parents.length > 0) {
+    const firstParentOutputIdx = outputIndexById.get(parents[0]!);
+    const useCurve = firstParentOutputIdx !== undefined && firstParentOutputIdx !== circleIndex;
     paths.push({
       id: `from-node:${commit.sha}`,
       color: row.color,
-      d: verticalPath(laneX(circleIndex), ROW_HEIGHT / 2, ROW_HEIGHT),
+      d: useCurve
+        ? nodeToLanePath(laneX(circleIndex), laneX(firstParentOutputIdx))
+        : verticalPath(laneX(circleIndex), ROW_HEIGHT / 2, ROW_HEIGHT),
     });
   }
 
@@ -180,43 +215,38 @@ function RefBadge({ item }: { readonly item: CommitGraphRefBadge }) {
   );
 }
 
-interface RowGraphProps {
-  readonly row: CommitGraphRowLayout;
-  readonly width: number;
-}
-
-function BranchDiamond({
-  color,
+function NodeCircle({
   cx,
   cy,
-  size,
+  radius,
+  fill,
+  stroke = GRAPH_BACKGROUND,
+  strokeWidth = CIRCLE_STROKE_WIDTH,
 }: {
-  readonly color: string;
   readonly cx: number;
   readonly cy: number;
-  readonly size: number;
+  readonly radius: number;
+  readonly fill: string;
+  readonly stroke?: string;
+  readonly strokeWidth?: number;
 }) {
   return (
-    <path
-      d={`M ${cx} ${cy - size} L ${cx + size} ${cy} L ${cx} ${cy + size} L ${cx - size} ${cy} Z`}
-      fill={color}
-      stroke={GRAPH_BACKGROUND}
-      strokeWidth={1}
-    />
+    <circle cx={cx} cy={cy} r={radius} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />
   );
 }
 
-function RowGraph({ row, width }: RowGraphProps) {
+function RowGraph({ row }: { readonly row: CommitGraphRowLayout }) {
   const paths = buildGraphPaths(row);
   const cx = laneX(row.column);
   const cy = ROW_HEIGHT / 2;
+  const width = graphWidthForRow(row);
 
   return (
     <svg
       width={width}
       height={ROW_HEIGHT}
       viewBox={`0 0 ${width} ${ROW_HEIGHT}`}
-      className="shrink-0 overflow-visible"
+      className="block shrink-0 overflow-hidden"
       aria-hidden
     >
       {paths.map((path) => (
@@ -225,49 +255,50 @@ function RowGraph({ row, width }: RowGraphProps) {
           d={path.d}
           fill="none"
           stroke={path.color}
-          strokeWidth={path.strokeWidth ?? 1.45}
+          strokeWidth={path.strokeWidth ?? 1}
           strokeLinecap="round"
           strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
         />
       ))}
       {row.kind === "head" ? (
         <>
-          <circle
+          <NodeCircle cx={cx} cy={cy} radius={CIRCLE_RADIUS + 3} fill={row.color} />
+          <NodeCircle
             cx={cx}
             cy={cy}
-            r={CIRCLE_RADIUS + 3}
+            radius={CIRCLE_STROKE_WIDTH}
             fill={GRAPH_BACKGROUND}
-            stroke={row.color}
-            strokeWidth={CIRCLE_STROKE_WIDTH}
+            stroke={GRAPH_BACKGROUND}
+            strokeWidth={CIRCLE_RADIUS}
           />
-          <circle cx={cx} cy={cy} r={CIRCLE_RADIUS - 1} fill={row.color} />
         </>
       ) : row.isMerge ? (
         <>
-          <circle
+          <NodeCircle
             cx={cx}
             cy={cy}
-            r={CIRCLE_RADIUS + 2}
+            radius={CIRCLE_RADIUS + 0.75}
             fill={GRAPH_BACKGROUND}
             stroke={row.color}
-            strokeWidth={CIRCLE_STROKE_WIDTH}
+            strokeWidth={1.75}
           />
-          {row.isBranchPoint ? (
-            <BranchDiamond color={row.color} cx={cx} cy={cy} size={CIRCLE_RADIUS - 1} />
-          ) : (
-            <circle cx={cx} cy={cy} r={CIRCLE_RADIUS - 1} fill={row.color} />
-          )}
+          <NodeCircle
+            cx={cx}
+            cy={cy}
+            radius={1.35}
+            fill={row.color}
+            stroke={row.color}
+            strokeWidth={0}
+          />
         </>
-      ) : row.isBranchPoint ? (
-        <BranchDiamond color={row.color} cx={cx} cy={cy} size={CIRCLE_RADIUS + 1} />
       ) : (
-        <circle
+        <NodeCircle
           cx={cx}
           cy={cy}
-          r={CIRCLE_RADIUS + 1}
+          radius={CIRCLE_RADIUS + 0.5}
           fill={row.color}
-          stroke={row.color}
-          strokeWidth={CIRCLE_STROKE_WIDTH}
+          strokeWidth={1.5}
         />
       )}
     </svg>
@@ -310,6 +341,65 @@ function menuPositionFromEvent(event: MouseEvent<HTMLElement>): {
   return { x: rect.left + 16, y: rect.top + rect.height / 2 };
 }
 
+interface CommitGraphRowProps {
+  readonly row: CommitGraphRowLayout;
+  readonly onCommitClick: (commit: VcsCommitGraphCommit, event: MouseEvent<HTMLElement>) => void;
+  readonly onCommitContextMenu: (
+    commit: VcsCommitGraphCommit,
+    event: MouseEvent<HTMLElement>,
+  ) => void;
+}
+
+const CommitGraphRow = memo(function CommitGraphRow({
+  row,
+  onCommitClick,
+  onCommitContextMenu,
+}: CommitGraphRowProps) {
+  const refs = getVisibleCommitGraphRefs(row.commit.refs);
+  const subject = row.commit.subject || row.commit.shortSha;
+  const rowTitle = [
+    row.commit.shortSha,
+    subject,
+    row.commit.authorName,
+    row.commit.relativeTime,
+    refs.allLabels.length > 0 ? refs.allLabels.join(", ") : null,
+  ]
+    .filter(Boolean)
+    .join(" - ");
+
+  return (
+    <button
+      type="button"
+      title={rowTitle}
+      aria-label={`Commit ${row.commit.shortSha}: ${subject}`}
+      className="flex w-full min-w-0 cursor-pointer items-center pl-2 pr-3 text-left hover:bg-accent/35 focus-visible:bg-accent/40 focus-visible:outline-none"
+      style={GRAPH_ROW_STYLE}
+      onClick={(event) => onCommitClick(row.commit, event)}
+      onContextMenu={(event) => onCommitContextMenu(row.commit, event)}
+    >
+      <div className="flex shrink-0" style={GRAPH_ROW_INNER_STYLE}>
+        <RowGraph row={row} />
+      </div>
+      <div
+        className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
+        style={GRAPH_ROW_TEXT_STYLE}
+      >
+        {refs.badges.map((item) => (
+          <RefBadge key={`${item.variant}:${item.label}`} item={item} />
+        ))}
+        <span className="min-w-0 shrink truncate text-[12px] font-normal leading-[18px] text-foreground/90">
+          {subject}
+        </span>
+        {row.commit.authorName.trim().length > 0 && (
+          <span className="max-w-[5rem] shrink truncate text-[10px] leading-[18px] text-muted-foreground/50">
+            {row.commit.authorName}
+          </span>
+        )}
+      </div>
+    </button>
+  );
+});
+
 export const WorkbenchCommitGraph = memo(function WorkbenchCommitGraph({
   commits,
   error,
@@ -317,11 +407,6 @@ export const WorkbenchCommitGraph = memo(function WorkbenchCommitGraph({
   truncated = false,
 }: WorkbenchCommitGraphProps) {
   const rows = useMemo(() => buildCommitGraphLayout(commits), [commits]);
-  const graphWidth = useMemo(
-    () => SWIMLANE_WIDTH * (Math.max(1, ...rows.map((row) => row.laneCount)) + 1),
-    [rows],
-  );
-  const textOffset = graphWidth + TEXT_GAP;
   const { copyToClipboard } = useCopyToClipboard<{ readonly action: CommitGraphAction }>();
 
   const showCommitActions = useCallback(
@@ -389,51 +474,13 @@ export const WorkbenchCommitGraph = memo(function WorkbenchCommitGraph({
         </div>
       )}
       {rows.map((row) => {
-        const refs = getVisibleCommitGraphRefs(row.commit.refs);
-        const subject = row.commit.subject || row.commit.shortSha;
-        const rowTitle = [
-          row.commit.shortSha,
-          subject,
-          row.commit.authorName,
-          row.commit.relativeTime,
-          refs.allLabels.length > 0 ? refs.allLabels.join(", ") : null,
-        ]
-          .filter(Boolean)
-          .join(" - ");
-
         return (
-          <button
+          <CommitGraphRow
             key={row.commit.sha}
-            type="button"
-            title={rowTitle}
-            aria-label={`Commit ${row.commit.shortSha}: ${subject}`}
-            className="relative block w-full min-w-0 cursor-pointer px-2 pr-3 text-left hover:bg-accent/35 focus-visible:bg-accent/40 focus-visible:outline-none"
-            style={{
-              height: ROW_HEIGHT,
-            }}
-            onClick={(event) => handleCommitClick(row.commit, event)}
-            onContextMenu={(event) => handleCommitContextMenu(row.commit, event)}
-          >
-            <div className="absolute top-0" style={{ left: GRAPH_LEFT_OFFSET }}>
-              <RowGraph row={row} width={graphWidth} />
-            </div>
-            <div
-              className="flex min-w-0 items-center gap-1.5 overflow-hidden"
-              style={{ height: ROW_HEIGHT, marginLeft: textOffset }}
-            >
-              {refs.badges.map((item) => (
-                <RefBadge key={`${item.variant}:${item.label}`} item={item} />
-              ))}
-              <span className="min-w-0 truncate text-xs font-medium text-foreground/90">
-                {subject}
-              </span>
-              {row.commit.authorName.trim().length > 0 && (
-                <span className="max-w-[36%] shrink-0 truncate text-[11px] text-muted-foreground/70">
-                  {row.commit.authorName}
-                </span>
-              )}
-            </div>
-          </button>
+            row={row}
+            onCommitClick={handleCommitClick}
+            onCommitContextMenu={handleCommitContextMenu}
+          />
         );
       })}
     </div>

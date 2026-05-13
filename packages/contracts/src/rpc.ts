@@ -56,6 +56,7 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { ProviderUsageInput, ProviderUsageSnapshot } from "./providerUsage.ts";
 import {
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
@@ -184,6 +185,7 @@ export const WS_METHODS = {
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
+  serverGetProviderUsage: "server.getProviderUsage",
   serverDiscoverSourceControl: "server.discoverSourceControl",
 
   // Source control methods
@@ -234,6 +236,12 @@ export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
 export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSettings, {
   payload: Schema.Struct({ patch: ServerSettingsPatch }),
   success: ServerSettings,
+  error: ServerSettingsError,
+});
+
+export const WsServerGetProviderUsageRpc = Rpc.make(WS_METHODS.serverGetProviderUsage, {
+  payload: ProviderUsageInput,
+  success: ProviderUsageSnapshot,
   error: ServerSettingsError,
 });
 
@@ -574,6 +582,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerUpsertKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
+  WsServerGetProviderUsageRpc,
   WsServerDiscoverSourceControlRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,

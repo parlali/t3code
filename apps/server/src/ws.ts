@@ -81,6 +81,7 @@ import {
   type SessionCredentialChange,
 } from "./auth/Services/SessionCredentialService.ts";
 import { respondToAuthError } from "./auth/http.ts";
+import { loadProviderUsageSnapshot } from "./provider/providerUsage.ts";
 
 function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   OrchestrationEvent,
@@ -857,6 +858,26 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               "rpc.aggregate": "server",
             },
           ),
+        [WS_METHODS.serverGetProviderUsage]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverGetProviderUsage,
+            Effect.all({
+              settings: serverSettings.getSettings,
+              providers: providerRegistry.getProviders,
+            }).pipe(
+              Effect.flatMap(({ settings, providers }) =>
+                loadProviderUsageSnapshot({
+                  settings,
+                  providers,
+                  cwd: config.cwd,
+                  input,
+                }),
+              ),
+            ),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>
           observeRpcEffect(
             WS_METHODS.serverDiscoverSourceControl,
@@ -1231,10 +1252,6 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                   payload: { settings },
                 })),
               );
-
-              yield* providerRegistry
-                .refresh()
-                .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
 
               const liveUpdates = Stream.merge(
                 keybindingsUpdates,

@@ -237,6 +237,7 @@ function toLocalStatusPart(status: VcsStatusResult): VcsStatusLocalResult {
     hasPrimaryRemote: status.hasPrimaryRemote,
     isDefaultRef: status.isDefaultRef,
     refName: status.refName,
+    ...(status.headSha === undefined ? {} : { headSha: status.headSha }),
     hasWorkingTreeChanges: status.hasWorkingTreeChanges,
     workingTree: status.workingTree,
   };
@@ -259,6 +260,7 @@ export function applyGitStatusStreamEvent(
             hasPrimaryRemote: false,
             isDefaultRef: false,
             refName: null,
+            headSha: null,
             hasWorkingTreeChanges: false,
             workingTree: { files: [], insertions: 0, deletions: 0 },
           },

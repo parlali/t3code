@@ -206,6 +206,36 @@ const LazyPullRequestThreadDialog = lazy(() =>
     default: module.PullRequestThreadDialog,
   })),
 );
+
+function isProviderReadyForSend(status: ServerProvider | null | undefined): boolean {
+  if (!status) {
+    return false;
+  }
+  return (
+    status.enabled &&
+    status.installed &&
+    status.status === "ready" &&
+    status.availability !== "unavailable"
+  );
+}
+
+function getProviderUnavailableForSendMessage(status: ServerProvider | null | undefined): string {
+  const label = status?.displayName?.trim() || "Selected provider";
+  const message = status?.message?.trim();
+  if (message) {
+    return `${label} is not ready. ${message}`;
+  }
+  if (!status) {
+    return "Selected provider is not available.";
+  }
+  if (!status.enabled) {
+    return `${label} is disabled.`;
+  }
+  if (!status.installed) {
+    return `${label} is not installed.`;
+  }
+  return `${label} is not ready.`;
+}
 import {
   useServerAvailableEditors,
   useServerConfig,
@@ -2813,6 +2843,28 @@ export default function ChatView(props: ChatViewProps) {
       imageCount: composerImages.length,
       terminalContexts: composerTerminalContexts,
     });
+    const standaloneSlashCommand =
+      composerImages.length === 0 && sendableComposerTerminalContexts.length === 0
+        ? parseStandaloneComposerSlashCommand(trimmed)
+        : null;
+    if (standaloneSlashCommand) {
+      handleInteractionModeChange(standaloneSlashCommand);
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      getComposer()?.resetCursorState();
+      return;
+    }
+    const selectedProviderStatusForSend =
+      providerStatuses.find(
+        (status) => status.instanceId === ctxSelectedModelSelection.instanceId,
+      ) ?? null;
+    if (!isProviderReadyForSend(selectedProviderStatusForSend)) {
+      setThreadError(
+        activeThread.id,
+        getProviderUnavailableForSendMessage(selectedProviderStatusForSend),
+      );
+      return;
+    }
     if (showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
         draftText: trimmed,
@@ -2825,17 +2877,6 @@ export default function ChatView(props: ChatViewProps) {
         text: followUp.text,
         interactionMode: followUp.interactionMode,
       });
-      return;
-    }
-    const standaloneSlashCommand =
-      composerImages.length === 0 && sendableComposerTerminalContexts.length === 0
-        ? parseStandaloneComposerSlashCommand(trimmed)
-        : null;
-    if (standaloneSlashCommand) {
-      handleInteractionModeChange(standaloneSlashCommand);
-      promptRef.current = "";
-      clearComposerDraftContent(composerDraftTarget);
-      getComposer()?.resetCursorState();
       return;
     }
     if (!hasSendableContent) {

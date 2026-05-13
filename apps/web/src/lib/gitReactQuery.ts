@@ -214,6 +214,8 @@ export function gitCommitGraphQueryOptions(input: {
     },
     enabled: (input.enabled ?? true) && input.environmentId !== null && input.cwd !== null,
     staleTime: GIT_COMMIT_GRAPH_STALE_TIME_MS,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
     retry: 1,
   });
 }

@@ -15,30 +15,15 @@ export interface CommitGraphRowLayout {
   readonly color: string;
   readonly kind: CommitGraphRowKind;
   readonly isMerge: boolean;
-  readonly isBranchPoint: boolean;
-  readonly laneCount: number;
 }
 
-const GENERATED_LANE_COLORS = [
-  "#ec4899",
-  "#3b82f6",
-  "#a855f7",
-  "#facc15",
-  "#14b8a6",
-  "#f97316",
-  "#06b6d4",
-  "#ef4444",
-  "#84cc16",
-  "#22c55e",
-  "#eab308",
-  "#8b5cf6",
-] as const;
+const GENERATED_LANE_COLORS = ["#ffb000", "#dc267f", "#994f00", "#40b0a6", "#b66dff"] as const;
 
 const HEAD_REF_COLOR = "#ec4899";
-const LOCAL_REF_COLOR = "#3b82f6";
-const REMOTE_REF_COLOR = "#a855f7";
-const BASE_REF_COLOR = "#f97316";
-const TAG_REF_COLOR = "#facc15";
+const LOCAL_REF_COLOR = "#3794ff";
+const REMOTE_REF_COLOR = "#b180d7";
+const BASE_REF_COLOR = "#ea5c00";
+const TAG_REF_COLOR = "#cca700";
 const DEFAULT_BRANCH_NAMES = new Set(["main", "master", "trunk", "develop"]);
 
 function copySwimlane(lane: CommitGraphSwimlane): CommitGraphSwimlane {
@@ -113,16 +98,6 @@ function compactSwimlanes(swimlanes: readonly CommitGraphSwimlane[]): CommitGrap
   return compacted;
 }
 
-function childCountsByCommit(commits: readonly VcsCommitGraphCommit[]): Map<string, number> {
-  const childCounts = new Map<string, number>();
-  for (const commit of commits) {
-    for (const parentId of uniqueValues(commit.parents)) {
-      childCounts.set(parentId, (childCounts.get(parentId) ?? 0) + 1);
-    }
-  }
-  return childCounts;
-}
-
 export function buildCommitGraphLayout(
   commits: readonly VcsCommitGraphCommit[],
 ): readonly CommitGraphRowLayout[] {
@@ -132,7 +107,6 @@ export function buildCommitGraphLayout(
     return GENERATED_LANE_COLORS[colorIndex] ?? GENERATED_LANE_COLORS[0];
   };
   const commitBySha = new Map(commits.map((commit) => [commit.sha, commit]));
-  const childCounts = childCountsByCommit(commits);
   const rows: CommitGraphRowLayout[] = [];
 
   for (const commit of commits) {
@@ -187,8 +161,6 @@ export function buildCommitGraphLayout(
       color,
       kind: commit.refs.some(isHeadRef) ? "head" : "node",
       isMerge: parents.length > 1,
-      isBranchPoint: (childCounts.get(commit.sha) ?? 0) > 1,
-      laneCount: Math.max(inputSwimlanes.length, compactedOutputSwimlanes.length, column + 1),
     });
   }
 

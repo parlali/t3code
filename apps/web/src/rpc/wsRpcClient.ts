@@ -146,6 +146,9 @@ export interface WsRpcClient {
     readonly updateSettings: (
       patch: ServerSettingsPatch,
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverUpdateSettings>>;
+    readonly getProviderUsage: (
+      input?: RpcInput<typeof WS_METHODS.serverGetProviderUsage>,
+    ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverGetProviderUsage>>;
     readonly discoverSourceControl: RpcUnaryNoArgMethod<
       typeof WS_METHODS.serverDiscoverSourceControl
     >;
@@ -323,6 +326,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       getSettings: () => transport.request((client) => client[WS_METHODS.serverGetSettings]({})),
       updateSettings: (patch) =>
         transport.request((client) => client[WS_METHODS.serverUpdateSettings]({ patch })),
+      getProviderUsage: (input) =>
+        transport.request((client) => client[WS_METHODS.serverGetProviderUsage](input ?? {})),
       discoverSourceControl: () =>
         transport.request((client) => client[WS_METHODS.serverDiscoverSourceControl]({})),
       subscribeConfig: (listener, options) =>

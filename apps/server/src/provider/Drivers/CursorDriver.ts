@@ -24,6 +24,7 @@ import {
   buildInitialCursorProviderSnapshot,
   checkCursorProviderStatus,
   enrichCursorSnapshot,
+  mergeCursorProviderSnapshotCapabilities,
 } from "../Layers/CursorProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
@@ -120,6 +121,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
             publishSnapshot,
             stampIdentity,
           }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
+        mergeSnapshot: mergeCursorProviderSnapshotCapabilities,
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(
         Effect.mapError(

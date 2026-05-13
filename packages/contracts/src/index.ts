@@ -8,6 +8,7 @@ export * from "./threadReadReceipts.ts";
 export * from "./threadWorkbenchState.ts";
 export * from "./provider.ts";
 export * from "./providerInstance.ts";
+export * from "./providerUsage.ts";
 export * from "./providerRuntime.ts";
 export * from "./model.ts";
 export * from "./keybindings.ts";
