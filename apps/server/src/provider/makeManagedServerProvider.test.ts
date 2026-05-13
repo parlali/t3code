@@ -4,6 +4,7 @@ import { createModelCapabilities } from "@t3tools/shared/model";
 import { Deferred, Effect, Fiber, PubSub, Ref, Stream } from "effect";
 
 import { makeManagedServerProvider } from "./makeManagedServerProvider.ts";
+import { makeManualOnlyProviderMaintenanceCapabilities } from "./providerMaintenance.ts";
 
 const emptyCapabilities = createModelCapabilities({ optionDescriptors: [] });
 const fastModeCapabilities = createModelCapabilities({
@@ -81,6 +82,11 @@ const enrichedSnapshotSecond: ServerProvider = {
   ],
 };
 
+const testMaintenanceCapabilities = makeManualOnlyProviderMaintenanceCapabilities({
+  provider: ProviderDriverKind.make("codex"),
+  packageName: null,
+});
+
 describe("makeManagedServerProvider", () => {
   it.effect(
     "runs the initial provider check in the background and streams the refreshed snapshot",
@@ -90,6 +96,7 @@ describe("makeManagedServerProvider", () => {
           const checkCalls = yield* Ref.make(0);
           const releaseCheck = yield* Deferred.make<void>();
           const provider = yield* makeManagedServerProvider<TestSettings>({
+            maintenanceCapabilities: testMaintenanceCapabilities,
             getSettings: Effect.succeed({ enabled: true }),
             streamSettings: Stream.empty,
             haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -131,6 +138,7 @@ describe("makeManagedServerProvider", () => {
         const releaseInitialCheck = yield* Deferred.make<void>();
         const releaseSettingsCheck = yield* Deferred.make<void>();
         const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities: testMaintenanceCapabilities,
           getSettings: Ref.get(settingsRef),
           streamSettings: Stream.fromPubSub(settingsChanges),
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -172,6 +180,7 @@ describe("makeManagedServerProvider", () => {
         const releaseEnrichment = yield* Deferred.make<void>();
         const releaseCheck = yield* Deferred.make<void>();
         const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities: testMaintenanceCapabilities,
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -212,6 +221,7 @@ describe("makeManagedServerProvider", () => {
         const secondCallbackReady = yield* Deferred.make<void>();
         const allowFirstRefresh = yield* Deferred.make<void>();
         const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities: testMaintenanceCapabilities,
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,

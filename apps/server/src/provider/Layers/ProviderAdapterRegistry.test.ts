@@ -17,6 +17,7 @@ import type { ProviderInstance } from "../ProviderDriver.ts";
 import type { TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import { ProviderAdapterRegistryLive } from "./ProviderAdapterRegistry.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const CLAUDE_AGENT_DRIVER = ProviderDriverKind.make("claudeAgent");
@@ -111,6 +112,10 @@ const makeFakeInstance = (
     displayName: undefined,
     enabled: true,
     snapshot: {
+      maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
+        provider: driverKind,
+        packageName: null,
+      }),
       getSnapshot: Effect.succeed({} as unknown as ServerProvider),
       refresh: Effect.succeed({} as unknown as ServerProvider),
       streamChanges: Stream.empty,

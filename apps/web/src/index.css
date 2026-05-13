@@ -600,6 +600,19 @@ label:has(> select#reasoning-effort) select {
   animation: ultrathink-rainbow 10s linear infinite;
 }
 
+@keyframes provider-update-pill-progress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.provider-update-pill-progress {
+  animation: provider-update-pill-progress var(--provider-update-pill-dismiss-ms) linear forwards;
+}
+
 /* Thin scrollbar for model picker */
 .model-picker-list::-webkit-scrollbar {
   width: 4px;

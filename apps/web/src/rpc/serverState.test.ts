@@ -366,4 +366,29 @@ describe("serverState", () => {
     unsubscribeConfig();
     stop();
   });
+
+  it("ignores config heartbeat events", async () => {
+    serverApi.getConfig.mockResolvedValueOnce(baseServerConfig);
+    const configListener = vi.fn();
+    const stop = startServerStateSync(serverApi);
+    const unsubscribeConfig = onServerConfigUpdated(configListener);
+
+    await waitFor(() => {
+      expect(getServerConfig()).toEqual(baseServerConfig);
+    });
+
+    emitServerConfigEvent({
+      version: 1,
+      type: "heartbeat",
+      payload: {
+        at: "2026-05-13T10:00:00.000Z",
+      },
+    });
+
+    expect(getServerConfig()).toEqual(baseServerConfig);
+    expect(configListener).toHaveBeenCalledTimes(1);
+
+    unsubscribeConfig();
+    stop();
+  });
 });

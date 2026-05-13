@@ -77,11 +77,8 @@ function ChatMarkdownFallback({ text }: { text: string }) {
 // ---------------------------------------------------------------------------
 
 interface TimelineRowSharedState {
-  activeTurnInProgress: boolean;
-  activeTurnId: TurnId | null | undefined;
   isWorking: boolean;
   isRevertingCheckpoint: boolean;
-  completionSummary: string | null;
   timestampFormat: TimestampFormat;
   markdownCwd: string | undefined;
   workspaceRoot: string | undefined;
@@ -149,14 +146,20 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       deriveMessagesTimelineRows({
         timelineEntries,
         completionDividerBeforeEntryId,
+        completionSummary,
         isWorking,
+        activeTurnInProgress,
+        activeTurnId: activeTurnId ?? null,
         activeTurnStartedAt,
         revertTurnCountByUserMessageId,
       }),
     [
       timelineEntries,
       completionDividerBeforeEntryId,
+      completionSummary,
       isWorking,
+      activeTurnInProgress,
+      activeTurnId,
       activeTurnStartedAt,
       revertTurnCountByUserMessageId,
     ],
@@ -192,11 +195,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // every streaming chunk. Callbacks from ChatView are useCallback-stable.
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
-      activeTurnInProgress,
-      activeTurnId: activeTurnId ?? null,
       isWorking,
       isRevertingCheckpoint,
-      completionSummary,
       timestampFormat,
       markdownCwd,
       workspaceRoot,
@@ -206,11 +206,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
     }),
     [
-      activeTurnInProgress,
-      activeTurnId,
       isWorking,
       isRevertingCheckpoint,
-      completionSummary,
       timestampFormat,
       markdownCwd,
       workspaceRoot,
@@ -387,15 +384,10 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
         row.message.role === "assistant" &&
         (() => {
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
-          const assistantTurnStillInProgress =
-            ctx.activeTurnInProgress &&
-            ctx.activeTurnId !== null &&
-            ctx.activeTurnId !== undefined &&
-            row.message.turnId === ctx.activeTurnId;
           const assistantCopyState = resolveAssistantMessageCopyState({
             text: row.message.text ?? null,
             showCopyButton: row.showAssistantCopyButton,
-            streaming: row.message.streaming || assistantTurnStillInProgress,
+            streaming: row.assistantCopyStreaming,
           });
           return (
             <>
@@ -403,7 +395,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                 <div className="my-3 flex items-center gap-3">
                   <span className="h-px flex-1 bg-border" />
                   <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
-                    {ctx.completionSummary ? `Response • ${ctx.completionSummary}` : "Response"}
+                    {row.completionSummary ? `Response • ${row.completionSummary}` : "Response"}
                   </span>
                   <span className="h-px flex-1 bg-border" />
                 </div>

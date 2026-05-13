@@ -6,9 +6,17 @@
  *
  * @module ProviderRegistry
  */
-import type { ProviderInstanceId, ProviderDriverKind, ServerProvider } from "@t3tools/contracts";
+import type {
+  ProviderInstanceId,
+  ProviderDriverKind,
+  ServerProvider,
+  ServerProviderUpdateState,
+} from "@t3tools/contracts";
 import { Context } from "effect";
 import type { Effect, Stream } from "effect";
+import type { ProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
+
+export type ProviderMaintenanceActionKind = "update";
 
 export interface ProviderRegistryShape {
   /**
@@ -38,6 +46,17 @@ export interface ProviderRegistryShape {
   readonly refreshInstance: (
     instanceId: ProviderInstanceId,
   ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+
+  readonly getProviderMaintenanceCapabilitiesForInstance: (
+    instanceId: ProviderInstanceId,
+    provider: ProviderDriverKind,
+  ) => Effect.Effect<ProviderMaintenanceCapabilities>;
+
+  readonly setProviderMaintenanceActionState: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly action: ProviderMaintenanceActionKind;
+    readonly state: ServerProviderUpdateState | null;
+  }) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**
    * Stream of provider snapshot updates — one emission per aggregated

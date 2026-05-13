@@ -102,6 +102,7 @@ const rpcClientMock = {
   server: {
     getConfig: vi.fn(),
     refreshProviders: vi.fn(),
+    updateProvider: vi.fn(),
     upsertKeybinding: vi.fn(),
     getSettings: vi.fn(),
     updateSettings: vi.fn(),
@@ -591,6 +592,7 @@ describe("wsApi", () => {
       autoOpenPlanSidebar: false,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
+      dismissedProviderUpdateNotificationKeys: [],
       diffIgnoreWhitespace: true,
       diffWordWrap: true,
       favorites: [],
@@ -652,6 +654,7 @@ describe("wsApi", () => {
       autoOpenPlanSidebar: false,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
+      dismissedProviderUpdateNotificationKeys: [],
       diffIgnoreWhitespace: true,
       diffWordWrap: true,
       favorites: [],

@@ -52,6 +52,13 @@ import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
+import {
+  canOneClickUpdateProviderCandidate,
+  collectProviderUpdateCandidates,
+  hasOneClickUpdateProviderCandidate,
+  isProviderUpdateActive,
+  type ProviderUpdateCandidate,
+} from "../ProviderUpdateLaunchNotification.logic";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
 import { buildProviderInstanceUpdatePatch } from "./SettingsPanels.logic";
@@ -468,6 +475,9 @@ export function GeneralSettingsPanel() {
   // runtime, so a pre-existing open key for e.g. "codex" persists across
   // the legacy/unified render swap.
   const [openInstanceDetails, setOpenInstanceDetails] = useState<Record<string, boolean>>({});
+  const [updatingProviderDrivers, setUpdatingProviderDrivers] = useState<
+    ReadonlySet<ProviderDriverKind>
+  >(() => new Set());
   const refreshingRef = useRef(false);
   const refreshProviders = useCallback(() => {
     if (refreshingRef.current) return;
@@ -488,6 +498,48 @@ export function GeneralSettingsPanel() {
   const availableEditors = useServerAvailableEditors();
   const observability = useServerObservability();
   const serverProviders = useServerProviders();
+  const providerUpdateCandidates = useMemo(
+    () => collectProviderUpdateCandidates(serverProviders),
+    [serverProviders],
+  );
+  const providerUpdateCandidateByInstanceId = useMemo(
+    () => new Map(providerUpdateCandidates.map((candidate) => [candidate.instanceId, candidate])),
+    [providerUpdateCandidates],
+  );
+  const runProviderUpdate = useCallback(async (candidate: ProviderUpdateCandidate) => {
+    let started = false;
+    setUpdatingProviderDrivers((previous) => {
+      if (previous.has(candidate.driver)) {
+        return previous;
+      }
+      started = true;
+      return new Set(previous).add(candidate.driver);
+    });
+    if (!started) {
+      return;
+    }
+
+    try {
+      await ensureLocalApi().server.updateProvider({
+        provider: candidate.driver,
+        instanceId: candidate.instanceId,
+      });
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Provider update failed",
+          description: error instanceof Error ? error.message : "Provider update failed.",
+        }),
+      );
+    } finally {
+      setUpdatingProviderDrivers((previous) => {
+        const next = new Set(previous);
+        next.delete(candidate.driver);
+        return next;
+      });
+    }
+  }, []);
   const visibleProviderSettings = PROVIDER_SETTINGS.filter(
     (providerSettings) =>
       providerSettings.provider !== "cursor" ||
@@ -1233,6 +1285,20 @@ export function GeneralSettingsPanel() {
                 onClick={() => resetDefaultInstance(row.driver)}
               />
             ) : null;
+          const updateCandidate = providerUpdateCandidateByInstanceId.get(row.instanceId);
+          const canRunInlineUpdate =
+            updateCandidate !== undefined &&
+            canOneClickUpdateProviderCandidate(updateCandidate, serverProviders);
+          const isDriverUpdateRunning =
+            updateCandidate !== undefined &&
+            (updatingProviderDrivers.has(updateCandidate.driver) ||
+              serverProviders.some(
+                (provider) =>
+                  provider.driver === updateCandidate.driver && isProviderUpdateActive(provider),
+              ));
+          const showInlineUpdateButton =
+            updateCandidate !== undefined &&
+            hasOneClickUpdateProviderCandidate(updateCandidate, serverProviders);
           return (
             <ProviderInstanceCard
               key={row.instanceId}
@@ -1287,6 +1353,17 @@ export function GeneralSettingsPanel() {
                   modelOrder,
                 })
               }
+              onRunUpdate={
+                showInlineUpdateButton && updateCandidate !== undefined
+                  ? () => {
+                      if (!canRunInlineUpdate) {
+                        return;
+                      }
+                      void runProviderUpdate(updateCandidate);
+                    }
+                  : undefined
+              }
+              isUpdating={showInlineUpdateButton ? isDriverUpdateRunning : undefined}
             />
           );
         })}

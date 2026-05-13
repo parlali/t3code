@@ -1,7 +1,8 @@
-import type {
-  VcsStatusLocalResult,
-  VcsStatusRemoteResult,
-  VcsStatusStreamEvent,
+import {
+  ThreadId,
+  type VcsStatusLocalResult,
+  type VcsStatusRemoteResult,
+  type VcsStatusStreamEvent,
 } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vitest";
 
@@ -33,6 +34,20 @@ const baseRemoteStatus: VcsStatusRemoteResult = {
   behindCount: 0,
   pr: null,
 };
+
+function makeTransportMock() {
+  return {
+    dispose: vi.fn(async () => undefined),
+    isConnectionOpen: vi.fn(() => true),
+    reconnect: vi.fn(async () => undefined),
+    request: vi.fn(),
+    requestStream: vi.fn(),
+    subscribe: vi.fn(() => () => undefined),
+  } satisfies Pick<
+    WsTransport,
+    "dispose" | "isConnectionOpen" | "reconnect" | "request" | "requestStream" | "subscribe"
+  >;
+}
 
 describe("wsRpcClient", () => {
   it("reduces vcs status stream events into flat status snapshots", () => {
@@ -102,5 +117,51 @@ describe("wsRpcClient", () => {
         },
       ],
     ]);
+  });
+
+  it("routes long-lived subscriptions away from unary requests", async () => {
+    const requestTransport = makeTransportMock();
+    const streamTransport = makeTransportMock();
+    const threadDetailTransport = makeTransportMock();
+    const client = createWsRpcClient(requestTransport as unknown as WsTransport, {
+      streamTransport: streamTransport as unknown as WsTransport,
+      threadDetailTransport: threadDetailTransport as unknown as WsTransport,
+    });
+
+    client.projects.subscribeEntries({ cwd: "/repo" }, vi.fn());
+    client.orchestration.subscribeShell(vi.fn());
+    client.orchestration.subscribeThread({ threadId: ThreadId.make("thread-1") }, vi.fn());
+    await client.terminal.open({
+      threadId: "thread-1",
+      terminalId: "default",
+      cwd: "/repo",
+      cols: 80,
+      rows: 24,
+    });
+
+    expect(requestTransport.request).toHaveBeenCalledOnce();
+    expect(requestTransport.subscribe).not.toHaveBeenCalled();
+    expect(streamTransport.subscribe).toHaveBeenCalledTimes(2);
+    expect(threadDetailTransport.subscribe).toHaveBeenCalledOnce();
+  });
+
+  it("reconnects and disposes all distinct transports", async () => {
+    const requestTransport = makeTransportMock();
+    const streamTransport = makeTransportMock();
+    const threadDetailTransport = makeTransportMock();
+    const client = createWsRpcClient(requestTransport as unknown as WsTransport, {
+      streamTransport: streamTransport as unknown as WsTransport,
+      threadDetailTransport: threadDetailTransport as unknown as WsTransport,
+    });
+
+    await client.reconnect();
+    await client.dispose();
+
+    expect(requestTransport.reconnect).toHaveBeenCalledOnce();
+    expect(streamTransport.reconnect).toHaveBeenCalledOnce();
+    expect(threadDetailTransport.reconnect).toHaveBeenCalledOnce();
+    expect(requestTransport.dispose).toHaveBeenCalledOnce();
+    expect(streamTransport.dispose).toHaveBeenCalledOnce();
+    expect(threadDetailTransport.dispose).toHaveBeenCalledOnce();
   });
 });

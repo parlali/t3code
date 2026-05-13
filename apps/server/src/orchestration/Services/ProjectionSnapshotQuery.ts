@@ -40,6 +40,12 @@ export interface ProjectionThreadCheckpointContext {
   readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>;
 }
 
+export interface ProjectionThreadDetailSubscriptionSnapshotOptions {
+  readonly messageLimit: number;
+  readonly activityLimit: number;
+  readonly checkpointLimit: number;
+}
+
 /**
  * ProjectionSnapshotQueryShape - Service API for read-model snapshots.
  */
@@ -137,6 +143,16 @@ export interface ProjectionSnapshotQueryShape {
    */
   readonly getThreadDetailById: (
     threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>;
+
+  /**
+   * Read a browser-facing thread detail snapshot without hydrating opaque
+   * activity payload blobs. The returned timeline arrays are bounded for
+   * initial subscription snapshots.
+   */
+  readonly getThreadDetailSubscriptionSnapshotById: (
+    threadId: ThreadId,
+    options: ProjectionThreadDetailSubscriptionSnapshotOptions,
   ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>;
 }
 

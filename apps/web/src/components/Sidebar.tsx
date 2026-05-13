@@ -164,6 +164,7 @@ import {
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
+import { SidebarProviderUpdatePill } from "./sidebar/SidebarProviderUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { CommandDialogTrigger } from "./ui/command";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
@@ -3442,6 +3443,9 @@ export default function Sidebar() {
             projectsLength={projects.length}
           />
 
+          <div className="px-2 pb-2">
+            <SidebarProviderUpdatePill />
+          </div>
           <SidebarSeparator />
           <SidebarChromeFooter />
         </>

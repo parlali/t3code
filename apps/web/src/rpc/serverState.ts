@@ -117,6 +117,9 @@ export function applyServerConfigEvent(event: ServerConfigStreamEvent): void {
       applySettingsUpdated(event.payload.settings);
       return;
     }
+    case "heartbeat": {
+      return;
+    }
   }
 }
 

@@ -35,8 +35,7 @@
     "@xterm/headless": "^6.0.0",
     "chokidar": "^4.0.3",
     "effect": "catalog:",
-    "node-pty": "^1.1.0",
-    "open": "^10.1.0"
+    "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",

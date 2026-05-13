@@ -1,6 +1,6 @@
 import { type TimelineEntry, type WorkLogEntry } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan } from "../../types";
-import { type MessageId } from "@t3tools/contracts";
+import { type MessageId, type TurnId } from "@t3tools/contracts";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 
@@ -25,7 +25,9 @@ export type MessagesTimelineRow =
       message: ChatMessage;
       durationStart: string;
       showCompletionDivider: boolean;
+      completionSummary: string | null;
       showAssistantCopyButton: boolean;
+      assistantCopyStreaming: boolean;
       revertTurnCount?: number | undefined;
     }
   | {
@@ -109,7 +111,10 @@ function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<Timeli
 export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   completionDividerBeforeEntryId: string | null;
+  completionSummary?: string | null;
   isWorking: boolean;
+  activeTurnInProgress?: boolean;
+  activeTurnId?: TurnId | null;
   activeTurnStartedAt: string | null;
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
 }): MessagesTimelineRow[] {
@@ -154,6 +159,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    const assistantTurnStillInProgress =
+      timelineEntry.message.role === "assistant" &&
+      input.activeTurnInProgress === true &&
+      input.activeTurnId != null &&
+      timelineEntry.message.turnId === input.activeTurnId;
+
+    const showCompletionDivider =
+      timelineEntry.message.role === "assistant" &&
+      input.completionDividerBeforeEntryId === timelineEntry.id;
+
     nextRows.push({
       kind: "message",
       id: timelineEntry.id,
@@ -161,12 +176,12 @@ export function deriveMessagesTimelineRows(input: {
       message: timelineEntry.message,
       durationStart:
         durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt,
-      showCompletionDivider:
-        timelineEntry.message.role === "assistant" &&
-        input.completionDividerBeforeEntryId === timelineEntry.id,
+      showCompletionDivider,
+      completionSummary: showCompletionDivider ? (input.completionSummary ?? null) : null,
       showAssistantCopyButton:
         timelineEntry.message.role === "assistant" &&
         terminalAssistantMessageIds.has(timelineEntry.message.id),
+      assistantCopyStreaming: timelineEntry.message.streaming || assistantTurnStillInProgress,
       revertTurnCount:
         timelineEntry.message.role === "user"
           ? input.revertTurnCountByUserMessageId.get(timelineEntry.message.id)
@@ -225,7 +240,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.message === bm.message &&
         a.durationStart === bm.durationStart &&
         a.showCompletionDivider === bm.showCompletionDivider &&
+        a.completionSummary === bm.completionSummary &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
+        a.assistantCopyStreaming === bm.assistantCopyStreaming &&
         a.revertTurnCount === bm.revertTurnCount
       );
     }

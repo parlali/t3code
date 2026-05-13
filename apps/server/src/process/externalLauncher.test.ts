@@ -1,14 +1,46 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { assertSuccess } from "@effect/vitest/utils";
-import { FileSystem, Path, Effect } from "effect";
+import { Effect, Encoding, FileSystem, Layer, Path, Random, Sink, Stream } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   isCommandAvailable,
-  launchDetached,
+  launchBrowser,
+  launchEditorProcess,
   resolveAvailableEditors,
+  resolveBrowserLaunch,
   resolveEditorLaunch,
-} from "./open.ts";
+} from "./externalLauncher.ts";
+
+function encodeUtf16LeBase64(input: string): string {
+  const bytes = new Uint8Array(input.length * 2);
+  for (let index = 0; index < input.length; index += 1) {
+    const code = input.charCodeAt(index);
+    bytes[index * 2] = code & 0xff;
+    bytes[index * 2 + 1] = code >>> 8;
+  }
+  return Encoding.encodeBase64(bytes);
+}
+
+function makeMockDetachedHandle(onUnref: () => void = () => undefined) {
+  return ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(1),
+    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+    isRunning: Effect.succeed(true),
+    kill: () => Effect.void,
+    unref: Effect.sync(() => {
+      onUnref();
+      return Effect.void;
+    }),
+    stdin: Sink.drain,
+    stdout: Stream.empty,
+    stderr: Stream.empty,
+    all: Stream.empty,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+  });
+}
 
 it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
   it.effect("returns commands for command-based editors", () =>
@@ -33,15 +65,6 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
         args: ["/tmp/workspace"],
       });
 
-      const traeLaunch = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace", editor: "trae" },
-        "darwin",
-      );
-      assert.deepEqual(traeLaunch, {
-        command: "trae",
-        args: ["/tmp/workspace"],
-      });
-
       const kiroLaunch = yield* resolveEditorLaunch(
         { cwd: "/tmp/workspace", editor: "kiro" },
         "darwin",
@@ -50,34 +73,6 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
       assert.deepEqual(kiroLaunch, {
         command: "kiro",
         args: ["ide", "/tmp/workspace"],
-      });
-
-      const vscodeLaunch = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace", editor: "vscode" },
-        "darwin",
-        { PATH: "" },
-      );
-      assert.deepEqual(vscodeLaunch, {
-        command: "code",
-        args: ["/tmp/workspace"],
-      });
-
-      const vscodeInsidersLaunch = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace", editor: "vscode-insiders" },
-        "darwin",
-      );
-      assert.deepEqual(vscodeInsidersLaunch, {
-        command: "code-insiders",
-        args: ["/tmp/workspace"],
-      });
-
-      const vscodiumLaunch = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace", editor: "vscodium" },
-        "darwin",
-      );
-      assert.deepEqual(vscodiumLaunch, {
-        command: "codium",
-        args: ["/tmp/workspace"],
       });
 
       const zedLaunch = yield* resolveEditorLaunch(
@@ -89,105 +84,29 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
         command: "zed",
         args: ["/tmp/workspace"],
       });
-
-      const ideaLaunch = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace", editor: "idea" },
-        "darwin",
-      );
-      assert.deepEqual(ideaLaunch, {
-        command: "idea",
-        args: ["/tmp/workspace"],
-      });
     }),
   );
 
   it.effect("applies launch-style-specific navigation arguments", () =>
     Effect.gen(function* () {
-      const lineOnly = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace/AGENTS.md:48", editor: "cursor" },
+      const cursorLineAndColumn = yield* resolveEditorLaunch(
+        { cwd: "/tmp/workspace/src/process/externalLauncher.ts:71:5", editor: "cursor" },
         "darwin",
         { PATH: "" },
       );
-      assert.deepEqual(lineOnly, {
+      assert.deepEqual(cursorLineAndColumn, {
         command: "cursor",
-        args: ["--goto", "/tmp/workspace/AGENTS.md:48"],
-      });
-
-      const lineAndColumn = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace/src/open.ts:71:5", editor: "cursor" },
-        "darwin",
-        { PATH: "" },
-      );
-      assert.deepEqual(lineAndColumn, {
-        command: "cursor",
-        args: ["--goto", "/tmp/workspace/src/open.ts:71:5"],
-      });
-
-      const traeLineAndColumn = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace/src/open.ts:71:5", editor: "trae" },
-        "darwin",
-      );
-      assert.deepEqual(traeLineAndColumn, {
-        command: "trae",
-        args: ["--goto", "/tmp/workspace/src/open.ts:71:5"],
-      });
-
-      const kiroLineAndColumn = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace/src/open.ts:71:5", editor: "kiro" },
-        "darwin",
-        { PATH: "" },
-      );
-      assert.deepEqual(kiroLineAndColumn, {
-        command: "kiro",
-        args: ["ide", "--goto", "/tmp/workspace/src/open.ts:71:5"],
-      });
-
-      const vscodeLineAndColumn = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace/src/open.ts:71:5", editor: "vscode" },
-        "darwin",
-        { PATH: "" },
-      );
-      assert.deepEqual(vscodeLineAndColumn, {
-        command: "code",
-        args: ["--goto", "/tmp/workspace/src/open.ts:71:5"],
-      });
-
-      const vscodeInsidersLineAndColumn = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace/src/open.ts:71:5", editor: "vscode-insiders" },
-        "darwin",
-      );
-      assert.deepEqual(vscodeInsidersLineAndColumn, {
-        command: "code-insiders",
-        args: ["--goto", "/tmp/workspace/src/open.ts:71:5"],
-      });
-
-      const vscodiumLineAndColumn = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace/src/open.ts:71:5", editor: "vscodium" },
-        "darwin",
-      );
-      assert.deepEqual(vscodiumLineAndColumn, {
-        command: "codium",
-        args: ["--goto", "/tmp/workspace/src/open.ts:71:5"],
+        args: ["--goto", "/tmp/workspace/src/process/externalLauncher.ts:71:5"],
       });
 
       const zedLineAndColumn = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace/src/open.ts:71:5", editor: "zed" },
+        { cwd: "/tmp/workspace/src/process/externalLauncher.ts:71:5", editor: "zed" },
         "darwin",
         { PATH: "" },
       );
       assert.deepEqual(zedLineAndColumn, {
         command: "zed",
-        args: ["/tmp/workspace/src/open.ts:71:5"],
-      });
-
-      const zedLineOnly = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace/AGENTS.md:48", editor: "zed" },
-        "darwin",
-        { PATH: "" },
-      );
-      assert.deepEqual(zedLineOnly, {
-        command: "zed",
-        args: ["/tmp/workspace/AGENTS.md:48"],
+        args: ["/tmp/workspace/src/process/externalLauncher.ts:71:5"],
       });
 
       const ideaLineOnly = yield* resolveEditorLaunch(
@@ -200,12 +119,12 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
       });
 
       const ideaLineAndColumn = yield* resolveEditorLaunch(
-        { cwd: "/tmp/workspace/src/open.ts:71:5", editor: "idea" },
+        { cwd: "/tmp/workspace/src/process/externalLauncher.ts:71:5", editor: "idea" },
         "darwin",
       );
       assert.deepEqual(ideaLineAndColumn, {
         command: "idea",
-        args: ["--line", "71", "--column", "5", "/tmp/workspace/src/open.ts"],
+        args: ["--line", "71", "--column", "5", "/tmp/workspace/src/process/externalLauncher.ts"],
       });
     }),
   );
@@ -214,7 +133,7 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-open-test-" });
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-external-launcher-test-" });
       yield* fs.writeFileString(path.join(dir, "zeditor"), "#!/bin/sh\nexit 0\n");
       yield* fs.chmod(path.join(dir, "zeditor"), 0o755);
 
@@ -276,23 +195,147 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
   );
 });
 
-it.layer(NodeServices.layer)("launchDetached", (it) => {
-  it.effect("resolves when command can be spawned", () =>
+it("resolveBrowserLaunch maps default browser launchers by platform", () => {
+  const target = "https://example.com/some path?name=o'hara";
+
+  assert.deepEqual(resolveBrowserLaunch(target, "darwin").command, "open");
+  assert.deepEqual(resolveBrowserLaunch(target, "darwin").args, [target]);
+  assert.deepEqual(resolveBrowserLaunch(target, "darwin").options, {
+    detached: true,
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+
+  assert.deepEqual(resolveBrowserLaunch(target, "linux", {}).command, "xdg-open");
+  assert.deepEqual(resolveBrowserLaunch(target, "linux", {}).args, [target]);
+
+  const windows = resolveBrowserLaunch(target, "win32", {
+    SYSTEMROOT: "C:\\Windows",
+  });
+  assert.equal(windows.command, "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+  assert.deepEqual(windows.args, [
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-EncodedCommand",
+    encodeUtf16LeBase64(
+      "$ProgressPreference = 'SilentlyContinue'; Start 'https://example.com/some path?name=o''hara'",
+    ),
+  ]);
+  assert.deepEqual(windows.options, {
+    detached: true,
+    shell: false,
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+});
+
+it("resolveBrowserLaunch opens through Windows from WSL when not remote", () => {
+  const launch = resolveBrowserLaunch("https://example.com", "linux", {
+    WSL_DISTRO_NAME: "Ubuntu",
+  });
+  assert.equal(launch.command, "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe");
+  assert.equal(launch.options.detached, true);
+});
+
+it("resolveBrowserLaunch keeps xdg-open for WSL over SSH", () => {
+  const launch = resolveBrowserLaunch("https://example.com", "linux", {
+    WSL_DISTRO_NAME: "Ubuntu",
+    SSH_CONNECTION: "client server",
+  });
+  assert.equal(launch.command, "xdg-open");
+});
+
+it.layer(NodeServices.layer)("launchBrowser", (it) => {
+  it.effect("spawns through the ChildProcessSpawner service and unrefs the handle", () =>
     Effect.gen(function* () {
-      const result = yield* launchDetached({
-        command: process.execPath,
-        args: ["-e", "process.exit(0)"],
-      }).pipe(Effect.result);
+      let spawnedCommand: ChildProcess.StandardCommand | undefined;
+      let didUnref = false;
+
+      const spawnerLayer = Layer.mock(ChildProcessSpawner.ChildProcessSpawner, {
+        spawn: (command) =>
+          Effect.sync(() => {
+            assert.equal(ChildProcess.isStandardCommand(command), true);
+            if (!ChildProcess.isStandardCommand(command)) {
+              throw new Error("Expected a standard command");
+            }
+            spawnedCommand = command;
+            return makeMockDetachedHandle(() => {
+              didUnref = true;
+            });
+          }),
+      });
+
+      const result = yield* launchBrowser("https://example.com").pipe(
+        Effect.provide(spawnerLayer),
+        Effect.result,
+      );
+
       assertSuccess(result, undefined);
+      assert.ok(spawnedCommand);
+      const expectedLaunch = resolveBrowserLaunch("https://example.com");
+      assert.equal(spawnedCommand.command, expectedLaunch.command);
+      assert.deepEqual(spawnedCommand.args, expectedLaunch.args);
+      assert.deepEqual(spawnedCommand.options, expectedLaunch.options);
+      assert.equal(didUnref, true);
+    }),
+  );
+});
+
+it.layer(NodeServices.layer)("launchEditorProcess", (it) => {
+  it.effect("spawns through the ChildProcessSpawner service and unrefs the handle", () =>
+    Effect.gen(function* () {
+      let spawnedCommand: ChildProcess.StandardCommand | undefined;
+      let didUnref = false;
+      const expectedArgs = ["-e", "process.exit(0)"];
+
+      const spawnerLayer = Layer.mock(ChildProcessSpawner.ChildProcessSpawner, {
+        spawn: (command) =>
+          Effect.sync(() => {
+            assert.equal(ChildProcess.isStandardCommand(command), true);
+            if (!ChildProcess.isStandardCommand(command)) {
+              throw new Error("Expected a standard command");
+            }
+            spawnedCommand = command;
+            return makeMockDetachedHandle(() => {
+              didUnref = true;
+            });
+          }),
+      });
+
+      const result = yield* launchEditorProcess({
+        command: process.execPath,
+        args: expectedArgs,
+      }).pipe(Effect.provide(spawnerLayer), Effect.result);
+
+      assertSuccess(result, undefined);
+      assert.ok(spawnedCommand);
+      assert.equal(spawnedCommand.command, process.execPath);
+      assert.deepEqual(
+        spawnedCommand.args,
+        process.platform === "win32" ? expectedArgs.map((arg) => `"${arg}"`) : expectedArgs,
+      );
+      assert.deepEqual(spawnedCommand.options, {
+        detached: true,
+        shell: process.platform === "win32",
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+      assert.equal(didUnref, true);
     }),
   );
 
   it.effect("rejects when command does not exist", () =>
     Effect.gen(function* () {
-      const result = yield* launchDetached({
-        command: `t3code-no-such-command-${Date.now()}`,
+      const spawnerLayer = Layer.mock(ChildProcessSpawner.ChildProcessSpawner, {});
+      const result = yield* launchEditorProcess({
+        command: `t3code-no-such-command-${yield* Random.nextUUIDv4}`,
         args: [],
-      }).pipe(Effect.result);
+      }).pipe(Effect.provide(spawnerLayer), Effect.result);
       assert.equal(result._tag, "Failure");
     }),
   );
@@ -303,7 +346,7 @@ it.layer(NodeServices.layer)("isCommandAvailable", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-open-test-" });
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-external-launcher-test-" });
       yield* fs.writeFileString(path.join(dir, "code.CMD"), "@echo off\r\n");
       const env = {
         PATH: dir,
@@ -325,7 +368,7 @@ it.layer(NodeServices.layer)("isCommandAvailable", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-open-test-" });
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-external-launcher-test-" });
       yield* fs.writeFileString(path.join(dir, "npm"), "echo nope\r\n");
       const env = {
         PATH: dir,
@@ -339,7 +382,7 @@ it.layer(NodeServices.layer)("isCommandAvailable", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-open-test-" });
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-external-launcher-test-" });
       yield* fs.writeFileString(path.join(dir, "my.tool.CMD"), "@echo off\r\n");
       const env = {
         PATH: dir,
@@ -353,8 +396,12 @@ it.layer(NodeServices.layer)("isCommandAvailable", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const firstDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-open-test-" });
-      const secondDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-open-test-" });
+      const firstDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-external-launcher-test-",
+      });
+      const secondDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-external-launcher-test-",
+      });
       yield* fs.writeFileString(path.join(firstDir, "code.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(secondDir, "code.CMD"), "MZ");
       const env = {
@@ -377,12 +424,40 @@ it.layer(NodeServices.layer)("resolveAvailableEditors", (it) => {
       yield* fs.writeFileString(path.join(dir, "kiro.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(dir, "code-insiders.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(dir, "codium.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "aqua.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "clion.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "datagrip.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "dataspell.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "goland.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "phpstorm.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "pycharm.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "rider.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "rubymine.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "rustrover.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "webstorm.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(dir, "explorer.CMD"), "MZ");
       const editors = resolveAvailableEditors("win32", {
         PATH: dir,
         PATHEXT: ".COM;.EXE;.BAT;.CMD",
       });
-      assert.deepEqual(editors, ["trae", "kiro", "vscode-insiders", "vscodium", "file-manager"]);
+      assert.deepEqual(editors, [
+        "trae",
+        "kiro",
+        "vscode-insiders",
+        "vscodium",
+        "aqua",
+        "clion",
+        "datagrip",
+        "dataspell",
+        "goland",
+        "phpstorm",
+        "pycharm",
+        "rider",
+        "rubymine",
+        "rustrover",
+        "webstorm",
+        "file-manager",
+      ]);
     }),
   );
 

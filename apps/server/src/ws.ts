@@ -11,6 +11,7 @@ import {
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
   type OrchestrationShellStreamEvent,
+  type OrchestrationThread,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
@@ -34,7 +35,7 @@ import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery.ts";
 import { ServerConfig } from "./config.ts";
 import { Keybindings } from "./keybindings.ts";
-import { Open, resolveAvailableEditors } from "./open.ts";
+import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -44,6 +45,7 @@ import {
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
+import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
@@ -106,6 +108,58 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
 }
 
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
+const SERVER_STREAM_KEEPALIVE_INTERVAL = Duration.seconds(20);
+const THREAD_DETAIL_ACTIVITY_SNAPSHOT_LIMIT = 500;
+const THREAD_DETAIL_CHECKPOINT_SNAPSHOT_LIMIT = 500;
+const THREAD_DETAIL_MESSAGE_SNAPSHOT_LIMIT = 2_000;
+
+function makeServerStreamKeepalive() {
+  return Stream.fromEffectRepeat(
+    Effect.sleep(SERVER_STREAM_KEEPALIVE_INTERVAL).pipe(
+      Effect.flatMap(() =>
+        Effect.sync(() => ({
+          version: 1 as const,
+          type: "heartbeat" as const,
+          payload: { at: new Date().toISOString() },
+        })),
+      ),
+    ),
+  );
+}
+
+function sanitizeThreadActivity(
+  activity: OrchestrationThread["activities"][number],
+): OrchestrationThread["activities"][number] {
+  return {
+    ...activity,
+    payload: null,
+  };
+}
+
+function sanitizeThreadDetailSnapshot(thread: OrchestrationThread): OrchestrationThread {
+  return {
+    ...thread,
+    messages: thread.messages.slice(-THREAD_DETAIL_MESSAGE_SNAPSHOT_LIMIT),
+    activities: thread.activities
+      .slice(-THREAD_DETAIL_ACTIVITY_SNAPSHOT_LIMIT)
+      .map(sanitizeThreadActivity),
+    checkpoints: thread.checkpoints.slice(-THREAD_DETAIL_CHECKPOINT_SNAPSHOT_LIMIT),
+  };
+}
+
+function sanitizeThreadDetailEvent(event: OrchestrationEvent): OrchestrationEvent {
+  if (event.type !== "thread.activity-appended") {
+    return event;
+  }
+
+  return {
+    ...event,
+    payload: {
+      ...event.payload,
+      activity: sanitizeThreadActivity(event.payload.activity),
+    },
+  };
+}
 
 function toAuthAccessStreamEvent(
   change: BootstrapCredentialChange | SessionCredentialChange,
@@ -154,7 +208,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const orchestrationEngine = yield* OrchestrationEngineService;
       const checkpointDiffQuery = yield* CheckpointDiffQuery;
       const keybindings = yield* Keybindings;
-      const open = yield* Open;
+      const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const gitWorkflow = yield* GitWorkflowService;
       const vcsProvisioning = yield* VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
@@ -162,6 +216,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const threadReadReceipts = yield* ThreadReadReceipts;
       const threadWorkbenchStates = yield* ThreadWorkbenchStates;
       const providerRegistry = yield* ProviderRegistry;
+      const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const config = yield* ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents;
       const serverSettings = yield* ServerSettingsService;
@@ -572,7 +627,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           keybindings: keybindingsConfig.keybindings,
           issues: keybindingsConfig.issues,
           providers,
-          availableEditors: resolveAvailableEditors(),
+          availableEditors: ExternalLauncher.resolveAvailableEditors(),
           observability: {
             logsDirectoryPath: config.logsDir,
             localTracingEnabled: true,
@@ -766,15 +821,21 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ORCHESTRATION_WS_METHODS.subscribeThread,
             Effect.gen(function* () {
               const [threadDetail, snapshotSequence] = yield* Effect.all([
-                projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationGetSnapshotError({
-                        message: `Failed to load thread ${input.threadId}`,
-                        cause,
-                      }),
+                projectionSnapshotQuery
+                  .getThreadDetailSubscriptionSnapshotById(input.threadId, {
+                    activityLimit: THREAD_DETAIL_ACTIVITY_SNAPSHOT_LIMIT,
+                    checkpointLimit: THREAD_DETAIL_CHECKPOINT_SNAPSHOT_LIMIT,
+                    messageLimit: THREAD_DETAIL_MESSAGE_SNAPSHOT_LIMIT,
+                  })
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new OrchestrationGetSnapshotError({
+                          message: `Failed to load thread ${input.threadId}`,
+                          cause,
+                        }),
+                    ),
                   ),
-                ),
                 projectionSnapshotQuery.getSnapshotSequence().pipe(
                   Effect.map(({ snapshotSequence }) => snapshotSequence),
                   Effect.mapError(
@@ -803,7 +864,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 ),
                 Stream.map((event) => ({
                   kind: "event" as const,
-                  event,
+                  event: sanitizeThreadDetailEvent(event),
                 })),
               );
 
@@ -812,7 +873,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                   kind: "snapshot" as const,
                   snapshot: {
                     snapshotSequence,
-                    thread: threadDetail.value,
+                    thread: sanitizeThreadDetailSnapshot(threadDetail.value),
                   },
                 }),
                 liveStream,
@@ -832,6 +893,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               : providerRegistry.refresh()
             ).pipe(Effect.map((providers) => ({ providers }))),
             { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverUpdateProvider]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverUpdateProvider,
+            providerMaintenanceRunner.updateProvider(input),
+            {
+              "rpc.aggregate": "server",
+            },
           ),
         [WS_METHODS.serverUpsertKeybinding]: (rule) =>
           observeRpcEffect(
@@ -987,7 +1056,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.shellOpenInEditor]: (input) =>
-          observeRpcEffect(WS_METHODS.shellOpenInEditor, open.openInEditor(input), {
+          observeRpcEffect(WS_METHODS.shellOpenInEditor, externalLauncher.launchEditor(input), {
             "rpc.aggregate": "workspace",
           }),
         [WS_METHODS.filesystemBrowse]: (input) =>
@@ -1257,6 +1326,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 keybindingsUpdates,
                 Stream.merge(providerStatuses, settingsUpdates),
               );
+              const keepaliveEvents = makeServerStreamKeepalive();
 
               return Stream.concat(
                 Stream.make({
@@ -1264,7 +1334,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                   type: "snapshot" as const,
                   config: yield* loadServerConfig,
                 }),
-                liveUpdates,
+                Stream.merge(liveUpdates, keepaliveEvents),
               );
             }),
             { "rpc.aggregate": "server" },
@@ -1280,7 +1350,22 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               const liveEvents = lifecycleEvents.stream.pipe(
                 Stream.filter((event) => event.sequence > snapshot.sequence),
               );
-              return Stream.concat(Stream.fromIterable(snapshotEvents), liveEvents);
+              const keepaliveEvents = Stream.fromEffectRepeat(
+                Effect.sleep(SERVER_STREAM_KEEPALIVE_INTERVAL).pipe(
+                  Effect.flatMap(() =>
+                    Effect.sync(() => ({
+                      version: 1 as const,
+                      sequence: 0,
+                      type: "heartbeat" as const,
+                      payload: { at: new Date().toISOString() },
+                    })),
+                  ),
+                ),
+              );
+              return Stream.concat(
+                Stream.fromIterable(snapshotEvents),
+                Stream.merge(liveEvents, keepaliveEvents),
+              );
             }),
             { "rpc.aggregate": "server" },
           ),
@@ -1340,6 +1425,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           Effect.provide(
             makeWsRpcLayer(session.sessionId).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
+              Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(
                 SourceControlDiscoveryLayer.layer.pipe(
                   Layer.provide(

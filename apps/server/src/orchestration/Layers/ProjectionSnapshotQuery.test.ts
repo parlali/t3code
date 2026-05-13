@@ -440,6 +440,197 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
+  it.effect("returns bounded subscription detail snapshots without activity payloads", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_turns`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-subscription-snapshot',
+          'Subscription Snapshot',
+          '/tmp/subscription-snapshot',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-04-10T00:00:00.000Z',
+          '2026-04-10T00:00:00.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          latest_user_message_at,
+          pending_approval_count,
+          pending_user_input_count,
+          has_actionable_proposed_plan,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-subscription-snapshot',
+          'project-subscription-snapshot',
+          'Thread Subscription Snapshot',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          'full-access',
+          'default',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          0,
+          0,
+          0,
+          '2026-04-10T00:00:00.000Z',
+          '2026-04-10T00:00:00.000Z',
+          NULL
+        )
+      `;
+
+      for (let index = 1; index <= 3; index += 1) {
+        yield* sql`
+          INSERT INTO projection_thread_messages (
+            message_id,
+            thread_id,
+            turn_id,
+            role,
+            text,
+            is_streaming,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            ${`message-${index}`},
+            'thread-subscription-snapshot',
+            NULL,
+            'assistant',
+            ${`message ${index}`},
+            0,
+            ${`2026-04-10T00:00:0${index}.000Z`},
+            ${`2026-04-10T00:00:0${index}.000Z`}
+          )
+        `;
+
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id,
+            thread_id,
+            turn_id,
+            tone,
+            kind,
+            summary,
+            payload_json,
+            sequence,
+            created_at
+          )
+          VALUES (
+            ${`activity-${index}`},
+            'thread-subscription-snapshot',
+            NULL,
+            'tool',
+            'runtime.tool',
+            ${`activity ${index}`},
+            ${JSON.stringify({ index, data: "x".repeat(1024) })},
+            ${index},
+            ${`2026-04-10T00:01:0${index}.000Z`}
+          )
+        `;
+
+        yield* sql`
+          INSERT INTO projection_turns (
+            thread_id,
+            turn_id,
+            pending_message_id,
+            source_proposed_plan_thread_id,
+            source_proposed_plan_id,
+            assistant_message_id,
+            state,
+            requested_at,
+            started_at,
+            completed_at,
+            checkpoint_turn_count,
+            checkpoint_ref,
+            checkpoint_status,
+            checkpoint_files_json
+          )
+          VALUES (
+            'thread-subscription-snapshot',
+            ${`turn-${index}`},
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            'completed',
+            ${`2026-04-10T00:02:0${index}.000Z`},
+            ${`2026-04-10T00:02:0${index}.000Z`},
+            ${`2026-04-10T00:02:0${index}.000Z`},
+            ${index},
+            ${`checkpoint-${index}`},
+            'ready',
+            '[]'
+          )
+        `;
+      }
+
+      const snapshot = yield* snapshotQuery.getThreadDetailSubscriptionSnapshotById(
+        ThreadId.make("thread-subscription-snapshot"),
+        {
+          activityLimit: 2,
+          checkpointLimit: 2,
+          messageLimit: 2,
+        },
+      );
+
+      assert.equal(snapshot._tag, "Some");
+      if (snapshot._tag === "Some") {
+        assert.deepEqual(
+          snapshot.value.messages.map((message) => message.id),
+          [asMessageId("message-2"), asMessageId("message-3")],
+        );
+        assert.deepEqual(
+          snapshot.value.activities.map((activity) => ({
+            id: activity.id,
+            payload: activity.payload,
+          })),
+          [
+            { id: asEventId("activity-2"), payload: null },
+            { id: asEventId("activity-3"), payload: null },
+          ],
+        );
+        assert.deepEqual(
+          snapshot.value.checkpoints.map((checkpoint) => checkpoint.checkpointTurnCount),
+          [2, 3],
+        );
+      }
+    }),
+  );
+
   it.effect("keeps archived threads out of the main shell snapshot", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;

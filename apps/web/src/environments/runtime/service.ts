@@ -67,7 +67,7 @@ import { useTerminalStateStore } from "~/terminalStateStore";
 import { useTerminalRuntimeStatusStore } from "~/terminalRuntimeStatusStore";
 import { useThreadReadReceiptStore } from "~/threadReadReceiptStore";
 import { useUiStateStore } from "~/uiStateStore";
-import type { WsProtocolCloseContext } from "../../rpc/protocol";
+import type { WsProtocolCloseContext, WsProtocolLifecycleHandlers } from "../../rpc/protocol";
 import { getServerConfig } from "../../rpc/serverState";
 import { WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
@@ -1163,6 +1163,12 @@ function createPrimaryEnvironmentClient(
     );
   }
   const connectionLabel = knownEnvironment?.label ?? null;
+  const passiveHandlers = {
+    trackConnectionStatus: false,
+    getConnectionLabel: () => connectionLabel,
+    getVersionMismatchHint: () =>
+      resolveServerConfigVersionMismatch(getServerConfig())?.hint ?? null,
+  } satisfies WsProtocolLifecycleHandlers;
 
   return createWsRpcClient(
     new WsTransport(wsBaseUrl, {
@@ -1170,6 +1176,10 @@ function createPrimaryEnvironmentClient(
       getVersionMismatchHint: () =>
         resolveServerConfigVersionMismatch(getServerConfig())?.hint ?? null,
     }),
+    {
+      streamTransport: new WsTransport(wsBaseUrl, passiveHandlers),
+      threadDetailTransport: new WsTransport(wsBaseUrl, passiveHandlers),
+    },
   );
 }
 
@@ -1179,67 +1189,78 @@ function createSavedEnvironmentClient(
 ): WsRpcClient {
   useSavedEnvironmentRuntimeStore.getState().ensure(environmentId);
 
+  const resolveSocketUrl = async () => {
+    const record = getSavedEnvironmentRecord(environmentId);
+    if (!record) {
+      throw new Error(`Saved environment ${environmentId} not found.`);
+    }
+    return record.desktopSsh
+      ? await resolveDesktopSshWebSocketConnectionUrl(
+          record.wsBaseUrl,
+          record.httpBaseUrl,
+          bearerToken,
+        )
+      : await resolveRemoteWebSocketConnectionUrl({
+          wsBaseUrl: record.wsBaseUrl,
+          httpBaseUrl: record.httpBaseUrl,
+          bearerToken,
+        });
+  };
+  const passiveHandlers = {
+    trackConnectionStatus: false,
+    getConnectionLabel: () => getSavedEnvironmentRecord(environmentId)?.label ?? null,
+    getVersionMismatchHint: () =>
+      resolveServerConfigVersionMismatch(
+        useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
+      )?.hint ?? null,
+  } satisfies WsProtocolLifecycleHandlers;
+
   return createWsRpcClient(
-    new WsTransport(
-      async () => {
-        const record = getSavedEnvironmentRecord(environmentId);
-        if (!record) {
-          throw new Error(`Saved environment ${environmentId} not found.`);
+    new WsTransport(resolveSocketUrl, {
+      trackConnectionStatus: false,
+      getConnectionLabel: () => getSavedEnvironmentRecord(environmentId)?.label ?? null,
+      getVersionMismatchHint: () =>
+        resolveServerConfigVersionMismatch(
+          useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
+        )?.hint ?? null,
+      onAttempt: () => {
+        setRuntimeConnecting(environmentId);
+      },
+      onOpen: () => {
+        setRuntimeConnected(environmentId);
+      },
+      onError: (message: string) => {
+        const mismatch = resolveServerConfigVersionMismatch(
+          useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
+        );
+        useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
+          connectionState: "error",
+          lastError: appendVersionMismatchHint(message, mismatch),
+          lastErrorAt: isoNow(),
+        });
+      },
+      onClose: (
+        details: { readonly code: number; readonly reason: string },
+        context: WsProtocolCloseContext,
+      ) => {
+        if (context.intentional) {
+          return;
         }
-        return record.desktopSsh
-          ? await resolveDesktopSshWebSocketConnectionUrl(
-              record.wsBaseUrl,
-              record.httpBaseUrl,
-              bearerToken,
-            )
-          : await resolveRemoteWebSocketConnectionUrl({
-              wsBaseUrl: record.wsBaseUrl,
-              httpBaseUrl: record.httpBaseUrl,
-              bearerToken,
-            });
-      },
-      {
-        trackConnectionStatus: false,
-        getConnectionLabel: () => getSavedEnvironmentRecord(environmentId)?.label ?? null,
-        getVersionMismatchHint: () =>
-          resolveServerConfigVersionMismatch(
-            useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
-          )?.hint ?? null,
-        onAttempt: () => {
-          setRuntimeConnecting(environmentId);
-        },
-        onOpen: () => {
-          setRuntimeConnected(environmentId);
-        },
-        onError: (message: string) => {
-          const mismatch = resolveServerConfigVersionMismatch(
-            useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
-          );
-          useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
-            connectionState: "error",
-            lastError: appendVersionMismatchHint(message, mismatch),
-            lastErrorAt: isoNow(),
-          });
-        },
-        onClose: (
-          details: { readonly code: number; readonly reason: string },
-          context: WsProtocolCloseContext,
-        ) => {
-          if (context.intentional) {
-            return;
-          }
-          setRuntimeDisconnected(
-            environmentId,
-            appendVersionMismatchHint(
-              details.reason,
-              resolveServerConfigVersionMismatch(
-                useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
-              ),
+        setRuntimeDisconnected(
+          environmentId,
+          appendVersionMismatchHint(
+            details.reason,
+            resolveServerConfigVersionMismatch(
+              useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
             ),
-          );
-        },
+          ),
+        );
       },
-    ),
+    }),
+    {
+      streamTransport: new WsTransport(resolveSocketUrl, passiveHandlers),
+      threadDetailTransport: new WsTransport(resolveSocketUrl, passiveHandlers),
+    },
   );
 }
 
