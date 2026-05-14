@@ -175,6 +175,9 @@ export interface WsRpcClient {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
+    readonly getCheckpointFileRestoreAvailability: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.getCheckpointFileRestoreAvailability
+    >;
     readonly getArchivedShellSnapshot: RpcUnaryNoArgMethod<
       typeof ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot
     >;
@@ -404,6 +407,10 @@ export function createWsRpcClient(
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getTurnDiff](input)),
       getFullThreadDiff: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getFullThreadDiff](input)),
+      getCheckpointFileRestoreAvailability: (input) =>
+        transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.getCheckpointFileRestoreAvailability](input),
+        ),
       getArchivedShellSnapshot: () =>
         transport.request((client) =>
           client[ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]({}),

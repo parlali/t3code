@@ -546,6 +546,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           turnCount: command.turnCount,
+          restoreFiles: command.restoreFiles,
           createdAt: command.createdAt,
         },
       };
@@ -713,6 +714,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           turnCount: command.turnCount,
+          restoreFiles: command.restoreFiles,
+          restoredFiles: command.restoredFiles,
         },
       };
     }

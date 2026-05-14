@@ -911,6 +911,8 @@ it.layer(
         payload: {
           threadId,
           turnCount: 1,
+          restoreFiles: false,
+          restoredFiles: false,
         },
       });
 
@@ -2009,6 +2011,8 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         payload: {
           threadId: ThreadId.make("thread-revert"),
           turnCount: 1,
+          restoreFiles: false,
+          restoredFiles: false,
         },
       });
 

@@ -829,6 +829,7 @@ it.live("reverts to an earlier checkpoint and trims checkpoint projections + git
         commandId: CommandId.make("cmd-checkpoint-revert"),
         threadId: THREAD_ID,
         turnCount: 1,
+        restoreFiles: true,
         createdAt: nowIso(),
       });
 
@@ -887,6 +888,7 @@ it.live("completes a checkpoint revert from thread workspace when no active sess
         commandId: CommandId.make("cmd-checkpoint-revert-no-session"),
         threadId: THREAD_ID,
         turnCount: 0,
+        restoreFiles: false,
         createdAt: nowIso(),
       });
 
@@ -1396,6 +1398,7 @@ it.live("reverts claudeAgent turns and rolls back provider conversation state", 
           commandId: CommandId.make("cmd-checkpoint-revert-claude"),
           threadId: THREAD_ID,
           turnCount: 1,
+          restoreFiles: true,
           createdAt: nowIso(),
         });
 

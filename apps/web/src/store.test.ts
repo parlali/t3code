@@ -961,6 +961,8 @@ describe("incremental orchestration updates", () => {
       makeEvent("thread.reverted", {
         threadId: ThreadId.make("thread-1"),
         turnCount: 1,
+        restoreFiles: false,
+        restoredFiles: false,
       }),
       localEnvironmentId,
     );
@@ -1020,6 +1022,8 @@ describe("incremental orchestration updates", () => {
       makeEvent("thread.reverted", {
         threadId: thread.id,
         turnCount: 1,
+        restoreFiles: false,
+        restoredFiles: false,
       }),
       localEnvironmentId,
     );

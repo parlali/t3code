@@ -9,6 +9,7 @@ import {
   type GitActionProgressEvent,
   type GitManagerServiceError,
   OrchestrationDispatchCommandError,
+  OrchestrationGetCheckpointFileRestoreAvailabilityError,
   type OrchestrationEvent,
   type OrchestrationShellStreamEvent,
   type OrchestrationThread,
@@ -40,6 +41,7 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
+import { CheckpointRevertPlanner } from "./orchestration/Services/CheckpointRevertPlanner.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -210,6 +212,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
       const orchestrationEngine = yield* OrchestrationEngineService;
       const checkpointDiffQuery = yield* CheckpointDiffQuery;
+      const checkpointRevertPlanner = yield* CheckpointRevertPlanner;
       const keybindings = yield* Keybindings;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const gitWorkflow = yield* GitWorkflowService;
@@ -741,6 +744,20 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 (cause) =>
                   new OrchestrationGetFullThreadDiffError({
                     message: "Failed to load full thread diff",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getCheckpointFileRestoreAvailability]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getCheckpointFileRestoreAvailability,
+            checkpointRevertPlanner.getFileRestoreAvailability(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetCheckpointFileRestoreAvailabilityError({
+                    message: "Failed to load checkpoint file restore availability",
                     cause,
                   }),
               ),

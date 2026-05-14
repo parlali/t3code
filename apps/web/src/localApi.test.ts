@@ -114,6 +114,7 @@ const rpcClientMock = {
     dispatchCommand: vi.fn(),
     getTurnDiff: vi.fn(),
     getFullThreadDiff: vi.fn(),
+    getCheckpointFileRestoreAvailability: vi.fn(),
     subscribeShell: vi.fn((listener: (event: OrchestrationShellStreamItem) => void) =>
       registerListener(shellStreamListeners, listener),
     ),
@@ -514,6 +515,28 @@ describe("wsApi", () => {
     expect(rpcClientMock.orchestration.getFullThreadDiff).toHaveBeenCalledWith({
       threadId: "thread-1",
       toTurnCount: 1,
+    });
+  });
+
+  it("forwards checkpoint file restore availability requests to the orchestration RPC", async () => {
+    rpcClientMock.orchestration.getCheckpointFileRestoreAvailability.mockResolvedValue({
+      threadId: ThreadId.make("thread-1"),
+      turnCount: 1,
+      canRestoreFiles: false,
+      checkpointRef: null,
+      reason: "missing",
+    });
+    const { createEnvironmentApi } = await import("./environmentApi");
+
+    const api = createEnvironmentApi(rpcClientMock as never);
+    await api.orchestration.getCheckpointFileRestoreAvailability({
+      threadId: ThreadId.make("thread-1"),
+      turnCount: 1,
+    });
+
+    expect(rpcClientMock.orchestration.getCheckpointFileRestoreAvailability).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      turnCount: 1,
     });
   });
 

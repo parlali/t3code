@@ -80,6 +80,8 @@ import type {
 import type { ServerUpsertKeybindingInput } from "./server.ts";
 import type {
   ClientOrchestrationCommand,
+  OrchestrationCheckpointFileRestoreAvailability,
+  OrchestrationGetCheckpointFileRestoreAvailabilityInput,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetTurnDiffInput,
@@ -447,6 +449,9 @@ export interface EnvironmentApi {
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;
+    getCheckpointFileRestoreAvailability: (
+      input: OrchestrationGetCheckpointFileRestoreAvailabilityInput,
+    ) => Promise<OrchestrationCheckpointFileRestoreAvailability>;
     getArchivedShellSnapshot: () => Promise<OrchestrationShellSnapshot>;
     subscribeShell: (
       callback: (event: OrchestrationShellStreamItem) => void,

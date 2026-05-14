@@ -24,6 +24,7 @@ import {
 } from "effect";
 
 import { CheckpointStoreLive } from "../src/checkpointing/Layers/CheckpointStore.ts";
+import { CheckpointRevertPlannerLive } from "../src/orchestration/Layers/CheckpointRevertPlanner.ts";
 import { CheckpointStore } from "../src/checkpointing/Services/CheckpointStore.ts";
 import { TextGeneration, type TextGenerationShape } from "../src/textGeneration/TextGeneration.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../src/persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -294,12 +295,18 @@ export const makeOrchestrationIntegrationHarness = (
 
     const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistry.layer));
     const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive;
+    const checkpointRevertPlannerLayer = CheckpointRevertPlannerLive.pipe(
+      Layer.provideMerge(checkpointStoreLayer),
+      Layer.provideMerge(providerLayer),
+      Layer.provideMerge(projectionSnapshotQueryLayer),
+    );
     const runtimeServicesLayer = Layer.mergeAll(
       projectionSnapshotQueryLayer,
       orchestrationLayer.pipe(Layer.provide(projectionSnapshotQueryLayer)),
       ProjectionCheckpointRepositoryLive,
       ProjectionPendingApprovalRepositoryLive,
       checkpointStoreLayer,
+      checkpointRevertPlannerLayer,
       providerLayer,
       RuntimeReceiptBusTest,
     );

@@ -636,6 +636,8 @@ describe("orchestration projector", () => {
         payload: {
           threadId: "thread-1",
           turnCount: 1,
+          restoreFiles: false,
+          restoredFiles: false,
         },
       }),
     ];
@@ -793,6 +795,8 @@ describe("orchestration projector", () => {
         payload: {
           threadId: "thread-revert",
           turnCount: 1,
+          restoreFiles: false,
+          restoredFiles: false,
         },
       }),
     ];

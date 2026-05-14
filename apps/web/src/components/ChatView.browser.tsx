@@ -13,7 +13,7 @@ import {
   ProviderInstanceId,
   type ServerConfig,
   type ServerLifecycleWelcomePayload,
-  type ThreadId,
+  ThreadId,
   type TurnId,
   WS_METHODS,
   OrchestrationSessionStatus,
@@ -244,6 +244,13 @@ function createMockEnvironmentApi(input: {
       getFullThreadDiff: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getFullThreadDiff"],
+      getCheckpointFileRestoreAvailability: (async () => ({
+        threadId: ThreadId.make("thread-1"),
+        turnCount: 0,
+        canRestoreFiles: false,
+        checkpointRef: null,
+        reason: "Not implemented in browser test.",
+      })) as EnvironmentApi["orchestration"]["getCheckpointFileRestoreAvailability"],
       getArchivedShellSnapshot: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getArchivedShellSnapshot"],

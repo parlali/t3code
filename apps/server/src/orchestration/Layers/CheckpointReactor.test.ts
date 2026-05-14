@@ -24,6 +24,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CheckpointStoreLive } from "../../checkpointing/Layers/CheckpointStore.ts";
 import { CheckpointStore } from "../../checkpointing/Services/CheckpointStore.ts";
+import { CheckpointRevertPlannerLive } from "./CheckpointRevertPlanner.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
@@ -313,14 +314,21 @@ describe("CheckpointReactor", () => {
       refreshStatus: () => Effect.die("refreshStatus should not be called in this test"),
       streamStatus: () => Stream.empty,
     });
+    const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistry.layer));
+    const checkpointRevertPlannerLayer = CheckpointRevertPlannerLive.pipe(
+      Layer.provideMerge(projectionSnapshotLayer),
+      Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
+      Layer.provideMerge(checkpointStoreLayer),
+    );
 
     const layer = CheckpointReactorLive.pipe(
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
+      Layer.provideMerge(checkpointRevertPlannerLayer),
       Layer.provideMerge(RuntimeReceiptBusLive),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
-      Layer.provideMerge(CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistry.layer))),
+      Layer.provideMerge(checkpointStoreLayer),
       Layer.provideMerge(
         WorkspaceEntriesLive.pipe(
           Layer.provide(WorkspacePathsLive),
@@ -979,6 +987,7 @@ describe("CheckpointReactor", () => {
         commandId: CommandId.make("cmd-revert-request"),
         threadId: ThreadId.make("thread-1"),
         turnCount: 1,
+        restoreFiles: true,
         createdAt,
       }),
     );
@@ -1001,6 +1010,66 @@ describe("CheckpointReactor", () => {
     expect(
       gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 2)),
     ).toBe(false);
+  });
+
+  it("completes chat rollback when filesystem checkpoint refs are missing", async () => {
+    const harness = await createHarness({ seedFilesystemCheckpoints: false });
+    const createdAt = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.make("cmd-missing-ref-diff-1"),
+        threadId: ThreadId.make("thread-1"),
+        turnId: asTurnId("turn-missing-ref-1"),
+        completedAt: createdAt,
+        checkpointRef: checkpointRefForThreadTurn(ThreadId.make("thread-1"), 1),
+        status: "ready",
+        files: [],
+        checkpointTurnCount: 1,
+        createdAt,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.make("cmd-missing-ref-diff-2"),
+        threadId: ThreadId.make("thread-1"),
+        turnId: asTurnId("turn-missing-ref-2"),
+        completedAt: createdAt,
+        checkpointRef: checkpointRefForThreadTurn(ThreadId.make("thread-1"), 2),
+        status: "ready",
+        files: [],
+        checkpointTurnCount: 2,
+        createdAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.checkpoint.revert",
+        commandId: CommandId.make("cmd-missing-ref-revert-request"),
+        threadId: ThreadId.make("thread-1"),
+        turnCount: 1,
+        restoreFiles: false,
+        createdAt,
+      }),
+    );
+
+    await waitForEvent(harness.engine, (event) => event.type === "thread.reverted");
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.checkpoints.length === 1,
+    );
+
+    expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1);
+    expect(thread.activities.some((activity) => activity.kind === "checkpoint.revert.failed")).toBe(
+      false,
+    );
+    expect(harness.provider.rollbackConversation).toHaveBeenCalledWith({
+      threadId: ThreadId.make("thread-1"),
+      numTurns: 1,
+    });
   });
 
   it("executes provider revert and emits thread.reverted for claude sessions", async () => {
@@ -1060,6 +1129,7 @@ describe("CheckpointReactor", () => {
         commandId: CommandId.make("cmd-revert-request-claude"),
         threadId: ThreadId.make("thread-1"),
         turnCount: 1,
+        restoreFiles: true,
         createdAt,
       }),
     );
@@ -1129,6 +1199,7 @@ describe("CheckpointReactor", () => {
         commandId: CommandId.make("cmd-sequenced-revert-request-1"),
         threadId: ThreadId.make("thread-1"),
         turnCount: 1,
+        restoreFiles: false,
         createdAt,
       }),
     );
@@ -1138,6 +1209,7 @@ describe("CheckpointReactor", () => {
         commandId: CommandId.make("cmd-sequenced-revert-request-0"),
         threadId: ThreadId.make("thread-1"),
         turnCount: 0,
+        restoreFiles: false,
         createdAt,
       }),
     );
@@ -1194,6 +1266,7 @@ describe("CheckpointReactor", () => {
         commandId: CommandId.make("cmd-revert-no-session"),
         threadId: ThreadId.make("thread-1"),
         turnCount: 1,
+        restoreFiles: true,
         createdAt,
       }),
     );

@@ -19,6 +19,7 @@ import {
 import { CheckpointStore } from "../../checkpointing/Services/CheckpointStore.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { CheckpointReactor, type CheckpointReactorShape } from "../Services/CheckpointReactor.ts";
+import { CheckpointRevertPlanner } from "../Services/CheckpointRevertPlanner.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { RuntimeReceiptBus } from "../Services/RuntimeReceiptBus.ts";
@@ -82,6 +83,7 @@ const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
   const checkpointStore = yield* CheckpointStore;
+  const checkpointRevertPlanner = yield* CheckpointRevertPlanner;
   const receiptBus = yield* RuntimeReceiptBus;
   const workspaceEntries = yield* WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
@@ -101,6 +103,33 @@ const make = Effect.gen(function* () {
         tone: "error",
         kind: "checkpoint.revert.failed",
         summary: "Checkpoint revert failed",
+        payload: {
+          turnCount: input.turnCount,
+          detail: input.detail,
+        },
+        turnId: null,
+        createdAt: input.createdAt,
+      },
+      createdAt: input.createdAt,
+    });
+
+  const appendFileRestoreActivity = (input: {
+    readonly threadId: ThreadId;
+    readonly turnCount: number;
+    readonly detail: string;
+    readonly createdAt: string;
+    readonly kind: "checkpoint.file-restore.failed" | "checkpoint.file-restore.skipped";
+    readonly summary: "File restore failed" | "File restore skipped";
+  }) =>
+    orchestrationEngine.dispatch({
+      type: "thread.activity.append",
+      commandId: serverCommandId(input.kind),
+      threadId: input.threadId,
+      activity: {
+        id: EventId.make(crypto.randomUUID()),
+        tone: input.kind === "checkpoint.file-restore.failed" ? "error" : "info",
+        kind: input.kind,
+        summary: input.summary,
         payload: {
           turnCount: input.turnCount,
           detail: input.detail,
@@ -615,89 +644,90 @@ const make = Effect.gen(function* () {
     event: Extract<OrchestrationEvent, { type: "thread.checkpoint-revert-requested" }>,
   ) {
     const now = new Date().toISOString();
+    const requestedRestoreFiles = event.payload.restoreFiles;
 
-    const thread = yield* resolveThreadDetail(event.payload.threadId);
-    if (!thread) {
-      yield* appendRevertFailureActivity({
-        threadId: event.payload.threadId,
-        turnCount: event.payload.turnCount,
-        detail: "Thread was not found in read model.",
-        createdAt: now,
-      }).pipe(Effect.catch(() => Effect.void));
-      return;
-    }
-
-    const projects = yield* resolveThreadProjects(thread.projectId);
-    const checkpointCwd = yield* resolveCheckpointCwd({
+    const plan = yield* checkpointRevertPlanner.resolveFileRestorePlan({
       threadId: event.payload.threadId,
-      thread,
-      projects,
+      turnCount: event.payload.turnCount,
       preferSessionRuntime: true,
     });
-    if (!checkpointCwd) {
+    if (!plan.thread) {
       yield* appendRevertFailureActivity({
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,
-        detail: yield* describeMissingCheckpointCwd({
-          threadId: event.payload.threadId,
-          thread,
-          projects,
-        }),
+        detail: plan.reason ?? "Thread was not found in read model.",
         createdAt: now,
       }).pipe(Effect.catch(() => Effect.void));
       return;
     }
 
-    const currentTurnCount = thread.checkpoints.reduce(
-      (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
-      0,
-    );
+    const thread = plan.thread;
+    const currentTurnCount = plan.currentTurnCount;
 
     if (event.payload.turnCount > currentTurnCount) {
       yield* appendRevertFailureActivity({
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,
-        detail: `Checkpoint turn count ${event.payload.turnCount} exceeds current turn count ${currentTurnCount}.`,
+        detail:
+          plan.reason ??
+          `Checkpoint turn count ${event.payload.turnCount} exceeds current turn count ${currentTurnCount}.`,
         createdAt: now,
       }).pipe(Effect.catch(() => Effect.void));
       return;
     }
 
-    const targetCheckpointRef =
-      event.payload.turnCount === 0
-        ? checkpointRefForThreadTurn(event.payload.threadId, 0)
-        : thread.checkpoints.find(
-            (checkpoint) => checkpoint.checkpointTurnCount === event.payload.turnCount,
-          )?.checkpointRef;
+    let restoredFiles = false;
 
-    if (!targetCheckpointRef) {
-      yield* appendRevertFailureActivity({
-        threadId: event.payload.threadId,
-        turnCount: event.payload.turnCount,
-        detail: `Checkpoint ref for turn ${event.payload.turnCount} is unavailable in read model.`,
-        createdAt: now,
-      }).pipe(Effect.catch(() => Effect.void));
-      return;
+    if (requestedRestoreFiles) {
+      if (!plan.canRestoreFiles || !plan.checkpointCwd || !plan.checkpointRef) {
+        yield* appendFileRestoreActivity({
+          threadId: event.payload.threadId,
+          turnCount: event.payload.turnCount,
+          detail: plan.reason ?? "Filesystem checkpoint is unavailable.",
+          createdAt: now,
+          kind: "checkpoint.file-restore.skipped",
+          summary: "File restore skipped",
+        }).pipe(Effect.catch(() => Effect.void));
+      } else {
+        const restored = yield* checkpointStore
+          .restoreCheckpoint({
+            cwd: plan.checkpointCwd,
+            checkpointRef: plan.checkpointRef,
+            fallbackToHead: false,
+          })
+          .pipe(
+            Effect.catch((error) =>
+              appendFileRestoreActivity({
+                threadId: event.payload.threadId,
+                turnCount: event.payload.turnCount,
+                detail: error.message,
+                createdAt: now,
+                kind: "checkpoint.file-restore.failed",
+                summary: "File restore failed",
+              }).pipe(
+                Effect.catch(() => Effect.void),
+                Effect.as(null),
+              ),
+            ),
+          );
+        if (restored) {
+          restoredFiles = true;
+
+          // Invalidate the workspace entry cache so the @-mention file picker
+          // reflects the reverted filesystem state.
+          yield* workspaceEntries.invalidate(plan.checkpointCwd);
+        } else if (restored === false) {
+          yield* appendFileRestoreActivity({
+            threadId: event.payload.threadId,
+            turnCount: event.payload.turnCount,
+            detail: `Filesystem checkpoint is unavailable for turn ${event.payload.turnCount}.`,
+            createdAt: now,
+            kind: "checkpoint.file-restore.failed",
+            summary: "File restore failed",
+          }).pipe(Effect.catch(() => Effect.void));
+        }
+      }
     }
-
-    const restored = yield* checkpointStore.restoreCheckpoint({
-      cwd: checkpointCwd,
-      checkpointRef: targetCheckpointRef,
-      fallbackToHead: event.payload.turnCount === 0,
-    });
-    if (!restored) {
-      yield* appendRevertFailureActivity({
-        threadId: event.payload.threadId,
-        turnCount: event.payload.turnCount,
-        detail: `Filesystem checkpoint is unavailable for turn ${event.payload.turnCount}.`,
-        createdAt: now,
-      }).pipe(Effect.catch(() => Effect.void));
-      return;
-    }
-
-    // Invalidate the workspace entry cache so the @-mention file picker
-    // reflects the reverted filesystem state.
-    yield* workspaceEntries.invalidate(checkpointCwd);
 
     const rolledBackTurns = Math.max(0, currentTurnCount - event.payload.turnCount);
     if (rolledBackTurns > 0) {
@@ -711,11 +741,22 @@ const make = Effect.gen(function* () {
       .filter((checkpoint) => checkpoint.checkpointTurnCount > event.payload.turnCount)
       .map((checkpoint) => checkpoint.checkpointRef);
 
-    if (staleCheckpointRefs.length > 0) {
-      yield* checkpointStore.deleteCheckpointRefs({
-        cwd: checkpointCwd,
-        checkpointRefs: staleCheckpointRefs,
-      });
+    if (staleCheckpointRefs.length > 0 && plan.checkpointCwd) {
+      yield* checkpointStore
+        .deleteCheckpointRefs({
+          cwd: plan.checkpointCwd,
+          checkpointRefs: staleCheckpointRefs,
+        })
+        .pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("failed to delete stale checkpoint refs after chat rollback", {
+              threadId: event.payload.threadId,
+              turnCount: event.payload.turnCount,
+              checkpointRefs: staleCheckpointRefs,
+              detail: error.message,
+            }),
+          ),
+        );
     }
 
     yield* orchestrationEngine
@@ -724,6 +765,8 @@ const make = Effect.gen(function* () {
         commandId: serverCommandId("checkpoint-revert-complete"),
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,
+        restoreFiles: requestedRestoreFiles,
+        restoredFiles,
         createdAt: now,
       })
       .pipe(

@@ -29,6 +29,7 @@ import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReap
 import { OpenCodeRuntimeLive } from "./provider/opencodeRuntime.ts";
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery.ts";
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore.ts";
+import { CheckpointRevertPlannerLive } from "./orchestration/Layers/CheckpointRevertPlanner.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
@@ -178,6 +179,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(ProviderRuntimeIngestionLive),
   Layer.provideMerge(ProviderCommandReactorLive),
   Layer.provideMerge(CheckpointReactorLive),
+  Layer.provideMerge(CheckpointRevertPlannerLive),
   Layer.provideMerge(ThreadDeletionReactorLive),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );

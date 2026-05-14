@@ -46,6 +46,7 @@ import {
   ClientOrchestrationCommand,
   ORCHESTRATION_WS_METHODS,
   OrchestrationDispatchCommandError,
+  OrchestrationGetCheckpointFileRestoreAvailabilityError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetSnapshotError,
@@ -554,6 +555,15 @@ export const WsOrchestrationGetFullThreadDiffRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationGetCheckpointFileRestoreAvailabilityRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getCheckpointFileRestoreAvailability,
+  {
+    payload: OrchestrationRpcSchemas.getCheckpointFileRestoreAvailability.input,
+    success: OrchestrationRpcSchemas.getCheckpointFileRestoreAvailability.output,
+    error: OrchestrationGetCheckpointFileRestoreAvailabilityError,
+  },
+);
+
 export const WsOrchestrationReplayEventsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.replayEvents, {
   payload: OrchestrationReplayEventsInput,
   success: OrchestrationRpcSchemas.replayEvents.output,
@@ -679,6 +689,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
+  WsOrchestrationGetCheckpointFileRestoreAvailabilityRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
   WsOrchestrationSubscribeShellRpc,

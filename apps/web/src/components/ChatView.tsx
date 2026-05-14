@@ -246,6 +246,14 @@ import { retainThreadDetailSubscription } from "../environments/runtime/service"
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
 import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
+import {
   buildVersionMismatchDismissalKey,
   dismissVersionMismatch,
   isVersionMismatchDismissed,
@@ -271,6 +279,71 @@ type PendingEditComposerPrefill = {
   readonly prompt: string;
   readonly images: ComposerImageAttachment[];
 };
+
+type RevertConfirmationChoice = "cancel" | "chat-only" | "chat-and-files";
+
+type RevertConfirmationState = {
+  readonly title: string;
+  readonly description: string;
+  readonly details: readonly string[];
+  readonly canRestoreFiles: boolean;
+  readonly chatOnlyLabel: string;
+  readonly chatAndFilesLabel: string;
+  readonly resolve: (choice: RevertConfirmationChoice) => void;
+};
+
+function CheckpointRevertConfirmationDialog({
+  state,
+  onResolve,
+}: {
+  readonly state: RevertConfirmationState | null;
+  readonly onResolve: (choice: RevertConfirmationChoice) => void;
+}) {
+  return (
+    <AlertDialog
+      open={state !== null}
+      onOpenChange={(open) => {
+        if (!open) {
+          onResolve("cancel");
+        }
+      }}
+    >
+      {state ? (
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <div className="mb-1 flex items-center gap-2 text-foreground">
+              <TriangleAlertIcon className="size-5 text-warning" />
+              <AlertDialogTitle>{state.title}</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription>{state.description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          {state.details.length > 0 ? (
+            <div className="px-6 pb-5 text-muted-foreground text-sm">
+              <ul className="list-disc space-y-1 pl-4">
+                {state.details.map((detail) => (
+                  <li key={detail}>{detail}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <AlertDialogFooter>
+            <Button variant="outline" onClick={() => onResolve("cancel")}>
+              Cancel
+            </Button>
+            <Button variant="outline" onClick={() => onResolve("chat-only")}>
+              {state.chatOnlyLabel}
+            </Button>
+            {state.canRestoreFiles ? (
+              <Button variant="destructive" onClick={() => onResolve("chat-and-files")}>
+                {state.chatAndFilesLabel}
+              </Button>
+            ) : null}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      ) : null}
+    </AlertDialog>
+  );
+}
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
 
@@ -772,6 +845,22 @@ export default function ChatView(props: ChatViewProps) {
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
+  const [revertConfirmationState, setRevertConfirmationState] =
+    useState<RevertConfirmationState | null>(null);
+  const revertConfirmationStateRef = useRef<RevertConfirmationState | null>(null);
+  revertConfirmationStateRef.current = revertConfirmationState;
+  const requestRevertConfirmation = useCallback(
+    (input: Omit<RevertConfirmationState, "resolve">) =>
+      new Promise<RevertConfirmationChoice>((resolve) => {
+        setRevertConfirmationState({ ...input, resolve });
+      }),
+    [],
+  );
+  const resolveRevertConfirmation = useCallback((choice: RevertConfirmationChoice) => {
+    const pending = revertConfirmationStateRef.current;
+    setRevertConfirmationState(null);
+    pending?.resolve(choice);
+  }, []);
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
     ApprovalRequestId[]
@@ -2734,13 +2823,12 @@ export default function ChatView(props: ChatViewProps) {
     async (
       turnCount: number,
       options?: {
-        confirmationLines?: string[];
+        action?: "revert" | "edit";
         beforeDispatch?: () => Promise<void> | void;
       },
     ): Promise<boolean> => {
       const api = readEnvironmentApi(environmentId);
-      const localApi = readLocalApi();
-      if (!api || !localApi || !activeThread || isRevertingCheckpoint) return false;
+      if (!api || !activeThread || isRevertingCheckpoint) return false;
 
       if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
         setThreadError(
@@ -2754,19 +2842,38 @@ export default function ChatView(props: ChatViewProps) {
         return false;
       }
       const hasCodeChanges = hasCodeChangesAfterTurnCount(turnCount);
-      const confirmed = await localApi.dialogs.confirm(
-        (
-          options?.confirmationLines ?? [
-            `Revert this thread to checkpoint ${turnCount}?`,
-            hasCodeChanges
-              ? `This will revert code changes made after checkpoint ${turnCount} and discard newer messages and turn diffs.`
-              : "This will discard newer messages and turn diffs in this thread.",
+      const availability = hasCodeChanges
+        ? await api.orchestration
+            .getCheckpointFileRestoreAvailability({
+              threadId: activeThread.id,
+              turnCount,
+            })
+            .catch(() => null)
+        : null;
+      const canRestoreFiles = hasCodeChanges && availability?.canRestoreFiles === true;
+      let restoreFiles = false;
+      if (canRestoreFiles) {
+        const isEdit = options?.action === "edit";
+        const choice = await requestRevertConfirmation({
+          title: isEdit ? "Edit this message?" : `Revert to checkpoint ${turnCount}?`,
+          description:
+            "Chat rollback is required. File restore is optional and will only run if you choose it.",
+          details: [
+            isEdit
+              ? "The selected message contents will be put back in the composer."
+              : "Newer messages and turn diffs will be removed from this thread.",
+            `A valid file checkpoint is available for checkpoint ${turnCount}.`,
+            `Restoring files will discard file changes made after checkpoint ${turnCount}.`,
             "This action cannot be undone.",
-          ]
-        ).join("\n"),
-      );
-      if (!confirmed) {
-        return false;
+          ],
+          canRestoreFiles,
+          chatOnlyLabel: "Revert chat only",
+          chatAndFilesLabel: "Revert chat and files",
+        });
+        if (choice === "cancel") {
+          return false;
+        }
+        restoreFiles = choice === "chat-and-files";
       }
 
       setIsRevertingCheckpoint(true);
@@ -2778,6 +2885,7 @@ export default function ChatView(props: ChatViewProps) {
           commandId: newCommandId(),
           threadId: activeThread.id,
           turnCount,
+          restoreFiles,
           createdAt: new Date().toISOString(),
         });
         return true;
@@ -2801,6 +2909,7 @@ export default function ChatView(props: ChatViewProps) {
       isRevertingCheckpoint,
       isSendBusy,
       phase,
+      requestRevertConfirmation,
       setThreadError,
     ],
   );
@@ -3699,16 +3808,8 @@ export default function ChatView(props: ChatViewProps) {
         displayedMessage.visibleText === IMAGE_ONLY_BOOTSTRAP_PROMPT
           ? ""
           : displayedMessage.visibleText;
-      const hasCodeChanges = hasCodeChangesAfterTurnCount(targetTurnCount);
       const dispatched = await onRevertToTurnCountRef.current(targetTurnCount, {
-        confirmationLines: [
-          "Edit this message?",
-          hasCodeChanges
-            ? "This will revert code changes made after this message and discard newer messages and turn diffs."
-            : "This will discard this message and newer messages and turn diffs.",
-          "The selected message contents will be put back in the composer.",
-          "This action cannot be undone.",
-        ],
+        action: "edit",
         beforeDispatch: async () => {
           const images = await cloneUserMessageAttachmentsForComposer(message);
           stagePendingEditPrefill({
@@ -3724,7 +3825,7 @@ export default function ChatView(props: ChatViewProps) {
         clearPendingEditPrefill({ revokeImages: true });
       }
     },
-    [activeThread, clearPendingEditPrefill, hasCodeChangesAfterTurnCount, stagePendingEditPrefill],
+    [activeThread, clearPendingEditPrefill, stagePendingEditPrefill],
   );
   const onEditUserMessageRef = useRef(onEditUserMessageInternal);
   onEditUserMessageRef.current = onEditUserMessageInternal;
@@ -4029,6 +4130,10 @@ export default function ChatView(props: ChatViewProps) {
       {expandedImage && (
         <ExpandedImageDialog preview={expandedImage} onClose={closeExpandedImage} />
       )}
+      <CheckpointRevertConfirmationDialog
+        state={revertConfirmationState}
+        onResolve={resolveRevertConfirmation}
+      />
     </div>
   );
 }

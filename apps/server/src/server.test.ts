@@ -66,6 +66,10 @@ import {
   CheckpointDiffQuery,
   type CheckpointDiffQueryShape,
 } from "./checkpointing/Services/CheckpointDiffQuery.ts";
+import {
+  CheckpointRevertPlanner,
+  type CheckpointRevertPlannerShape,
+} from "./orchestration/Services/CheckpointRevertPlanner.ts";
 import { GitManager, type GitManagerShape } from "./git/GitManager.ts";
 import { Keybindings, type KeybindingsShape } from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -348,6 +352,7 @@ const buildAppUnderTest = (options?: {
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
+    checkpointRevertPlanner?: Partial<CheckpointRevertPlannerShape>;
     browserTraceCollector?: Partial<BrowserTraceCollectorShape>;
     processDiagnostics?: Partial<ProcessDiagnosticsShape>;
     processResourceMonitor?: Partial<ProcessResourceMonitorShape>;
@@ -671,23 +676,47 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(CheckpointDiffQuery)({
-          getTurnDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: "",
-            }),
-          getFullThreadDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: "",
-            }),
-          ...options?.layers?.checkpointDiffQuery,
-        }),
+        Layer.mergeAll(
+          Layer.mock(CheckpointDiffQuery)({
+            getTurnDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: "",
+              }),
+            getFullThreadDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: "",
+              }),
+            ...options?.layers?.checkpointDiffQuery,
+          }),
+          Layer.mock(CheckpointRevertPlanner)({
+            resolveFileRestorePlan: (input) =>
+              Effect.succeed({
+                threadId: input.threadId,
+                turnCount: input.turnCount,
+                thread: null,
+                currentTurnCount: 0,
+                checkpointCwd: null,
+                checkpointRef: null,
+                canRestoreFiles: false,
+                reason: "Checkpoint file restore is unavailable in this test.",
+              }),
+            getFileRestoreAvailability: (input) =>
+              Effect.succeed({
+                threadId: input.threadId,
+                turnCount: input.turnCount,
+                canRestoreFiles: false,
+                checkpointRef: null,
+                reason: "Checkpoint file restore is unavailable in this test.",
+              }),
+            ...options?.layers?.checkpointRevertPlanner,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ProcessDiagnostics)({

@@ -21,6 +21,7 @@ export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
+  getCheckpointFileRestoreAvailability: "orchestration.getCheckpointFileRestoreAvailability",
   replayEvents: "orchestration.replayEvents",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
@@ -630,6 +631,7 @@ const ThreadCheckpointRevertCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   turnCount: NonNegativeInt,
+  restoreFiles: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   createdAt: IsoDateTime,
 });
 
@@ -743,6 +745,8 @@ const ThreadRevertCompleteCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   turnCount: NonNegativeInt,
+  restoreFiles: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  restoredFiles: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   createdAt: IsoDateTime,
 });
 
@@ -921,12 +925,15 @@ const ThreadUserInputResponseRequestedPayload = Schema.Struct({
 export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
+  restoreFiles: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   createdAt: IsoDateTime,
 });
 
 export const ThreadRevertedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
+  restoreFiles: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  restoredFiles: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 
 export const ThreadSessionStopRequestedPayload = Schema.Struct({
@@ -1193,6 +1200,23 @@ export type OrchestrationGetFullThreadDiffInput = typeof OrchestrationGetFullThr
 export const OrchestrationGetFullThreadDiffResult = ThreadTurnDiff;
 export type OrchestrationGetFullThreadDiffResult = typeof OrchestrationGetFullThreadDiffResult.Type;
 
+export const OrchestrationGetCheckpointFileRestoreAvailabilityInput = Schema.Struct({
+  threadId: ThreadId,
+  turnCount: NonNegativeInt,
+});
+export type OrchestrationGetCheckpointFileRestoreAvailabilityInput =
+  typeof OrchestrationGetCheckpointFileRestoreAvailabilityInput.Type;
+
+export const OrchestrationCheckpointFileRestoreAvailability = Schema.Struct({
+  threadId: ThreadId,
+  turnCount: NonNegativeInt,
+  canRestoreFiles: Schema.Boolean,
+  checkpointRef: Schema.NullOr(CheckpointRef),
+  reason: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type OrchestrationCheckpointFileRestoreAvailability =
+  typeof OrchestrationCheckpointFileRestoreAvailability.Type;
+
 export const OrchestrationReplayEventsInput = Schema.Struct({
   fromSequenceExclusive: NonNegativeInt,
 });
@@ -1213,6 +1237,10 @@ export const OrchestrationRpcSchemas = {
   getFullThreadDiff: {
     input: OrchestrationGetFullThreadDiffInput,
     output: OrchestrationGetFullThreadDiffResult,
+  },
+  getCheckpointFileRestoreAvailability: {
+    input: OrchestrationGetCheckpointFileRestoreAvailabilityInput,
+    output: OrchestrationCheckpointFileRestoreAvailability,
   },
   replayEvents: {
     input: OrchestrationReplayEventsInput,
@@ -1258,6 +1286,14 @@ export class OrchestrationGetTurnDiffError extends Schema.TaggedErrorClass<Orche
 
 export class OrchestrationGetFullThreadDiffError extends Schema.TaggedErrorClass<OrchestrationGetFullThreadDiffError>()(
   "OrchestrationGetFullThreadDiffError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class OrchestrationGetCheckpointFileRestoreAvailabilityError extends Schema.TaggedErrorClass<OrchestrationGetCheckpointFileRestoreAvailabilityError>()(
+  "OrchestrationGetCheckpointFileRestoreAvailabilityError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),
