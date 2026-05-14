@@ -95,6 +95,15 @@ import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
 } from "./observability/Services/BrowserTraceCollector.ts";
+import {
+  ProcessDiagnostics,
+  type ProcessDiagnosticsShape,
+} from "./diagnostics/ProcessDiagnostics.ts";
+import {
+  ProcessResourceMonitor,
+  type ProcessResourceMonitorShape,
+} from "./diagnostics/ProcessResourceMonitor.ts";
+import { TraceDiagnostics, type TraceDiagnosticsShape } from "./diagnostics/TraceDiagnostics.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import {
   ProjectSetupScriptRunner,
@@ -340,6 +349,9 @@ const buildAppUnderTest = (options?: {
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
     browserTraceCollector?: Partial<BrowserTraceCollectorShape>;
+    processDiagnostics?: Partial<ProcessDiagnosticsShape>;
+    processResourceMonitor?: Partial<ProcessResourceMonitorShape>;
+    traceDiagnostics?: Partial<TraceDiagnosticsShape>;
     serverLifecycleEvents?: Partial<ServerLifecycleEventsShape>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
     serverEnvironment?: Partial<ServerEnvironmentShape>;
@@ -675,6 +687,71 @@ const buildAppUnderTest = (options?: {
               diff: "",
             }),
           ...options?.layers?.checkpointDiffQuery,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProcessDiagnostics)({
+          read: Effect.succeed({
+            serverPid: process.pid,
+            readAt: TEST_EPOCH,
+            processCount: 0,
+            totalRssBytes: 0,
+            totalCpuPercent: 0,
+            processes: [],
+            error: Option.none(),
+          }),
+          signal: (input) =>
+            Effect.succeed({
+              pid: input.pid,
+              signal: input.signal,
+              signaled: false,
+              message: Option.some("Process diagnostics are not available in this test."),
+            }),
+          ...options?.layers?.processDiagnostics,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProcessResourceMonitor)({
+          readHistory: (input) =>
+            Effect.succeed({
+              readAt: TEST_EPOCH,
+              windowMs: input.windowMs,
+              bucketMs: input.bucketMs,
+              sampleIntervalMs: 5_000,
+              retainedSampleCount: 0,
+              totalCpuSecondsApprox: 0,
+              buckets: [],
+              topProcesses: [],
+              error: Option.none(),
+            }),
+          ...options?.layers?.processResourceMonitor,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(TraceDiagnostics)({
+          read: (input) =>
+            Effect.succeed({
+              traceFilePath: input.traceFilePath,
+              scannedFilePaths: [],
+              readAt: input.readAt ?? TEST_EPOCH,
+              recordCount: 0,
+              parseErrorCount: 0,
+              firstSpanAt: Option.none(),
+              lastSpanAt: Option.none(),
+              failureCount: 0,
+              interruptionCount: 0,
+              slowSpanThresholdMs: input.slowSpanThresholdMs ?? 1_000,
+              slowSpanCount: 0,
+              logLevelCounts: {},
+              topSpansByCount: [],
+              slowestSpans: [],
+              commonFailures: [],
+              latestFailures: [],
+              latestWarningAndErrorLogs: [],
+              partialFailure: Option.none(),
+              error: Option.none(),
+            }),
+          ...options?.layers?.traceDiagnostics,
         }),
       ),
     );

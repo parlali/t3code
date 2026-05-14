@@ -4,18 +4,28 @@ This fork may manually port upstream work without creating merge ancestry. GitHu
 
 ## Current Baseline
 
-- Last reviewed upstream: `7e20b23e` (`upstream/main`, tag `v0.0.24-nightly.20260513.273` on prior commit `b83e9c95`)
-- Review date: 2026-05-13
-- Local branch at review: `main` at `bc53e668` with manual sync worktree changes
+- Last reviewed upstream: `ea20e800` (`upstream/main`, tag `v0.0.24-nightly.20260514.285`)
+- Review date: 2026-05-14
+- Local branch at review: `main` at `49ab6629` with manual sync worktree changes
 - Merge strategy: manual integration, no synthetic merge marker
-- Next comparison should start at: `7e20b23e..upstream/main`
+- Next comparison should start at: `ea20e800..upstream/main`
+
+## Manual Alignment Policy
+
+This fork has enough feature drift that a normal upstream merge is usually not viable, but keep both forks aligned as much as practical through manual ports.
+
+- Review every new upstream commit enough to classify it. Do not skip a commit just because it is not immediately on this fork's critical path.
+- Prefer porting upstream bug fixes, reliability fixes, performance work, protocol/schema updates, dependency maintenance, and new features that do not overlap this fork's own central-server direction.
+- Adapt upstream behavior to the local architecture instead of copying patches mechanically when package boundaries or UX flows have diverged.
+- Defer broad or risky upstream work only when it needs its own dedicated pass, conflicts with local architecture, duplicates an existing local implementation, or targets apps/features this fork does not ship.
+- Record every decision as `ported`, `pending dedicated pass`, `deferred with trigger`, or `intentionally skipped`, with enough rationale for the next sync reviewer to continue without re-litigating the same range.
 
 ## How To Continue
 
 1. Run `git fetch upstream --prune`.
 2. Read this file before comparing code.
-3. List new upstream work with `git log --oneline 7e20b23e..upstream/main`.
-4. Inspect only relevant upstream changes with targeted `git show` and `git diff` commands.
+3. List new upstream work with `git log --oneline ea20e800..upstream/main`.
+4. Inspect all new commits enough to classify them, then use targeted `git show` and `git diff` commands for likely ports.
 5. After porting or intentionally skipping new upstream work, rewrite this file with the new last reviewed upstream SHA and a fresh summary.
 
 ## Reviewed Upstream Work
@@ -23,6 +33,8 @@ This fork may manually port upstream work without creating merge ancestry. GitHu
 The upstream range through `447236d5` was reviewed after this fork had diverged too far for a clean merge. Electron app and marketing app changes were intentionally deprioritized because this build does not use them.
 
 The upstream range `447236d5..7e20b23e` was reviewed on 2026-05-13. Useful source changes from that range were manually ported where they apply to this fork's current architecture.
+
+The upstream range `7e20b23e..ea20e800` was reviewed on 2026-05-14. Relevant technical work from that range was manually ported and adapted to this fork's current architecture.
 
 Manually ported or aligned:
 
@@ -44,19 +56,27 @@ Manually ported or aligned:
 - Effect child-process based external launcher from upstream commit `d15909af`: replaced the old `open` package/browser-editor launch service with `ExternalLauncher`, wired `ChildProcessSpawner` through server runtime and WebSocket RPC handling, and updated launcher coverage.
 - Provider update advisories from upstream commit `9b604bca`: added server-side provider maintenance capability detection, provider version advisory schemas, one-click provider update RPC/state projection, update command coordination, provider snapshot/cache handling for volatile update state, and web advisory notification/card surfaces adapted to this fork's single General settings page.
 - Provider update popover overflow fix from upstream commit `7e20b23e`: constrained the provider update popover to the viewport and wrapped long manual update commands in `ScrollArea`.
+- React/composer cleanup from upstream commit `b83e9c95`: pinned React/React DOM and React type packages, updated the React compiler dependency, removed composer `forwardRef` plumbing in favor of explicit ref props, adopted upstream context-provider cleanup where it fits this fork's timeline architecture, and renamed `apps/web/src/rpc/atomRegistry.tsx` to `.ts`.
+- Git success toast styling from upstream commit `16c69ba7`.
+- VCS/checkpoint diff performance work from upstream commit `5165b8c3`: ported the Effect child-process runner integration, `VcsProcess`, Git VCS driver core updates, checkpoint diff query optimizations, VCS contracts/tests, and terminal manager/test adaptations while preserving this fork's terminal replay behavior.
+- GitHub workflow permission hardening from upstream commit `556c4245`.
+- Browser resume reconnect freshness from upstream commit `90eea047`: browser resume now skips reconnecting healthy environment WebSocket streams and only reconnects stale heartbeat streams.
+- VCS remote refresh backoff from upstream commit `4120e945`: failing remote refresh loops back off exponentially up to 15 minutes while honoring larger configured intervals.
+- Workspace build/dependency cleanup from upstream commit `f92e1e1b`: moved advertised endpoint helpers to `@t3tools/shared/advertisedEndpoint`, simplified workspace package scripts/dependencies, and adapted desktop imports to this fork's current file layout.
+- Diagnostics prerequisite and resource-history work from upstream commits `a2ff50db` and `9e632f5c`: added process diagnostics, trace diagnostics, in-memory process resource sampling, diagnostics RPC/contracts, a Diagnostics settings route, and adapted tests. `a2ff50db` was not listed in the previous pending range, but `9e632f5c` depended on it and this pass corrected that prerequisite gap.
+- Desktop runtime dependency staging fix from upstream commit `ea20e800`: bundled workspace packages and Electron are omitted from staged desktop runtime dependencies.
 
 Pending alignment work:
 
-- Upstream commit `b83e9c95` (`Refactor composer refs and context providers`) should be treated as pending alignment work, not irrelevant. It is broad React/compiler cleanup: pins React/React DOM to `19.2.6`, updates `@types/react`, bumps `babel-plugin-react-compiler`, converts context consumers/providers to React 19 `use(...)` / `<Context>` style, removes `forwardRef` from composer paths, renames `rpc/atomRegistry.tsx` to `.ts`, and churns a large `ChatComposer` file. Port as its own dedicated web cleanup pass.
+- No technical alignment work is pending through upstream `ea20e800`.
 
 Intentionally skipped or not relevant:
 
 - Electron app changes.
 - Marketing app changes.
+- Upstream commit `34bb18c8` (`feat(marketing): Made marketing site less cringe`) is marketing-site content/assets and should stay skipped for this fork unless the marketing app becomes a maintained surface again.
 - Upstream commit `b793401a` (`chore(release): prepare v0.0.23`) only bumped package versions from `0.0.22` to `0.0.23` in `apps/desktop`, `apps/server`, `apps/web`, and `packages/contracts`; skip until this fork performs its own intentional release bookkeeping.
 - Upstream commit `e64c19f1` is mostly hosted Vercel release routing and public-domain aliasing. This fork currently keeps `apps/web/vercel.json` and self-hosted central-server direction, so defer unless the hosted channel/router release flow is revived.
-- Upstream commit `16c69ba7` only removes outline styling from a git success toast action. It is safe but cosmetic; port opportunistically if touching `GitActionsControl`.
-- Upstream commit `5165b8c3` optimized the older checkpoint/full-thread patch diff path. The active workspace diff UI now uses the Monaco/VS Code-style workbench and `vcs.fileDiff`, so this is not a priority manual merge. Reconsider only if the legacy `orchestration.getTurnDiff` / `getFullThreadDiff` RPCs become user-facing again or backend checkpoint diff latency shows up independently.
 - Upstream ancestry merge marker. The fork is still ancestry-behind upstream by design.
 
 ## Known Divergences
@@ -66,6 +86,16 @@ Intentionally skipped or not relevant:
 - GitHub may report the branch as behind upstream even when the useful upstream work in the reviewed range has been manually handled.
 
 ## Verification For Latest Manual Sync
+
+Latest manual sync completed on 2026-05-14 after upstream fetch:
+
+- Inspected `git log --oneline 7e20b23e..upstream/main`.
+- New upstream commits reviewed: `556c4245`, `f92e1e1b`, `90eea047`, `34bb18c8`, `4120e945`, `9e632f5c`, and `ea20e800`.
+- Also inspected and ported missing diagnostics prerequisite commit `a2ff50db` because `9e632f5c` depends on process and trace diagnostics added there.
+- Manually ported technical alignment commits `b83e9c95`, `16c69ba7`, `5165b8c3`, `556c4245`, `f92e1e1b`, `90eea047`, `4120e945`, `a2ff50db`, `9e632f5c`, and `ea20e800`, adapted where this fork's settings, desktop, diagnostics, and terminal architectures diverged.
+- Intentionally skipped `34bb18c8` marketing-site refresh.
+- Focused verification: `bun run test src/diagnostics/ProcessDiagnostics.test.ts src/diagnostics/ProcessResourceMonitor.test.ts src/diagnostics/TraceDiagnostics.test.ts src/vcs/VcsStatusBroadcaster.test.ts src/vcs/VcsProcess.test.ts src/processRunner.test.ts src/checkpointing/Layers/CheckpointDiffQuery.test.ts` in `apps/server`; `bun run test src/server.test.ts` in `apps/server`; `bun run test src/localApi.test.ts src/environments/runtime/service.threadSubscriptions.test.ts` in `apps/web`; and `bun run test build-desktop-artifact.test.ts` in `scripts`.
+- Full repo gate: `bun fmt`, `bun lint`, and `bun typecheck`.
 
 Latest manual sync completed on 2026-05-13:
 

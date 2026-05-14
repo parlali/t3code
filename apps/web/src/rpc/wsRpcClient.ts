@@ -61,6 +61,7 @@ export interface WsRpcClient {
   readonly dispose: () => Promise<void>;
   readonly isConnectionOpen: () => boolean;
   readonly reconnect: () => Promise<void>;
+  readonly isHeartbeatFresh: () => boolean;
   readonly terminal: {
     readonly open: RpcUnaryMethod<typeof WS_METHODS.terminalOpen>;
     readonly write: RpcUnaryMethod<typeof WS_METHODS.terminalWrite>;
@@ -158,6 +159,14 @@ export interface WsRpcClient {
     readonly discoverSourceControl: RpcUnaryNoArgMethod<
       typeof WS_METHODS.serverDiscoverSourceControl
     >;
+    readonly getTraceDiagnostics: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetTraceDiagnostics>;
+    readonly getProcessDiagnostics: RpcUnaryNoArgMethod<
+      typeof WS_METHODS.serverGetProcessDiagnostics
+    >;
+    readonly getProcessResourceHistory: RpcUnaryMethod<
+      typeof WS_METHODS.serverGetProcessResourceHistory
+    >;
+    readonly signalProcess: RpcUnaryMethod<typeof WS_METHODS.serverSignalProcess>;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
@@ -195,6 +204,7 @@ export function createWsRpcClient(
       resetWsReconnectBackoff();
       await Promise.all(transports.map((transport) => transport.reconnect()));
     },
+    isHeartbeatFresh: () => transport.isHeartbeatFresh(),
     terminal: {
       open: (input) => transport.request((client) => client[WS_METHODS.terminalOpen](input)),
       write: (input) => transport.request((client) => client[WS_METHODS.terminalWrite](input)),
@@ -351,6 +361,14 @@ export function createWsRpcClient(
         transport.request((client) => client[WS_METHODS.serverGetProviderUsage](input ?? {})),
       discoverSourceControl: () =>
         transport.request((client) => client[WS_METHODS.serverDiscoverSourceControl]({})),
+      getTraceDiagnostics: () =>
+        transport.request((client) => client[WS_METHODS.serverGetTraceDiagnostics]({})),
+      getProcessDiagnostics: () =>
+        transport.request((client) => client[WS_METHODS.serverGetProcessDiagnostics]({})),
+      getProcessResourceHistory: (input) =>
+        transport.request((client) => client[WS_METHODS.serverGetProcessResourceHistory](input)),
+      signalProcess: (input) =>
+        transport.request((client) => client[WS_METHODS.serverSignalProcess](input)),
       subscribeConfig: (listener, options) =>
         streamTransport.subscribe(
           (client) => client[WS_METHODS.subscribeServerConfig]({}),

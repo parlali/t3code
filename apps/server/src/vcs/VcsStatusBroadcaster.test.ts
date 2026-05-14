@@ -1,6 +1,17 @@
 import { assert, it, describe } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Deferred, Effect, Exit, FileSystem, Layer, Option, Path, Scope, Stream } from "effect";
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Scope,
+  Stream,
+} from "effect";
 import type {
   VcsStatusLocalResult,
   VcsStatusRemoteResult,
@@ -72,6 +83,7 @@ function makeTestLayer(state: {
           }),
       }),
     ),
+    Layer.provide(NodeServices.layer),
   );
 }
 
@@ -94,7 +106,10 @@ describe("VcsStatusBroadcaster", () => {
       yield* Effect.yieldNow;
 
       assert.deepStrictEqual(first, baseLocalOnlyStatus);
-      assert.deepStrictEqual(second, baseLocalOnlyStatus);
+      assert.deepStrictEqual(second, {
+        ...baseLocalStatus,
+        ...baseRemoteStatus,
+      });
       assert.equal(state.localStatusCalls, 1);
       assert.equal(state.remoteStatusCalls, 1);
       assert.equal(state.localInvalidationCalls, 0);
@@ -131,20 +146,16 @@ describe("VcsStatusBroadcaster", () => {
       assert.deepStrictEqual(initial, baseLocalOnlyStatus);
       assert.deepStrictEqual(refreshed, {
         ...state.currentLocalStatus,
-        hasUpstream: false,
-        aheadCount: 0,
-        behindCount: 0,
-        aheadOfDefaultCount: 0,
-        pr: null,
+        ...state.currentRemoteStatus,
       });
       assert.deepStrictEqual(cached, {
         ...state.currentLocalStatus,
         ...state.currentRemoteStatus,
       });
       assert.equal(state.localStatusCalls, 2);
-      assert.equal(state.remoteStatusCalls, 1);
+      assert.equal(state.remoteStatusCalls, 2);
       assert.equal(state.localInvalidationCalls, 1);
-      assert.equal(state.remoteInvalidationCalls, 1);
+      assert.equal(state.remoteInvalidationCalls, 2);
     }).pipe(Effect.provide(makeTestLayer(state)));
   });
 
@@ -220,6 +231,7 @@ describe("VcsStatusBroadcaster", () => {
             }),
         } satisfies Partial<GitWorkflowService.GitWorkflowServiceShape>),
       ),
+      Layer.provide(NodeServices.layer),
     );
 
     return Effect.gen(function* () {
@@ -286,6 +298,54 @@ describe("VcsStatusBroadcaster", () => {
     }).pipe(Effect.provide(makeTestLayer(state)));
   });
 
+  it.effect("does not start automatic remote refreshes when disabled", () => {
+    const state = {
+      currentLocalStatus: baseLocalStatus,
+      currentRemoteStatus: baseRemoteStatus,
+      localStatusCalls: 0,
+      remoteStatusCalls: 0,
+      localInvalidationCalls: 0,
+      remoteInvalidationCalls: 0,
+    };
+
+    return Effect.gen(function* () {
+      const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+      const snapshot = yield* Stream.runHead(
+        broadcaster.streamStatus(
+          { cwd: "/repo" },
+          { automaticRemoteRefreshInterval: Effect.succeed(Duration.zero) },
+        ),
+      );
+
+      assert.isTrue(Option.isSome(snapshot));
+      assert.equal(state.remoteStatusCalls, 0);
+      assert.equal(state.remoteInvalidationCalls, 0);
+    }).pipe(Effect.provide(makeTestLayer(state)));
+  });
+
+  it("backs off remote refresh failures exponentially and honors larger configured intervals", () => {
+    assert.equal(
+      Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(1, Duration.seconds(1))),
+      30_000,
+    );
+    assert.equal(
+      Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(2, Duration.seconds(1))),
+      60_000,
+    );
+    assert.equal(
+      Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(3, Duration.seconds(1))),
+      120_000,
+    );
+    assert.equal(
+      Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(1, Duration.minutes(5))),
+      300_000,
+    );
+    assert.equal(
+      Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(20, Duration.seconds(1))),
+      900_000,
+    );
+  });
+
   it.effect("stops the remote poller after the last stream subscriber disconnects", () => {
     const state = {
       currentLocalStatus: baseLocalStatus,
@@ -331,6 +391,7 @@ describe("VcsStatusBroadcaster", () => {
             }),
         } satisfies Partial<GitWorkflowService.GitWorkflowServiceShape>),
       ),
+      Layer.provide(NodeServices.layer),
     );
 
     return Effect.gen(function* () {

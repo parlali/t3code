@@ -1,18 +1,16 @@
-import { realpathSync } from "node:fs";
-
-import {
-  Context,
-  Duration,
-  Effect,
-  Exit,
-  Fiber,
-  Layer,
-  PubSub,
-  Ref,
-  Scope,
-  Stream,
-  SynchronizedRef,
-} from "effect";
+import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
+import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 import type {
   GitManagerServiceError,
   VcsStatusInput,
@@ -26,6 +24,8 @@ import { mergeGitStatusParts } from "@t3tools/shared/git";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 
 const DEFAULT_VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30);
+const VCS_STATUS_REFRESH_FAILURE_BASE_DELAY = Duration.seconds(30);
+const VCS_STATUS_REFRESH_FAILURE_MAX_DELAY = Duration.minutes(15);
 
 interface VcsStatusChange {
   readonly cwd: string;
@@ -51,6 +51,20 @@ interface StreamStatusOptions {
   readonly automaticRemoteRefreshInterval?: Effect.Effect<Duration.Duration, never>;
 }
 
+export function remoteRefreshFailureDelay(
+  consecutiveFailures: number,
+  configuredInterval: Duration.Duration,
+) {
+  const exponent = Math.max(0, consecutiveFailures - 1);
+  const backoffMs =
+    Duration.toMillis(VCS_STATUS_REFRESH_FAILURE_BASE_DELAY) * Math.pow(2, exponent);
+  const cappedBackoff = Duration.min(
+    Duration.millis(backoffMs),
+    VCS_STATUS_REFRESH_FAILURE_MAX_DELAY,
+  );
+  return Duration.max(configuredInterval, cappedBackoff);
+}
+
 export interface VcsStatusBroadcasterShape {
   readonly getStatus: (
     input: VcsStatusInput,
@@ -74,18 +88,17 @@ function fingerprintStatusPart(status: unknown): string {
   return JSON.stringify(status);
 }
 
-function normalizeCwd(cwd: string): string {
-  try {
-    return realpathSync.native(cwd);
-  } catch {
-    return cwd;
-  }
-}
+const normalizeCwd = (cwd: string) =>
+  Effect.service(FileSystem.FileSystem).pipe(
+    Effect.flatMap((fs) => fs.realPath(cwd)),
+    Effect.orElseSucceed(() => cwd),
+  );
 
 export const layer = Layer.effect(
   VcsStatusBroadcaster,
   Effect.gen(function* () {
     const workflow = yield* GitWorkflowService.GitWorkflowService;
+    const fs = yield* FileSystem.FileSystem;
     const changesPubSub = yield* Effect.acquireRelease(
       PubSub.unbounded<VcsStatusChange>(),
       (pubsub) => PubSub.shutdown(pubsub),
@@ -96,6 +109,7 @@ export const layer = Layer.effect(
     const cacheRef = yield* Ref.make(new Map<string, CachedVcsStatus>());
     const remoteRefreshInFlightRef = yield* Ref.make(new Set<string>());
     const pollersRef = yield* SynchronizedRef.make(new Map<string, ActiveRemotePoller>());
+    const withFileSystem = Effect.provideService(FileSystem.FileSystem, fs);
 
     const getCachedStatus = Effect.fn("VcsStatusBroadcaster.getCachedStatus")(function* (
       cwd: string,
@@ -229,7 +243,7 @@ export const layer = Layer.effect(
     const getStatus: VcsStatusBroadcasterShape["getStatus"] = Effect.fn(
       "VcsStatusBroadcaster.getStatus",
     )(function* (input) {
-      const cwd = normalizeCwd(input.cwd);
+      const cwd = yield* withFileSystem(normalizeCwd(input.cwd));
       const local = yield* getOrLoadLocalStatus(cwd);
       const remote = (yield* getCachedStatus(cwd))?.remote?.value ?? null;
       if (remote === null) {
@@ -241,7 +255,7 @@ export const layer = Layer.effect(
     const refreshLocalStatus: VcsStatusBroadcasterShape["refreshLocalStatus"] = Effect.fn(
       "VcsStatusBroadcaster.refreshLocalStatus",
     )(function* (rawCwd) {
-      const cwd = normalizeCwd(rawCwd);
+      const cwd = yield* withFileSystem(normalizeCwd(rawCwd));
       yield* workflow.invalidateLocalStatus(cwd);
       const local = yield* workflow.localStatus({ cwd });
       return yield* updateCachedLocalStatus(cwd, local, { publish: true });
@@ -250,7 +264,7 @@ export const layer = Layer.effect(
     const refreshStatus: VcsStatusBroadcasterShape["refreshStatus"] = Effect.fn(
       "VcsStatusBroadcaster.refreshStatus",
     )(function* (rawCwd) {
-      const cwd = normalizeCwd(rawCwd);
+      const cwd = yield* withFileSystem(normalizeCwd(rawCwd));
       const local = yield* refreshLocalStatus(cwd);
       const remote = (yield* getCachedStatus(cwd))?.remote?.value ?? null;
       yield* triggerRemoteStatusRefresh(cwd);
@@ -261,29 +275,46 @@ export const layer = Layer.effect(
       cwd: string,
       automaticRemoteRefreshInterval: Effect.Effect<Duration.Duration, never>,
     ) => {
-      const refreshRemoteStatusIfEnabled = automaticRemoteRefreshInterval.pipe(
-        Effect.flatMap((interval) =>
-          Duration.isZero(interval) ? Effect.void : refreshRemoteStatus(cwd).pipe(Effect.asVoid),
-        ),
-      );
-      const sleepForConfiguredInterval = automaticRemoteRefreshInterval.pipe(
-        Effect.flatMap((interval) =>
-          Effect.sleep(Duration.isZero(interval) ? DEFAULT_VCS_STATUS_REFRESH_INTERVAL : interval),
-        ),
-      );
+      return Effect.gen(function* () {
+        const consecutiveFailuresRef = yield* Ref.make(0);
+        const refreshRemoteStatusIfEnabled = Effect.gen(function* () {
+          const configuredInterval = yield* automaticRemoteRefreshInterval;
+          const activeInterval = Duration.isZero(configuredInterval)
+            ? DEFAULT_VCS_STATUS_REFRESH_INTERVAL
+            : configuredInterval;
+          if (Duration.isZero(configuredInterval)) {
+            return activeInterval;
+          }
 
-      return refreshRemoteStatusIfEnabled.pipe(
-        Effect.catch(logRemoteRefreshFailure(cwd)),
-        Effect.andThen(
-          Effect.forever(
-            sleepForConfiguredInterval.pipe(
-              Effect.andThen(
-                refreshRemoteStatusIfEnabled.pipe(Effect.catch(logRemoteRefreshFailure(cwd))),
-              ),
+          const exit = yield* refreshRemoteStatus(cwd).pipe(Effect.exit);
+          if (Exit.isSuccess(exit)) {
+            yield* Ref.set(consecutiveFailuresRef, 0);
+            return activeInterval;
+          }
+
+          const consecutiveFailures = yield* Ref.updateAndGet(
+            consecutiveFailuresRef,
+            (count) => count + 1,
+          );
+          const nextDelay = remoteRefreshFailureDelay(consecutiveFailures, activeInterval);
+          yield* Effect.logWarning("VCS remote status refresh failed", {
+            cwd,
+            detail: exit.cause.toString(),
+            consecutiveFailures,
+            nextDelayMs: Duration.toMillis(nextDelay),
+          });
+          return nextDelay;
+        });
+
+        return yield* refreshRemoteStatusIfEnabled.pipe(
+          Effect.repeat(
+            Schedule.identity<Duration.Duration>().pipe(
+              Schedule.addDelay((delay) => Effect.succeed(delay)),
             ),
           ),
-        ),
-      );
+          Effect.asVoid,
+        );
+      });
     };
 
     const retainRemotePoller = Effect.fn("VcsStatusBroadcaster.retainRemotePoller")(function* (
@@ -346,7 +377,7 @@ export const layer = Layer.effect(
     const streamStatus: VcsStatusBroadcasterShape["streamStatus"] = (input, options) =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const cwd = normalizeCwd(input.cwd);
+          const cwd = yield* withFileSystem(normalizeCwd(input.cwd));
           const subscription = yield* PubSub.subscribe(changesPubSub);
           const initialLocal = yield* getOrLoadLocalStatus(cwd);
           const initialRemote = (yield* getCachedStatus(cwd))?.remote?.value ?? null;

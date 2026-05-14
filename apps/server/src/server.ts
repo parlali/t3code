@@ -3,6 +3,9 @@ import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import type * as NodeHttp from "node:http";
 
 import { ServerConfig } from "./config.ts";
+import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
+import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
+import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import {
   attachmentsRouteLayer,
   otlpTracesProxyRouteLayer,
@@ -321,6 +324,9 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   // Misc.
   Layer.provideMerge(AnalyticsServiceLayerLive),
   Layer.provideMerge(ExternalLauncher.layer),
+  Layer.provideMerge(ProcessDiagnostics.layer),
+  Layer.provideMerge(ProcessResourceMonitor.layer),
+  Layer.provideMerge(TraceDiagnostics.layer),
   Layer.provideMerge(ServerLifecycleEventsLive),
   Layer.provide(NetService.layer),
 );

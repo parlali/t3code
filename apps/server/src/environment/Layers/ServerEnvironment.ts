@@ -2,6 +2,7 @@ import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/con
 import { Effect, FileSystem, Layer, Path, Random } from "effect";
 
 import { ServerConfig } from "../../config.ts";
+import { layer as ProcessRunnerLive } from "../../processRunner.ts";
 import { ServerEnvironment, type ServerEnvironmentShape } from "../Services/ServerEnvironment.ts";
 import packageJson from "../../../package.json" with { type: "json" };
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
@@ -89,4 +90,6 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
   } satisfies ServerEnvironmentShape;
 });
 
-export const ServerEnvironmentLive = Layer.effect(ServerEnvironment, makeServerEnvironment());
+export const ServerEnvironmentLive = Layer.effect(ServerEnvironment, makeServerEnvironment()).pipe(
+  Layer.provide(ProcessRunnerLive),
+);

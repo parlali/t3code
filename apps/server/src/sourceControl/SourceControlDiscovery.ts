@@ -97,7 +97,7 @@ export const layer = Layer.effect(
           cwd: config.cwd,
           timeoutMs: 5_000,
           maxOutputBytes: 8_000,
-          truncateOutputAtMaxBytes: true,
+          appendTruncationMarker: true,
         })
         .pipe(
           Effect.map(

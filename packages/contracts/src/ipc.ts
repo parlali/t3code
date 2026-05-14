@@ -42,8 +42,14 @@ import type { ProviderInstanceId } from "./providerInstance.ts";
 import type { ProviderUsageInput, ProviderUsageSnapshot } from "./providerUsage.ts";
 import type {
   ServerConfig,
+  ServerProcessDiagnosticsResult,
+  ServerProcessResourceHistoryInput,
+  ServerProcessResourceHistoryResult,
   ServerProviderUpdateInput,
   ServerProviderUpdatedPayload,
+  ServerSignalProcessInput,
+  ServerSignalProcessResult,
+  ServerTraceDiagnosticsResult,
   ServerUpsertKeybindingResult,
 } from "./server.ts";
 import type {
@@ -333,6 +339,12 @@ export interface LocalApi {
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
     getProviderUsage: (input?: ProviderUsageInput) => Promise<ProviderUsageSnapshot>;
     discoverSourceControl: () => Promise<SourceControlDiscoveryResult>;
+    getTraceDiagnostics: () => Promise<ServerTraceDiagnosticsResult>;
+    getProcessDiagnostics: () => Promise<ServerProcessDiagnosticsResult>;
+    getProcessResourceHistory: (
+      input: ServerProcessResourceHistoryInput,
+    ) => Promise<ServerProcessResourceHistoryResult>;
+    signalProcess: (input: ServerSignalProcessInput) => Promise<ServerSignalProcessResult>;
   };
 }
 
