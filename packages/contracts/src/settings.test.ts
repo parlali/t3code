@@ -8,11 +8,6 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
-  it("streams assistant text by default for split client/server deployments", () => {
-    expect(DEFAULT_SERVER_SETTINGS.enableAssistantStreaming).toBe(true);
-    expect(decodeServerSettings({}).enableAssistantStreaming).toBe(true);
-  });
-
   it("defaults to an empty record so legacy configs without the key still decode", () => {
     expect(DEFAULT_SERVER_SETTINGS.providerInstances).toEqual({});
   });

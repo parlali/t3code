@@ -128,6 +128,40 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     }
   });
 
+  const offerOutgoingNotification = Effect.fn("offerOutgoingNotification")(function* (
+    method: string,
+    payload: unknown,
+  ) {
+    const message = {
+      jsonrpc: "2.0",
+      method,
+      params: payload,
+    };
+
+    yield* logProtocol({
+      direction: "outgoing",
+      stage: "decoded",
+      payload: message,
+    });
+
+    const encoded = yield* Effect.try({
+      try: () => `${JSON.stringify(message)}\n`,
+      catch: (cause) =>
+        new AcpError.AcpProtocolParseError({
+          detail: "Failed to encode ACP message",
+          cause,
+        }),
+    });
+
+    yield* logProtocol({
+      direction: "outgoing",
+      stage: "raw",
+      payload: encoded,
+    });
+
+    yield* Queue.offer(outgoing, encoded).pipe(Effect.asVoid);
+  });
+
   const resolveExtPending = (
     requestId: string,
     onFound: (deferred: Deferred.Deferred<unknown, AcpError.AcpError>) => Effect.Effect<void>,
@@ -464,13 +498,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     method: string,
     payload: unknown,
   ) {
-    yield* offerOutgoing({
-      _tag: "Request",
-      id: "",
-      tag: method,
-      payload,
-      headers: [],
-    });
+    yield* offerOutgoingNotification(method, payload);
   });
 
   const sendRequest = Effect.fn("sendRequest")(function* (method: string, payload: unknown) {

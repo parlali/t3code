@@ -22,7 +22,7 @@ import {
   TurnId,
 } from "@t3tools/contracts";
 import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -2026,8 +2026,8 @@ describe("ProviderRuntimeIngestion", () => {
     ).toBe(" after approval");
   });
 
-  it("streams assistant deltas by default while a turn is running", async () => {
-    const harness = await createHarness();
+  it("streams assistant deltas when enabled while a turn is running", async () => {
+    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
     const now = new Date().toISOString();
 
     await Effect.runPromise(
@@ -2116,6 +2116,118 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(finalMessage?.text).toBe("hello live");
     expect(finalMessage?.streaming).toBe(false);
+  });
+
+  it("coalesces rapid streaming assistant deltas before completion", async () => {
+    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-streaming-coalesced"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-streaming-coalesced"),
+    });
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-streaming-coalesced",
+    );
+
+    const fixedNowMs = Date.now();
+    const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(fixedNowMs);
+    try {
+      for (const [index, delta] of ["a", "b", "c"].entries()) {
+        harness.emit({
+          type: "content.delta",
+          eventId: asEventId(`evt-message-delta-streaming-coalesced-${index}`),
+          provider: ProviderDriverKind.make("codex"),
+          createdAt: now,
+          threadId: asThreadId("thread-1"),
+          turnId: asTurnId("turn-streaming-coalesced"),
+          itemId: asItemId("item-streaming-coalesced"),
+          payload: {
+            streamKind: "assistant_text",
+            delta,
+          },
+        });
+      }
+      await harness.drain();
+    } finally {
+      dateNowSpy.mockRestore();
+    }
+
+    const midThread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === ThreadId.make("thread-1"),
+    );
+    const midMessage = midThread?.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-streaming-coalesced",
+    );
+    expect(midMessage?.text).toBe("a");
+    expect(midMessage?.streaming).toBe(true);
+
+    const midEvents = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    const midAssistantEvents = midEvents.filter(
+      (event): event is Extract<(typeof midEvents)[number], { type: "thread.message-sent" }> =>
+        event.type === "thread.message-sent" &&
+        event.payload.messageId === "assistant:item-streaming-coalesced",
+    );
+    expect(midAssistantEvents).toHaveLength(1);
+    expect(midAssistantEvents[0]?.payload.text).toBe("a");
+    expect(midAssistantEvents[0]?.payload.streaming).toBe(true);
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-message-completed-streaming-coalesced"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-streaming-coalesced"),
+      itemId: asItemId("item-streaming-coalesced"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    const finalThread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-streaming-coalesced" &&
+          !message.streaming &&
+          message.text === "abc",
+      ),
+    );
+    const finalMessage = finalThread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-streaming-coalesced",
+    );
+    expect(finalMessage?.text).toBe("abc");
+    expect(finalMessage?.streaming).toBe(false);
+
+    const finalEvents = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    const finalAssistantEvents = finalEvents.filter(
+      (event): event is Extract<(typeof finalEvents)[number], { type: "thread.message-sent" }> =>
+        event.type === "thread.message-sent" &&
+        event.payload.messageId === "assistant:item-streaming-coalesced",
+    );
+    expect(finalAssistantEvents).toHaveLength(3);
+    expect(finalAssistantEvents.map((event) => event.payload.text)).toEqual(["a", "bc", ""]);
+    expect(finalAssistantEvents.map((event) => event.payload.streaming)).toEqual([
+      true,
+      true,
+      false,
+    ]);
   });
 
   it("spills oversized buffered deltas and still finalizes full assistant text", async () => {
