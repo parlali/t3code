@@ -112,6 +112,7 @@ vi.mock("./connection", () => ({
 vi.mock("../../rpc/wsRpcClient", () => ({
   createWsRpcClient: vi.fn(() => ({
     isConnectionOpen: vi.fn(() => true),
+    isHeartbeatFresh: vi.fn(() => true),
     server: {
       getConfig: mockClientGetConfig,
     },

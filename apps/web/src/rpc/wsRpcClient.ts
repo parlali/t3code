@@ -203,12 +203,12 @@ export function createWsRpcClient(
     dispose: async () => {
       await Promise.all(transports.map((transport) => transport.dispose()));
     },
-    isConnectionOpen: () => transport.isConnectionOpen(),
+    isConnectionOpen: () => transports.every((transport) => transport.isConnectionOpen()),
     reconnect: async () => {
       resetWsReconnectBackoff();
       await Promise.all(transports.map((transport) => transport.reconnect()));
     },
-    isHeartbeatFresh: () => transport.isHeartbeatFresh(),
+    isHeartbeatFresh: () => transports.every((transport) => transport.isHeartbeatFresh()),
     terminal: {
       open: (input) => transport.request((client) => client[WS_METHODS.terminalOpen](input)),
       write: (input) => transport.request((client) => client[WS_METHODS.terminalWrite](input)),

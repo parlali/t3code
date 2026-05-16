@@ -39,13 +39,20 @@ function makeTransportMock() {
   return {
     dispose: vi.fn(async () => undefined),
     isConnectionOpen: vi.fn(() => true),
+    isHeartbeatFresh: vi.fn(() => true),
     reconnect: vi.fn(async () => undefined),
     request: vi.fn(),
     requestStream: vi.fn(),
     subscribe: vi.fn(() => () => undefined),
   } satisfies Pick<
     WsTransport,
-    "dispose" | "isConnectionOpen" | "reconnect" | "request" | "requestStream" | "subscribe"
+    | "dispose"
+    | "isConnectionOpen"
+    | "isHeartbeatFresh"
+    | "reconnect"
+    | "request"
+    | "requestStream"
+    | "subscribe"
   >;
 }
 
@@ -78,13 +85,20 @@ describe("wsRpcClient", () => {
     const transport = {
       dispose: vi.fn(async () => undefined),
       isConnectionOpen: vi.fn(() => true),
+      isHeartbeatFresh: vi.fn(() => true),
       reconnect: vi.fn(async () => undefined),
       request: vi.fn(),
       requestStream: vi.fn(),
       subscribe,
     } satisfies Pick<
       WsTransport,
-      "dispose" | "isConnectionOpen" | "reconnect" | "request" | "requestStream" | "subscribe"
+      | "dispose"
+      | "isConnectionOpen"
+      | "isHeartbeatFresh"
+      | "reconnect"
+      | "request"
+      | "requestStream"
+      | "subscribe"
     >;
 
     const client = createWsRpcClient(transport as unknown as WsTransport);
@@ -163,5 +177,25 @@ describe("wsRpcClient", () => {
     expect(requestTransport.dispose).toHaveBeenCalledOnce();
     expect(streamTransport.dispose).toHaveBeenCalledOnce();
     expect(threadDetailTransport.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("reports stale when any transport is closed or heartbeat stale", () => {
+    const requestTransport = makeTransportMock();
+    const streamTransport = makeTransportMock();
+    const threadDetailTransport = makeTransportMock();
+    const client = createWsRpcClient(requestTransport as unknown as WsTransport, {
+      streamTransport: streamTransport as unknown as WsTransport,
+      threadDetailTransport: threadDetailTransport as unknown as WsTransport,
+    });
+
+    expect(client.isConnectionOpen()).toBe(true);
+    expect(client.isHeartbeatFresh()).toBe(true);
+
+    streamTransport.isConnectionOpen.mockReturnValue(false);
+    expect(client.isConnectionOpen()).toBe(false);
+
+    streamTransport.isConnectionOpen.mockReturnValue(true);
+    threadDetailTransport.isHeartbeatFresh.mockReturnValue(false);
+    expect(client.isHeartbeatFresh()).toBe(false);
   });
 });

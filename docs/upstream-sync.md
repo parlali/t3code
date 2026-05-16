@@ -4,11 +4,11 @@ This fork may manually port upstream work without creating merge ancestry. GitHu
 
 ## Current Baseline
 
-- Last reviewed upstream: `ea20e800` (`upstream/main`, tag `v0.0.24-nightly.20260514.285`)
-- Review date: 2026-05-14
-- Local branch at review: `main` at `49ab6629` with manual sync worktree changes
+- Last reviewed upstream: `d1e85c4e` (`upstream/main`, tag `v0.0.25-nightly.20260515.295`)
+- Review date: 2026-05-16
+- Local branch at review: `main` at `f9b03383` with clean worktree
 - Merge strategy: manual integration, no synthetic merge marker
-- Next comparison should start at: `ea20e800..upstream/main`
+- Next comparison should start at: `d1e85c4e..upstream/main`
 
 ## Manual Alignment Policy
 
@@ -16,6 +16,7 @@ This fork has enough feature drift that a normal upstream merge is usually not v
 
 - Review every new upstream commit enough to classify it. Do not skip a commit just because it is not immediately on this fork's critical path.
 - Prefer porting upstream bug fixes, reliability fixes, performance work, protocol/schema updates, dependency maintenance, and new features that do not overlap this fork's own central-server direction.
+- For release-only package version commits, mirror upstream package versions in `apps/desktop`, `apps/server`, `apps/web`, and `packages/contracts` as tracking metadata for the latest reviewed upstream release line. This does not by itself mean this fork has published an upstream release.
 - Adapt upstream behavior to the local architecture instead of copying patches mechanically when package boundaries or UX flows have diverged.
 - Defer broad or risky upstream work only when it needs its own dedicated pass, conflicts with local architecture, duplicates an existing local implementation, or targets apps/features this fork does not ship.
 - Record every decision as `ported`, `pending dedicated pass`, `deferred with trigger`, or `intentionally skipped`, with enough rationale for the next sync reviewer to continue without re-litigating the same range.
@@ -24,7 +25,7 @@ This fork has enough feature drift that a normal upstream merge is usually not v
 
 1. Run `git fetch upstream --prune`.
 2. Read this file before comparing code.
-3. List new upstream work with `git log --oneline ea20e800..upstream/main`.
+3. List new upstream work with `git log --oneline d1e85c4e..upstream/main`.
 4. Inspect all new commits enough to classify them, then use targeted `git show` and `git diff` commands for likely ports.
 5. After porting or intentionally skipping new upstream work, rewrite this file with the new last reviewed upstream SHA and a fresh summary.
 
@@ -35,6 +36,8 @@ The upstream range through `447236d5` was reviewed after this fork had diverged 
 The upstream range `447236d5..7e20b23e` was reviewed on 2026-05-13. Useful source changes from that range were manually ported where they apply to this fork's current architecture.
 
 The upstream range `7e20b23e..ea20e800` was reviewed on 2026-05-14. Relevant technical work from that range was manually ported and adapted to this fork's current architecture.
+
+The upstream range `ea20e800..d1e85c4e` was reviewed on 2026-05-16. It contained only release version bookkeeping; package versions were mirrored to `0.0.24` so this fork exposes the latest reviewed upstream release line.
 
 Manually ported or aligned:
 
@@ -65,17 +68,18 @@ Manually ported or aligned:
 - Workspace build/dependency cleanup from upstream commit `f92e1e1b`: moved advertised endpoint helpers to `@t3tools/shared/advertisedEndpoint`, simplified workspace package scripts/dependencies, and adapted desktop imports to this fork's current file layout.
 - Diagnostics prerequisite and resource-history work from upstream commits `a2ff50db` and `9e632f5c`: added process diagnostics, trace diagnostics, in-memory process resource sampling, diagnostics RPC/contracts, a Diagnostics settings route, and adapted tests. `a2ff50db` was not listed in the previous pending range, but `9e632f5c` depended on it and this pass corrected that prerequisite gap.
 - Desktop runtime dependency staging fix from upstream commit `ea20e800`: bundled workspace packages and Electron are omitted from staged desktop runtime dependencies.
+- Release version tracking from upstream commit `d1e85c4e`: mirrored `apps/desktop`, `apps/server`, `apps/web`, and `packages/contracts` package versions to `0.0.24` as upstream tracking metadata.
 
 Pending alignment work:
 
-- No technical alignment work is pending through upstream `ea20e800`.
+- No technical alignment work is pending through upstream `d1e85c4e`.
 
 Intentionally skipped or not relevant:
 
 - Electron app changes.
 - Marketing app changes.
 - Upstream commit `34bb18c8` (`feat(marketing): Made marketing site less cringe`) is marketing-site content/assets and should stay skipped for this fork unless the marketing app becomes a maintained surface again.
-- Upstream commit `b793401a` (`chore(release): prepare v0.0.23`) only bumped package versions from `0.0.22` to `0.0.23` in `apps/desktop`, `apps/server`, `apps/web`, and `packages/contracts`; skip until this fork performs its own intentional release bookkeeping.
+- Upstream commit `b793401a` (`chore(release): prepare v0.0.23`) only bumped package versions from `0.0.22` to `0.0.23` and was superseded by the later `0.0.24` tracking version bump.
 - Upstream commit `e64c19f1` is mostly hosted Vercel release routing and public-domain aliasing. This fork currently keeps `apps/web/vercel.json` and self-hosted central-server direction, so defer unless the hosted channel/router release flow is revived.
 - Upstream ancestry merge marker. The fork is still ancestry-behind upstream by design.
 
@@ -85,7 +89,15 @@ Intentionally skipped or not relevant:
 - Local changes may prefer central-server reliability, predictable reconnect behavior, and maintainability over matching upstream desktop-oriented flows exactly.
 - GitHub may report the branch as behind upstream even when the useful upstream work in the reviewed range has been manually handled.
 
-## Verification For Latest Manual Sync
+## Verification History
+
+Latest upstream review completed on 2026-05-16 after upstream fetch:
+
+- Inspected `git log --oneline ea20e800..upstream/main`.
+- New upstream commit reviewed: `d1e85c4e`.
+- Inspected `git show --stat --patch d1e85c4e`.
+- Mirrored `d1e85c4e` package version bookkeeping so `apps/desktop`, `apps/server`, `apps/web`, and `packages/contracts` report `0.0.24`, matching the latest reviewed upstream release line.
+- Verification: `bun fmt`, `bun lint`, and `bun typecheck`.
 
 Latest manual sync completed on 2026-05-14 after upstream fetch:
 

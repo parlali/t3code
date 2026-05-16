@@ -21,7 +21,7 @@ import {
   type WsRpcProtocolClient,
   type WsRpcProtocolSocketUrlProvider,
 } from "./protocol";
-import { isTransportConnectionErrorMessage } from "./transportError";
+import { isRecoverableSubscriptionErrorMessage } from "./transportError";
 
 interface SubscribeOptions {
   readonly retryDelay?: Duration.Input;
@@ -184,7 +184,7 @@ export class WsTransport {
           }
 
           const formattedError = formatErrorMessage(error);
-          if (!isTransportConnectionErrorMessage(formattedError)) {
+          if (!isRecoverableSubscriptionErrorMessage(formattedError)) {
             console.warn("WebSocket RPC subscription failed", {
               error: formattedError,
             });

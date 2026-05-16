@@ -168,6 +168,7 @@ function createClient() {
   return {
     dispose: vi.fn(async () => undefined),
     isConnectionOpen: vi.fn(() => true),
+    isHeartbeatFresh: vi.fn(() => true),
     reconnect: vi.fn(async () => undefined),
     server: {
       getConfig: vi.fn(async () => configSnapshot),

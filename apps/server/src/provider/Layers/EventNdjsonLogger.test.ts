@@ -27,6 +27,15 @@ function parseLogLine(line: string) {
   };
 }
 
+function readParsedLogLines(filePath: string) {
+  return fs
+    .readFileSync(filePath, "utf8")
+    .trim()
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => parseLogLine(line));
+}
+
 describe("EventNdjsonLogger", () => {
   it.effect("writes effect-style lines to thread-scoped files", () =>
     Effect.gen(function* () {
@@ -149,6 +158,174 @@ describe("EventNdjsonLogger", () => {
           '{"id":"evt-concurrent-1"}',
           '{"id":"evt-concurrent-2"}',
         ]);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("summarizes canonical chunk events instead of logging every chunk payload", () =>
+    Effect.gen(function* () {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-log-"));
+      const basePath = path.join(tempDir, "provider-canonical.ndjson");
+
+      try {
+        const logger = yield* makeEventNdjsonLogger(basePath, {
+          stream: "canonical",
+          batchWindowMs: 0,
+        });
+        assert.notEqual(logger, undefined);
+        if (!logger) {
+          return;
+        }
+
+        const threadId = ThreadId.make("thread-chunks");
+        const createdAt = "2026-05-16T12:00:00.000Z";
+        yield* logger.write(
+          {
+            type: "content.delta",
+            provider: "codex",
+            createdAt,
+            threadId,
+            turnId: "turn-chunks",
+            payload: { streamKind: "assistant_text", delta: "hello" },
+          },
+          threadId,
+        );
+        yield* logger.write(
+          {
+            type: "content.delta",
+            provider: "codex",
+            createdAt,
+            threadId,
+            turnId: "turn-chunks",
+            payload: { streamKind: "assistant_text", delta: " world" },
+          },
+          threadId,
+        );
+        yield* logger.write(
+          {
+            type: "turn.proposed.delta",
+            provider: "codex",
+            createdAt,
+            threadId,
+            turnId: "turn-chunks",
+            payload: { delta: "plan" },
+          },
+          threadId,
+        );
+        yield* logger.write(
+          {
+            type: "turn.diff.updated",
+            provider: "codex",
+            createdAt,
+            threadId,
+            turnId: "turn-chunks",
+            payload: { unifiedDiff: "difftext" },
+          },
+          threadId,
+        );
+        yield* logger.write(
+          {
+            type: "turn.completed",
+            provider: "codex",
+            createdAt,
+            threadId,
+            turnId: "turn-chunks",
+            payload: { state: "completed" },
+          },
+          threadId,
+        );
+        yield* logger.close();
+
+        const lines = readParsedLogLines(path.join(tempDir, "thread-chunks.log"));
+        assert.equal(lines.length, 2);
+        const summary = JSON.parse(lines[0]?.payload ?? "{}") as {
+          readonly type?: string;
+          readonly payload?: Record<string, unknown>;
+        };
+        const completed = JSON.parse(lines[1]?.payload ?? "{}") as { readonly type?: string };
+
+        assert.equal(summary.type, "turn.chunk-summary");
+        assert.equal(summary.payload?.contentDeltaChunks, 2);
+        assert.equal(summary.payload?.contentDeltaChars, 11);
+        assert.equal(summary.payload?.assistantTextChunks, 2);
+        assert.equal(summary.payload?.assistantTextChars, 11);
+        assert.equal(summary.payload?.proposedPlanDeltaChunks, 1);
+        assert.equal(summary.payload?.proposedPlanDeltaChars, 4);
+        assert.equal(summary.payload?.diffUpdateCount, 1);
+        assert.equal(summary.payload?.diffPayloadChars, 8);
+        assert.equal(lines[0]?.payload.includes("hello"), false);
+        assert.equal(lines[0]?.payload.includes("difftext"), false);
+        assert.equal(completed.type, "turn.completed");
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("drops high-volume native chunk updates while keeping lifecycle events", () =>
+    Effect.gen(function* () {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-log-"));
+      const basePath = path.join(tempDir, "provider-native.ndjson");
+
+      try {
+        const logger = yield* makeEventNdjsonLogger(basePath, {
+          stream: "native",
+          batchWindowMs: 0,
+        });
+        assert.notEqual(logger, undefined);
+        if (!logger) {
+          return;
+        }
+
+        const threadId = ThreadId.make("thread-native-chunks");
+        const createdAt = "2026-05-16T12:00:00.000Z";
+        yield* logger.write(
+          {
+            id: "evt-native-delta",
+            kind: "notification",
+            provider: "codex",
+            createdAt,
+            threadId,
+            method: "item/agentMessage/delta",
+            textDelta: "drop me",
+            payload: { delta: "drop me" },
+          },
+          threadId,
+        );
+        yield* logger.write(
+          {
+            observedAt: createdAt,
+            event: {
+              id: "evt-native-update",
+              kind: "notification",
+              provider: "opencode",
+              createdAt,
+              threadId,
+              method: "message.part.updated",
+              payload: { text: "drop me too" },
+            },
+          },
+          threadId,
+        );
+        yield* logger.write(
+          {
+            id: "evt-native-completed",
+            kind: "notification",
+            provider: "codex",
+            createdAt,
+            threadId,
+            method: "turn/completed",
+          },
+          threadId,
+        );
+        yield* logger.close();
+
+        const lines = readParsedLogLines(path.join(tempDir, "thread-native-chunks.log"));
+        assert.equal(lines.length, 1);
+        assert.equal(lines[0]?.payload.includes("turn/completed"), true);
+        assert.equal(lines[0]?.payload.includes("drop me"), false);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
