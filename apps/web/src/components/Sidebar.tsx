@@ -156,6 +156,7 @@ import {
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  resolveThreadUnreadAnchor,
   orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
@@ -1030,36 +1031,26 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   // thread-list change).
   const sidebarThreadByKeyRef = useRef(sidebarThreadByKey);
   sidebarThreadByKeyRef.current = sidebarThreadByKey;
-  const markThreadUnread = useCallback(
-    (threadKey: string, latestTurnCompletedAt: string | null | undefined) => {
-      if (!latestTurnCompletedAt) {
-        return;
-      }
-      const threadRef = parseScopedThreadKey(threadKey);
-      if (!threadRef) {
-        return;
-      }
-      const observedAt = new Date().toISOString();
-      useThreadReadReceiptStore
-        .getState()
-        .markUnreadOptimistic(
-          threadRef.environmentId,
-          threadRef.threadId,
-          latestTurnCompletedAt,
-          observedAt,
-        );
-      void readEnvironmentApi(threadRef.environmentId)
-        ?.threadRead.markUnread({
-          threadId: threadRef.threadId,
-          latestTurnCompletedAt,
-          observedAt,
-        })
-        .catch((error: unknown) => {
-          console.warn("Failed to mark thread unread", error);
-        });
-    },
-    [],
-  );
+  const markThreadUnread = useCallback((thread: SidebarThreadSummary | null | undefined) => {
+    if (!thread) {
+      return;
+    }
+    const unreadAnchor = resolveThreadUnreadAnchor(thread);
+    if (!unreadAnchor) return;
+    const observedAt = new Date().toISOString();
+    useThreadReadReceiptStore
+      .getState()
+      .markUnreadOptimistic(thread.environmentId, thread.id, unreadAnchor, observedAt);
+    void readEnvironmentApi(thread.environmentId)
+      ?.threadRead.markUnread({
+        threadId: thread.id,
+        latestTurnCompletedAt: unreadAnchor,
+        observedAt,
+      })
+      .catch((error: unknown) => {
+        console.warn("Failed to mark thread unread", error);
+      });
+  }, []);
   const projectThreads = sidebarThreads;
   const projectExpanded = useUiStateStore(
     (state) => state.projectExpandedById[project.projectKey] ?? true,
@@ -1629,7 +1620,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (clicked === "mark-unread") {
         for (const threadKey of threadKeys) {
           const thread = sidebarThreadByKeyRef.current.get(threadKey);
-          markThreadUnread(threadKey, thread?.latestTurn?.completedAt);
+          markThreadUnread(thread);
         }
         clearSelection();
         return;
@@ -1947,7 +1938,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       }
 
       if (clicked === "mark-unread") {
-        markThreadUnread(threadKey, thread.latestTurn?.completedAt);
+        markThreadUnread(thread);
         return;
       }
       if (clicked === "copy-path") {

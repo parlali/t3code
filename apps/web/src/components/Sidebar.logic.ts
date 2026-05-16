@@ -49,15 +49,19 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
 
 type ThreadStatusInput = Pick<
   SidebarThreadSummary,
+  | "createdAt"
   | "hasActionableProposedPlan"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
   | "interactionMode"
   | "latestTurn"
   | "session"
+  | "updatedAt"
 > & {
   lastVisitedAt?: string | undefined;
 };
+
+type ThreadUnreadAnchorInput = Pick<SidebarThreadSummary, "createdAt" | "latestTurn" | "updatedAt">;
 
 export interface ThreadJumpHintVisibilityController {
   sync: (shouldShow: boolean) => void;
@@ -144,11 +148,33 @@ export function useThreadJumpHintVisibility(): {
   };
 }
 
+function isValidTimestamp(value: string | null | undefined): value is string {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+export function resolveThreadUnreadAnchor(thread: ThreadUnreadAnchorInput): string | null {
+  if (!thread.latestTurn) {
+    return isValidTimestamp(thread.createdAt) ? thread.createdAt : null;
+  }
+  if (isValidTimestamp(thread.latestTurn.completedAt)) {
+    return thread.latestTurn.completedAt;
+  }
+  if (thread.latestTurn.state === "running") {
+    return null;
+  }
+  const fallback =
+    thread.updatedAt ??
+    thread.latestTurn.startedAt ??
+    thread.latestTurn.requestedAt ??
+    thread.createdAt;
+  return isValidTimestamp(fallback) ? fallback : null;
+}
+
 export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
-  if (!thread.latestTurn?.completedAt) return false;
-  const completedAt = Date.parse(thread.latestTurn.completedAt);
-  if (Number.isNaN(completedAt)) return false;
-  if (!thread.lastVisitedAt) return true;
+  const unreadAnchor = resolveThreadUnreadAnchor(thread);
+  if (!unreadAnchor) return false;
+  const completedAt = Date.parse(unreadAnchor);
+  if (!thread.lastVisitedAt) return thread.latestTurn !== null;
 
   const lastVisitedAt = Date.parse(thread.lastVisitedAt);
   if (Number.isNaN(lastVisitedAt)) return true;

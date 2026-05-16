@@ -11,6 +11,33 @@ export function parentPath(path: string): string | null {
   return index === -1 ? null : path.slice(0, index);
 }
 
+export function relativePathAncestors(path: string): string[] {
+  const ancestors: string[] = [];
+  let current = parentPath(path);
+  while (current) {
+    ancestors.unshift(current);
+    current = parentPath(current);
+  }
+  return ancestors;
+}
+
+export function normalizeNewEntryName(input: string): string | null {
+  const segments = input
+    .trim()
+    .replaceAll("\\", "/")
+    .split("/")
+    .filter((segment) => segment.length > 0);
+  if (segments.length === 0) return null;
+  if (segments.some((segment) => segment === "." || segment === "..")) return null;
+  return segments.join("/");
+}
+
+export function buildNewEntryRelativePath(parent: string | null, input: string): string | null {
+  const name = normalizeNewEntryName(input);
+  if (!name) return null;
+  return parent ? `${parent}/${name}` : name;
+}
+
 export function sortTreeNodes(items: TreeNode[]): void {
   items.sort((left, right) => {
     if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;

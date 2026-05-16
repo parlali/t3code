@@ -16,6 +16,70 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
   const workspacePaths = yield* WorkspacePaths;
   const workspaceEntries = yield* WorkspaceEntries;
 
+  const createEntry: WorkspaceFileSystemShape["createEntry"] = Effect.fn(
+    "WorkspaceFileSystem.createEntry",
+  )(function* (input) {
+    const target = yield* workspacePaths.resolveRelativePathWithinRoot({
+      workspaceRoot: input.cwd,
+      relativePath: input.relativePath,
+    });
+
+    const existingStat = yield* fileSystem
+      .stat(target.absolutePath)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (existingStat) {
+      return yield* new WorkspaceFileSystemError({
+        cwd: input.cwd,
+        relativePath: input.relativePath,
+        operation: "workspaceFileSystem.createEntry",
+        detail: "Workspace path already exists.",
+      });
+    }
+
+    if (input.kind === "directory") {
+      yield* fileSystem.makeDirectory(target.absolutePath, { recursive: true }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new WorkspaceFileSystemError({
+              cwd: input.cwd,
+              relativePath: input.relativePath,
+              operation: "workspaceFileSystem.makeDirectory",
+              detail: cause.message,
+              cause,
+            }),
+        ),
+      );
+    } else {
+      yield* fileSystem.makeDirectory(path.dirname(target.absolutePath), { recursive: true }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new WorkspaceFileSystemError({
+              cwd: input.cwd,
+              relativePath: input.relativePath,
+              operation: "workspaceFileSystem.makeDirectory",
+              detail: cause.message,
+              cause,
+            }),
+        ),
+      );
+      yield* fileSystem.writeFileString(target.absolutePath, "").pipe(
+        Effect.mapError(
+          (cause) =>
+            new WorkspaceFileSystemError({
+              cwd: input.cwd,
+              relativePath: input.relativePath,
+              operation: "workspaceFileSystem.writeFile",
+              detail: cause.message,
+              cause,
+            }),
+        ),
+      );
+    }
+
+    yield* workspaceEntries.invalidate(input.cwd);
+    return { relativePath: target.relativePath, kind: input.kind };
+  });
+
   const readFile: WorkspaceFileSystemShape["readFile"] = Effect.fn("WorkspaceFileSystem.readFile")(
     function* (input) {
       const target = yield* workspacePaths.resolveRelativePathWithinRoot({
@@ -104,7 +168,7 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
     yield* workspaceEntries.invalidate(input.cwd);
     return { relativePath: target.relativePath };
   });
-  return { readFile, writeFile } satisfies WorkspaceFileSystemShape;
+  return { createEntry, readFile, writeFile } satisfies WorkspaceFileSystemShape;
 });
 
 export const WorkspaceFileSystemLive = Layer.effect(WorkspaceFileSystem, makeWorkspaceFileSystem);

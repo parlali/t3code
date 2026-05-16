@@ -44,6 +44,19 @@ export const ProjectListEntriesResult = Schema.Struct({
 });
 export type ProjectListEntriesResult = typeof ProjectListEntriesResult.Type;
 
+export const ProjectCreateEntryInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  relativePath: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_FILE_PATH_MAX_LENGTH)),
+  kind: ProjectEntryKind,
+});
+export type ProjectCreateEntryInput = typeof ProjectCreateEntryInput.Type;
+
+export const ProjectCreateEntryResult = Schema.Struct({
+  relativePath: TrimmedNonEmptyString,
+  kind: ProjectEntryKind,
+});
+export type ProjectCreateEntryResult = typeof ProjectCreateEntryResult.Type;
+
 export const ProjectEntriesReadyEvent = Schema.Struct({
   type: Schema.Literal("ready"),
   cwd: TrimmedNonEmptyString,
@@ -80,6 +93,14 @@ export class ProjectListEntriesError extends Schema.TaggedErrorClass<ProjectList
 
 export class ProjectEntriesSubscribeError extends Schema.TaggedErrorClass<ProjectEntriesSubscribeError>()(
   "ProjectEntriesSubscribeError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class ProjectCreateEntryError extends Schema.TaggedErrorClass<ProjectCreateEntryError>()(
+  "ProjectCreateEntryError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),

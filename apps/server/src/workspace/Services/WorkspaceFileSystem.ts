@@ -10,6 +10,8 @@ import { Schema, Context } from "effect";
 import type { Effect } from "effect";
 
 import type {
+  ProjectCreateEntryInput,
+  ProjectCreateEntryResult,
   ProjectReadFileInput,
   ProjectReadFileResult,
   ProjectWriteFileInput,
@@ -32,6 +34,19 @@ export class WorkspaceFileSystemError extends Schema.TaggedErrorClass<WorkspaceF
  * WorkspaceFileSystemShape - Service API for workspace-relative file operations.
  */
 export interface WorkspaceFileSystemShape {
+  /**
+   * Create a file or directory relative to the workspace root.
+   *
+   * Creates parent directories as needed, rejects paths that escape the
+   * workspace root, and does not overwrite an existing entry.
+   */
+  readonly createEntry: (
+    input: ProjectCreateEntryInput,
+  ) => Effect.Effect<
+    ProjectCreateEntryResult,
+    WorkspaceFileSystemError | WorkspacePathOutsideRootError
+  >;
+
   /**
    * Read a file relative to the workspace root.
    */

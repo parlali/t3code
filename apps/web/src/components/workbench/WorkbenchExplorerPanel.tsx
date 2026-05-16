@@ -1,4 +1,4 @@
-import { RefreshCwIcon } from "lucide-react";
+import { FilePlusIcon, FolderPlusIcon, RefreshCwIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { VcsCommitGraphCommit } from "@t3tools/contracts";
 import type { TurnDiffTreeNode } from "../../lib/turnDiffTree";
@@ -13,7 +13,12 @@ import {
 } from "../ui/pane-chrome";
 import { startResizeInteraction, type ResizeInteractionHandle } from "../ui/resize-interaction";
 import { ExplorerModeToggle, type ExplorerMode } from "./ExplorerModeToggle";
-import { ExplorerTree, type TreeNode } from "./ExplorerTree";
+import {
+  ExplorerTree,
+  type CreateEntryKind,
+  type ExplorerCreateDraft,
+  type TreeNode,
+} from "./ExplorerTree";
 import { ChangesTree } from "./ChangesTree";
 import { WorkbenchCommitGraph } from "./WorkbenchCommitGraph";
 import {
@@ -43,9 +48,14 @@ interface WorkbenchExplorerPanelProps {
   readonly commitGraphTruncated?: boolean;
   readonly isRefreshing?: boolean;
   readonly isCommitGraphLoading?: boolean;
+  readonly createDraft?: ExplorerCreateDraft | null;
+  readonly createParentPath?: string | null;
   readonly onToggleExpanded: (path: string) => void;
   readonly onToggleCollapsedChangeDirectory: (path: string) => void;
   readonly onOpenFile: (path: string) => void;
+  readonly onStartCreate?: (kind: CreateEntryKind, parentPath: string | null) => void;
+  readonly onSubmitCreate?: (draft: ExplorerCreateDraft, name: string) => void;
+  readonly onCancelCreate?: () => void;
   readonly onRefresh?: () => void | Promise<void>;
   readonly showCollapseButton?: boolean;
   readonly onCollapse?: () => void;
@@ -69,9 +79,14 @@ export const WorkbenchExplorerPanel = memo(function WorkbenchExplorerPanel({
   commitGraphTruncated = false,
   isRefreshing = false,
   isCommitGraphLoading = false,
+  createDraft = null,
+  createParentPath = null,
   onToggleExpanded,
   onToggleCollapsedChangeDirectory,
   onOpenFile,
+  onStartCreate,
+  onSubmitCreate,
+  onCancelCreate,
   onRefresh,
   showCollapseButton = false,
   onCollapse,
@@ -139,6 +154,32 @@ export const WorkbenchExplorerPanel = memo(function WorkbenchExplorerPanel({
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
           {mode === "files" ? "Files" : "Changes"}
         </span>
+        {mode === "files" && cwd && onStartCreate && (
+          <>
+            <Button
+              size="icon"
+              variant="ghost"
+              className={PANE_ICON_BUTTON_CLASS}
+              aria-label="New file"
+              title="New file"
+              disabled={createDraft?.isSaving}
+              onClick={() => onStartCreate("file", createParentPath)}
+            >
+              <FilePlusIcon className="size-3.5" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className={PANE_ICON_BUTTON_CLASS}
+              aria-label="New folder"
+              title="New folder"
+              disabled={createDraft?.isSaving}
+              onClick={() => onStartCreate("directory", createParentPath)}
+            >
+              <FolderPlusIcon className="size-3.5" />
+            </Button>
+          </>
+        )}
         {onRefresh && (
           <Button
             size="icon"
@@ -182,6 +223,10 @@ export const WorkbenchExplorerPanel = memo(function WorkbenchExplorerPanel({
               selectedPath={selectedPath}
               onToggle={onToggleExpanded}
               onOpenFile={onOpenFile}
+              createDraft={createDraft}
+              onStartCreate={onStartCreate}
+              onSubmitCreate={onSubmitCreate}
+              onCancelCreate={onCancelCreate}
             />
           ) : gitError ? (
             <div className="px-3 py-8 text-center text-xs text-destructive">

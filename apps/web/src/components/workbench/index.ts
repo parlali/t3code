@@ -1,5 +1,10 @@
 export { ExplorerModeToggle, type ExplorerMode } from "./ExplorerModeToggle";
-export { ExplorerTree, type TreeNode } from "./ExplorerTree";
+export {
+  ExplorerTree,
+  type CreateEntryKind,
+  type ExplorerCreateDraft,
+  type TreeNode,
+} from "./ExplorerTree";
 export { ChangesTree } from "./ChangesTree";
 export { WorkbenchExplorerPanel } from "./WorkbenchExplorerPanel";
 export { WorkbenchCommitGraph } from "./WorkbenchCommitGraph";
@@ -22,6 +27,9 @@ export {
 export {
   basename,
   parentPath,
+  relativePathAncestors,
+  normalizeNewEntryName,
+  buildNewEntryRelativePath,
   sortTreeNodes,
   tabFor,
   setBufferValue,

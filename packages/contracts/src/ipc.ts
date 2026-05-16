@@ -33,6 +33,8 @@ import type {
   ProjectListEntriesResult,
   ProjectEntriesSubscribeInput,
   ProjectEntriesStreamEvent,
+  ProjectCreateEntryInput,
+  ProjectCreateEntryResult,
   ProjectReadFileInput,
   ProjectReadFileResult,
   ProjectWriteFileInput,
@@ -397,6 +399,7 @@ export interface EnvironmentApi {
         onResubscribe?: () => void;
       },
     ) => () => void;
+    createEntry: (input: ProjectCreateEntryInput) => Promise<ProjectCreateEntryResult>;
     readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
   };

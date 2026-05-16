@@ -33,6 +33,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       searchEntries: rpcClient.projects.searchEntries,
       listEntries: rpcClient.projects.listEntries,
       subscribeEntries: rpcClient.projects.subscribeEntries,
+      createEntry: rpcClient.projects.createEntry,
       readFile: rpcClient.projects.readFile,
       writeFile: rpcClient.projects.writeFile,
     },

@@ -48,12 +48,17 @@ import {
   WorkbenchBreadcrumbs,
   WorkbenchDiffEditor,
   type WorkbenchTab,
+  type CreateEntryKind,
+  type ExplorerCreateDraft,
   basename,
+  parentPath,
   tabFor,
   setBufferValue,
   markDirty,
   languageFor,
   buildTree,
+  buildNewEntryRelativePath,
+  relativePathAncestors,
   configureWorkbenchMonaco,
   isChangeSelectionAvailable,
   isFileSelectionAvailable,
@@ -157,6 +162,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   const [fileBuffers, setFileBuffers] = useState<Record<string, string>>({});
   const [diffBuffers, setDiffBuffers] = useState<Record<string, string>>({});
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(() => new Set());
+  const [createDraft, setCreateDraft] = useState<ExplorerCreateDraft | null>(null);
   const [explorerWidth, setExplorerWidth] = useState(() => {
     if (typeof window === "undefined") return DEFAULT_EXPLORER_WIDTH;
     const stored = window.localStorage.getItem(WORKBENCH_EXPLORER_WIDTH_STORAGE_KEY);
@@ -189,6 +195,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   const activePath = activeTab?.path ?? null;
   const activeKind = activeTab?.kind ?? null;
   const activeTabDirty = activeTab ? dirtyTabs.has(activeTab.id) : false;
+  const createParentPath = activeTab?.path ? parentPath(activeTab.path) : null;
   const listQuery = useQuery(
     projectListEntriesQueryOptions({
       environmentId: props.environmentId,
@@ -337,6 +344,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     setFileBuffers({});
     setDiffBuffers({});
     setDirtyTabs(new Set());
+    setCreateDraft(null);
     setExpanded(new Set());
     setCollapsedChangeDirectories(new Set());
 
@@ -555,6 +563,95 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     });
   }, []);
 
+  const expandCreateParent = useCallback((entryParentPath: string | null) => {
+    if (!entryParentPath) return;
+    setExpanded((current) => {
+      const next = new Set(current);
+      for (const ancestor of [...relativePathAncestors(entryParentPath), entryParentPath]) {
+        next.add(ancestor);
+      }
+      return next;
+    });
+  }, []);
+
+  const startCreateEntry = useCallback(
+    (kind: CreateEntryKind, entryParentPath: string | null) => {
+      setMode("files");
+      expandCreateParent(entryParentPath);
+      setCreateDraft({
+        kind,
+        parentPath: entryParentPath,
+        error: null,
+        isSaving: false,
+      });
+    },
+    [expandCreateParent],
+  );
+
+  const cancelCreateEntry = useCallback(() => {
+    setCreateDraft(null);
+  }, []);
+
+  const submitCreateEntry = useCallback(
+    (draft: ExplorerCreateDraft, name: string) => {
+      const relativePath = buildNewEntryRelativePath(draft.parentPath, name);
+      if (!relativePath) {
+        setCreateDraft((current) =>
+          current && current.kind === draft.kind && current.parentPath === draft.parentPath
+            ? { ...current, error: "Enter a valid name.", isSaving: false }
+            : current,
+        );
+        return;
+      }
+      if (!cwd) {
+        setCreateDraft((current) =>
+          current && current.kind === draft.kind && current.parentPath === draft.parentPath
+            ? { ...current, error: "No project selected.", isSaving: false }
+            : current,
+        );
+        return;
+      }
+
+      setCreateDraft((current) =>
+        current && current.kind === draft.kind && current.parentPath === draft.parentPath
+          ? { ...current, error: null, isSaving: true }
+          : current,
+      );
+
+      void (async () => {
+        const api = ensureEnvironmentApi(props.environmentId);
+        let result: Awaited<ReturnType<typeof api.projects.createEntry>>;
+        try {
+          result = await api.projects.createEntry({
+            cwd,
+            relativePath,
+            kind: draft.kind,
+          });
+        } catch (error) {
+          setCreateDraft((current) =>
+            current && current.kind === draft.kind && current.parentPath === draft.parentPath
+              ? { ...current, error: getErrorMessage(error), isSaving: false }
+              : current,
+          );
+          return;
+        }
+
+        setCreateDraft(null);
+        const createdParentPath =
+          result.kind === "directory" ? result.relativePath : parentPath(result.relativePath);
+        expandCreateParent(createdParentPath);
+        await refreshWorkspace().catch((error: unknown) => {
+          console.warn("Failed to refresh workspace after creating entry", error);
+        });
+        if (result.kind === "file") {
+          openTab(tabFor("file", result.relativePath));
+          if (isMobileLayout) setMobileExplorerOpen(false);
+        }
+      })();
+    },
+    [cwd, expandCreateParent, isMobileLayout, openTab, props.environmentId, refreshWorkspace],
+  );
+
   const handleOpenFileFromExplorer = useCallback(
     (path: string) => {
       openTab(tabFor(mode === "files" ? "file" : "diff", path));
@@ -712,9 +809,14 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
               listQuery.isFetching || gitStatus.isPending || commitGraphQuery.isFetching
             }
             isCommitGraphLoading={commitGraphQuery.isPending}
+            createDraft={createDraft}
+            createParentPath={createParentPath}
             onToggleExpanded={handleToggleExpanded}
             onToggleCollapsedChangeDirectory={handleToggleCollapsedChangeDirectory}
             onOpenFile={(path) => openTab(tabFor(mode === "files" ? "file" : "diff", path))}
+            onStartCreate={startCreateEntry}
+            onSubmitCreate={submitCreateEntry}
+            onCancelCreate={cancelCreateEntry}
             onRefresh={refreshWorkspace}
             showCollapseButton
             onCollapse={() => setExplorerCollapsed(true)}
@@ -843,9 +945,14 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
           commitGraphTruncated={commitGraphQuery.data?.truncated ?? false}
           isRefreshing={listQuery.isFetching || gitStatus.isPending || commitGraphQuery.isFetching}
           isCommitGraphLoading={commitGraphQuery.isPending}
+          createDraft={createDraft}
+          createParentPath={createParentPath}
           onToggleExpanded={handleToggleExpanded}
           onToggleCollapsedChangeDirectory={handleToggleCollapsedChangeDirectory}
           onOpenFile={handleOpenFileFromExplorer}
+          onStartCreate={startCreateEntry}
+          onSubmitCreate={submitCreateEntry}
+          onCancelCreate={cancelCreateEntry}
           onRefresh={refreshWorkspace}
           showCollapseButton
           onCollapse={closeMobileExplorer}

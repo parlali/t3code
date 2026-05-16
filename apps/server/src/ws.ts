@@ -19,6 +19,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   ProjectListEntriesError,
   ProjectEntriesSubscribeError,
+  ProjectCreateEntryError,
   ProjectReadFileError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
@@ -1069,6 +1070,22 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                     cause,
                   }),
               ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsCreateEntry]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsCreateEntry,
+            workspaceFileSystem.createEntry(input).pipe(
+              Effect.mapError((cause) => {
+                const message = Schema.is(WorkspacePathOutsideRootError)(cause)
+                  ? "Workspace file path must stay within the project root."
+                  : "Failed to create workspace entry";
+                return new ProjectCreateEntryError({
+                  message,
+                  cause,
+                });
+              }),
             ),
             { "rpc.aggregate": "workspace" },
           ),

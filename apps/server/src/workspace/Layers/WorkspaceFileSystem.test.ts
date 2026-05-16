@@ -51,6 +51,84 @@ const writeTextFile = Effect.fn("writeTextFile")(function* (
 });
 
 it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
+  describe("createEntry", () => {
+    it.effect("creates files relative to the workspace root without overwriting", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        const result = yield* workspaceFileSystem.createEntry({
+          cwd,
+          relativePath: "src/generated.ts",
+          kind: "file",
+        });
+        const saved = yield* fileSystem.readFileString(path.join(cwd, "src/generated.ts"));
+
+        expect(result).toEqual({ relativePath: "src/generated.ts", kind: "file" });
+        expect(saved).toBe("");
+
+        const error = yield* workspaceFileSystem
+          .createEntry({
+            cwd,
+            relativePath: "src/generated.ts",
+            kind: "file",
+          })
+          .pipe(Effect.flip);
+        expect(error).toEqual(
+          expect.objectContaining({ detail: "Workspace path already exists." }),
+        );
+      }),
+    );
+
+    it.effect("creates directories relative to the workspace root", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        const result = yield* workspaceFileSystem.createEntry({
+          cwd,
+          relativePath: "src/components",
+          kind: "directory",
+        });
+        const stat = yield* fileSystem.stat(path.join(cwd, "src/components"));
+
+        expect(result).toEqual({ relativePath: "src/components", kind: "directory" });
+        expect(stat.type).toBe("Directory");
+      }),
+    );
+
+    it.effect("rejects create paths outside the workspace root", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const path = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+
+        const error = yield* workspaceFileSystem
+          .createEntry({
+            cwd,
+            relativePath: "../escape.md",
+            kind: "file",
+          })
+          .pipe(Effect.flip);
+
+        expect(error.message).toContain(
+          "Workspace file path must be relative to the project root: ../escape.md",
+        );
+
+        const escapedPath = path.resolve(cwd, "..", "escape.md");
+        const escapedStat = yield* fileSystem
+          .stat(escapedPath)
+          .pipe(Effect.catch(() => Effect.succeed(null)));
+        expect(escapedStat).toBeNull();
+      }),
+    );
+  });
+
   describe("writeFile", () => {
     it.effect("writes files relative to the workspace root", () =>
       Effect.gen(function* () {

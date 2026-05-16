@@ -68,6 +68,9 @@ import {
   ProjectEntriesSubscribeError,
   ProjectEntriesSubscribeInput,
   ProjectEntriesStreamEvent,
+  ProjectCreateEntryError,
+  ProjectCreateEntryInput,
+  ProjectCreateEntryResult,
   ProjectReadFileError,
   ProjectReadFileInput,
   ProjectReadFileResult,
@@ -140,6 +143,7 @@ export const WS_METHODS = {
   projectsSearchEntries: "projects.searchEntries",
   projectsListEntries: "projects.listEntries",
   projectsSubscribeEntries: "projects.subscribeEntries",
+  projectsCreateEntry: "projects.createEntry",
   projectsReadFile: "projects.readFile",
   projectsWriteFile: "projects.writeFile",
 
@@ -334,6 +338,12 @@ export const WsProjectsSubscribeEntriesRpc = Rpc.make(WS_METHODS.projectsSubscri
   success: ProjectEntriesStreamEvent,
   error: ProjectEntriesSubscribeError,
   stream: true,
+});
+
+export const WsProjectsCreateEntryRpc = Rpc.make(WS_METHODS.projectsCreateEntry, {
+  payload: ProjectCreateEntryInput,
+  success: ProjectCreateEntryResult,
+  error: ProjectCreateEntryError,
 });
 
 export const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
@@ -647,6 +657,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsSearchEntriesRpc,
   WsProjectsListEntriesRpc,
   WsProjectsSubscribeEntriesRpc,
+  WsProjectsCreateEntryRpc,
   WsProjectsReadFileRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
