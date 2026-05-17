@@ -102,6 +102,23 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("counts text lines in untracked files as insertions", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "src/new.ts", "one\ntwo\nthree");
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
+        const file = status.workingTree.files.find((entry) => entry.path === "src/new.ts");
+
+        assert.equal(file?.untracked, true);
+        assert.equal(file?.insertions, 3);
+        assert.equal(file?.deletions, 0);
+        assert.equal(status.workingTree.insertions, 3);
+        assert.equal(status.workingTree.deletions, 0);
+      }),
+    );
+
     it.effect("reports default-branch delta separately from upstream delta", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -179,6 +196,38 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           Effect.catch(() => Effect.succeed(false)),
         );
         assert.equal(exists, false);
+      }),
+    );
+
+    it.effect("stages and unstages multiple paths with one operation", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "first.txt", "first\n");
+        yield* writeTextFile(cwd, "second.txt", "second\n");
+        yield* driver.stageFiles({ cwd, relativePaths: ["first.txt", "second.txt"] });
+
+        const staged = yield* driver.statusDetails(cwd);
+        assert.deepStrictEqual(
+          staged.workingTree.files.map((file) => [file.path, file.staged]),
+          [
+            ["first.txt", true],
+            ["second.txt", true],
+          ],
+        );
+
+        yield* driver.unstageFiles({ cwd, relativePaths: ["first.txt", "second.txt"] });
+
+        const unstaged = yield* driver.statusDetails(cwd);
+        assert.deepStrictEqual(
+          unstaged.workingTree.files.map((file) => [file.path, file.untracked]),
+          [
+            ["first.txt", true],
+            ["second.txt", true],
+          ],
+        );
       }),
     );
   });

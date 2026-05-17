@@ -18,7 +18,11 @@ import {
 import {
   GitActionProgressEvent,
   GitActionProgressPhase,
+  GitCommitStagedInput,
+  GitCommitStagedResult,
   GitCommandError,
+  GitGenerateCommitMessageInput,
+  GitGenerateCommitMessageResult,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
   GitPullRequestRefInput,
@@ -82,6 +86,12 @@ export interface GitManagerShape {
   readonly preparePullRequestThread: (
     input: GitPreparePullRequestThreadInput,
   ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
+  readonly generateCommitMessage: (
+    input: GitGenerateCommitMessageInput,
+  ) => Effect.Effect<GitGenerateCommitMessageResult, GitManagerServiceError>;
+  readonly commitStaged: (
+    input: GitCommitStagedInput,
+  ) => Effect.Effect<GitCommitStagedResult, GitManagerServiceError>;
   readonly runStackedAction: (
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
@@ -1134,6 +1144,58 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     },
   );
 
+  const generateCommitMessage: GitManagerShape["generateCommitMessage"] = Effect.fn(
+    "generateCommitMessage",
+  )(function* (input) {
+    const initialStatus = yield* gitCore.statusDetails(input.cwd);
+    const files = initialStatus.workingTree.files;
+    const hasStaged = files.some((file) => file.staged === true);
+    const modelSelection = yield* serverSettingsService.getSettings.pipe(
+      Effect.map((settings) => settings.textGenerationModelSelection),
+      Effect.mapError((cause) =>
+        gitManagerError("generateCommitMessage", "Failed to get server settings.", cause),
+      ),
+    );
+    const context = yield* gitCore.readCommitMessageContext(
+      input.cwd,
+      input.filePaths,
+      hasStaged ? "staged" : "working-tree",
+    );
+    if (!context) {
+      return yield* gitManagerError(
+        "generateCommitMessage",
+        "Cannot generate a commit message because there are no changes.",
+      );
+    }
+    const generated = yield* textGeneration
+      .generateCommitMessage({
+        cwd: input.cwd,
+        branch: initialStatus.branch,
+        stagedSummary: limitContext(context.summary, 8_000),
+        stagedPatch: limitContext(context.patch, 50_000),
+        modelSelection,
+      })
+      .pipe(Effect.map((result) => sanitizeCommitMessage(result)));
+    return { commitMessage: formatCommitMessage(generated.subject, generated.body) };
+  });
+
+  const commitStaged: GitManagerShape["commitStaged"] = Effect.fn("commitStaged")(
+    function* (input) {
+      const parsed = parseCustomCommitMessage(input.commitMessage);
+      if (!parsed) {
+        return yield* gitManagerError("commitStaged", "Enter a commit message.");
+      }
+      const status = yield* gitCore.statusDetails(input.cwd);
+      const hasStagedFiles = status.workingTree.files.some((file) => file.staged === true);
+      if (!hasStagedFiles) {
+        return yield* gitManagerError("commitStaged", "Stage at least one file before committing.");
+      }
+      return yield* gitCore
+        .commit(input.cwd, parsed.subject, parsed.body, { timeoutMs: COMMIT_TIMEOUT_MS })
+        .pipe(Effect.ensuring(invalidateStatus(input.cwd)));
+    },
+  );
+
   const runCommitStep = Effect.fn("runCommitStep")(function* (
     modelSelection: ModelSelection,
     cwd: string,
@@ -1781,6 +1843,8 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     invalidateStatus,
     resolvePullRequest,
     preparePullRequestThread,
+    generateCommitMessage,
+    commitStaged,
     runStackedAction,
   } satisfies GitManagerShape;
 });

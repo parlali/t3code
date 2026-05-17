@@ -2,9 +2,15 @@ import type {
   VcsSwitchRefInput,
   VcsSwitchRefResult,
   VcsCreateRefInput,
+  GitCommitStagedInput,
+  GitCommitStagedResult,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
+  GitGenerateCommitMessageInput,
+  GitGenerateCommitMessageResult,
   GitPullRequestRefInput,
+  GitRunStackedActionInput,
+  GitRunStackedActionResult,
   VcsCreateWorktreeInput,
   VcsCreateWorktreeResult,
   VcsCommitGraphInput,
@@ -19,8 +25,10 @@ import type {
   VcsApplyPatchInput,
   VcsDiffInput,
   VcsDiffResult,
+  VcsFileDiffInput,
   VcsFileDiffResult,
   VcsFileInput,
+  VcsPathsInput,
   VcsStatusInput,
   VcsStatusResult,
   VcsCreateRefResult,
@@ -425,8 +433,11 @@ export interface EnvironmentApi {
     switchRef: (input: VcsSwitchRefInput) => Promise<VcsSwitchRefResult>;
     init: (input: VcsInitInput) => Promise<void>;
     diff: (input: VcsDiffInput) => Promise<VcsDiffResult>;
-    fileDiff: (input: VcsFileInput) => Promise<VcsFileDiffResult>;
+    fileDiff: (input: VcsFileDiffInput) => Promise<VcsFileDiffResult>;
     stageFile: (input: VcsFileInput) => Promise<void>;
+    stageFiles: (input: VcsPathsInput) => Promise<void>;
+    unstageFile: (input: VcsFileInput) => Promise<void>;
+    unstageFiles: (input: VcsPathsInput) => Promise<void>;
     revertFile: (input: VcsFileInput) => Promise<void>;
     applyPatch: (input: VcsApplyPatchInput) => Promise<void>;
     pull: (input: VcsPullInput) => Promise<VcsPullResult>;
@@ -441,6 +452,11 @@ export interface EnvironmentApi {
     ) => () => void;
   };
   git: {
+    generateCommitMessage: (
+      input: GitGenerateCommitMessageInput,
+    ) => Promise<GitGenerateCommitMessageResult>;
+    commitStaged: (input: GitCommitStagedInput) => Promise<GitCommitStagedResult>;
+    runStackedAction: (input: GitRunStackedActionInput) => Promise<GitRunStackedActionResult>;
     resolvePullRequest: (input: GitPullRequestRefInput) => Promise<GitResolvePullRequestResult>;
     preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,

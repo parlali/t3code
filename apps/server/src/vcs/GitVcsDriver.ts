@@ -18,8 +18,10 @@ import {
   type VcsCreateRefResult,
   type VcsDiffInput,
   type VcsDiffResult,
+  type VcsFileDiffInput,
   type VcsFileDiffResult,
   type VcsFileInput,
+  type VcsPathsInput,
   type VcsCommitGraphInput,
   type VcsCommitGraphResult,
   type VcsApplyPatchInput,
@@ -77,6 +79,11 @@ export interface GitStatusDetails {
 export interface GitPreparedCommitContext {
   stagedSummary: string;
   stagedPatch: string;
+}
+
+export interface GitCommitMessageContext {
+  summary: string;
+  patch: string;
 }
 
 export interface ExecuteGitProgress {
@@ -172,6 +179,11 @@ export interface GitVcsDriverShape {
     cwd: string,
     filePaths?: readonly string[],
   ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
+  readonly readCommitMessageContext: (
+    cwd: string,
+    filePaths: readonly string[] | undefined,
+    source: "staged" | "working-tree",
+  ) => Effect.Effect<GitCommitMessageContext | null, GitCommandError>;
   readonly commit: (
     cwd: string,
     subject: string,
@@ -184,11 +196,14 @@ export interface GitVcsDriverShape {
     options?: { readonly remoteName?: string | null },
   ) => Effect.Effect<GitPushResult, GitCommandError>;
   readonly diff: (input: VcsDiffInput) => Effect.Effect<VcsDiffResult, GitCommandError>;
-  readonly fileDiff: (input: VcsFileInput) => Effect.Effect<VcsFileDiffResult, GitCommandError>;
+  readonly fileDiff: (input: VcsFileDiffInput) => Effect.Effect<VcsFileDiffResult, GitCommandError>;
   readonly commitGraph: (
     input: VcsCommitGraphInput,
   ) => Effect.Effect<VcsCommitGraphResult, GitCommandError>;
   readonly stageFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
+  readonly stageFiles: (input: VcsPathsInput) => Effect.Effect<void, GitCommandError>;
+  readonly unstageFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
+  readonly unstageFiles: (input: VcsPathsInput) => Effect.Effect<void, GitCommandError>;
   readonly revertFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
   readonly applyPatch: (input: VcsApplyPatchInput) => Effect.Effect<void, GitCommandError>;
   readonly readRangeContext: (

@@ -1768,7 +1768,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     document.body.innerHTML = "";
   });
 
-  it("renders locked single-environment mobile run context as a static workspace label", async () => {
+  it("hides locked single-environment mobile run context", async () => {
     const mounted = await mountChatView({
       viewport: COMPACT_FOOTER_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
@@ -1778,14 +1778,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      await waitForElement(
-        () =>
-          Array.from(document.querySelectorAll<HTMLElement>("span")).find(
-            (element) => element.textContent?.trim() === "Local checkout",
-          ) ?? null,
-        "Unable to find static mobile workspace label.",
-      );
-
+      await waitForElement(() => document.querySelector("textarea"), "Unable to find composer.");
+      expect(
+        Array.from(document.querySelectorAll<HTMLElement>("span")).find(
+          (element) => element.textContent?.trim() === "Local checkout",
+        ) ?? null,
+      ).toBeNull();
       expect(findButtonByText("Local checkout")).toBeNull();
     } finally {
       await mounted.cleanup();

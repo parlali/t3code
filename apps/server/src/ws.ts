@@ -1192,6 +1192,18 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "vcs" },
           ),
+        [WS_METHODS.gitGenerateCommitMessage]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitGenerateCommitMessage,
+            gitWorkflow.generateCommitMessage(input),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.gitCommitStaged]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitCommitStaged,
+            gitWorkflow.commitStaged(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "git" },
+          ),
         [WS_METHODS.gitResolvePullRequest]: (input) =>
           observeRpcEffect(
             WS_METHODS.gitResolvePullRequest,
@@ -1224,6 +1236,30 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(
             WS_METHODS.vcsStageFile,
             gitWorkflow.stageFile(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            {
+              "rpc.aggregate": "vcs",
+            },
+          ),
+        [WS_METHODS.vcsStageFiles]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsStageFiles,
+            gitWorkflow.stageFiles(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            {
+              "rpc.aggregate": "vcs",
+            },
+          ),
+        [WS_METHODS.vcsUnstageFile]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsUnstageFile,
+            gitWorkflow.unstageFile(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            {
+              "rpc.aggregate": "vcs",
+            },
+          ),
+        [WS_METHODS.vcsUnstageFiles]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsUnstageFiles,
+            gitWorkflow.unstageFiles(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
             {
               "rpc.aggregate": "vcs",
             },

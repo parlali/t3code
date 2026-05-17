@@ -46,8 +46,16 @@ export function sortTreeNodes(items: TreeNode[]): void {
   for (const item of items) sortTreeNodes(item.children);
 }
 
-export function tabFor(kind: WorkbenchTab["kind"], path: string): WorkbenchTab {
-  return { id: `${kind}:${path}`, kind, path };
+export function tabFor(
+  kind: WorkbenchTab["kind"],
+  path: string,
+  options?: { readonly source?: "working-tree" | "staged" },
+): WorkbenchTab {
+  if (kind === "diff") {
+    const source = options?.source ?? "working-tree";
+    return { id: `diff:${source}:${path}`, kind, path, source };
+  }
+  return { id: `file:${path}`, kind, path };
 }
 
 export function setBufferValue(
@@ -129,64 +137,6 @@ export function buildTree(entries: ReadonlyArray<ProjectEntry>): TreeNode[] {
 
   sortTreeNodes(roots);
   return roots;
-}
-
-export interface ChangedLineRange {
-  readonly startLineNumber: number;
-  readonly endLineNumber: number;
-}
-
-interface ChangedLineRanges {
-  readonly original: readonly ChangedLineRange[];
-  readonly modified: readonly ChangedLineRange[];
-}
-
-function appendChangedLineRange(ranges: ChangedLineRange[], lineNumber: number): void {
-  const previous = ranges.at(-1);
-  if (previous && previous.endLineNumber + 1 === lineNumber) {
-    ranges[ranges.length - 1] = { ...previous, endLineNumber: lineNumber };
-    return;
-  }
-  ranges.push({ startLineNumber: lineNumber, endLineNumber: lineNumber });
-}
-
-export function parseChangedLineRanges(diff: string): ChangedLineRanges {
-  const original: ChangedLineRange[] = [];
-  const modified: ChangedLineRange[] = [];
-  const lines = diff.split("\n");
-  let originalLine = 0;
-  let modifiedLine = 0;
-
-  for (const line of lines) {
-    const hunkMatch = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-    if (hunkMatch) {
-      originalLine = Number(hunkMatch[1]);
-      modifiedLine = Number(hunkMatch[2]);
-      continue;
-    }
-
-    if (originalLine === 0 && modifiedLine === 0) continue;
-    if (line.startsWith("---") || line.startsWith("+++")) continue;
-
-    if (line.startsWith("-")) {
-      appendChangedLineRange(original, originalLine);
-      originalLine += 1;
-      continue;
-    }
-
-    if (line.startsWith("+")) {
-      appendChangedLineRange(modified, modifiedLine);
-      modifiedLine += 1;
-      continue;
-    }
-
-    if (line.startsWith("\\")) continue;
-
-    originalLine += 1;
-    modifiedLine += 1;
-  }
-
-  return { original, modified };
 }
 
 export const WORKBENCH_EXPLORER_WIDTH_STORAGE_KEY = "t3code:workbench-explorer-width";

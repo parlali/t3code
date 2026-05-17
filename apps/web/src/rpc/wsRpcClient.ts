@@ -109,6 +109,9 @@ export interface WsRpcClient {
     readonly diff: RpcUnaryMethod<typeof WS_METHODS.vcsDiff>;
     readonly fileDiff: RpcUnaryMethod<typeof WS_METHODS.vcsFileDiff>;
     readonly stageFile: RpcUnaryMethod<typeof WS_METHODS.vcsStageFile>;
+    readonly stageFiles: RpcUnaryMethod<typeof WS_METHODS.vcsStageFiles>;
+    readonly unstageFile: RpcUnaryMethod<typeof WS_METHODS.vcsUnstageFile>;
+    readonly unstageFiles: RpcUnaryMethod<typeof WS_METHODS.vcsUnstageFiles>;
     readonly revertFile: RpcUnaryMethod<typeof WS_METHODS.vcsRevertFile>;
     readonly applyPatch: RpcUnaryMethod<typeof WS_METHODS.vcsApplyPatch>;
     readonly pull: RpcUnaryMethod<typeof WS_METHODS.vcsPull>;
@@ -130,6 +133,8 @@ export interface WsRpcClient {
    * Git-specific workflows. Local repository mechanics live under `vcs`.
    */
   readonly git: {
+    readonly generateCommitMessage: RpcUnaryMethod<typeof WS_METHODS.gitGenerateCommitMessage>;
+    readonly commitStaged: RpcUnaryMethod<typeof WS_METHODS.gitCommitStaged>;
     readonly runStackedAction: (
       input: GitRunStackedActionInput,
       options?: GitRunStackedActionOptions,
@@ -300,6 +305,11 @@ export function createWsRpcClient(
       diff: (input) => transport.request((client) => client[WS_METHODS.vcsDiff](input)),
       fileDiff: (input) => transport.request((client) => client[WS_METHODS.vcsFileDiff](input)),
       stageFile: (input) => transport.request((client) => client[WS_METHODS.vcsStageFile](input)),
+      stageFiles: (input) => transport.request((client) => client[WS_METHODS.vcsStageFiles](input)),
+      unstageFile: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsUnstageFile](input)),
+      unstageFiles: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsUnstageFiles](input)),
       revertFile: (input) => transport.request((client) => client[WS_METHODS.vcsRevertFile](input)),
       applyPatch: (input) => transport.request((client) => client[WS_METHODS.vcsApplyPatch](input)),
       pull: (input) => transport.request((client) => client[WS_METHODS.vcsPull](input)),
@@ -328,6 +338,10 @@ export function createWsRpcClient(
       init: (input) => transport.request((client) => client[WS_METHODS.vcsInit](input)),
     },
     git: {
+      generateCommitMessage: (input) =>
+        transport.request((client) => client[WS_METHODS.gitGenerateCommitMessage](input)),
+      commitStaged: (input) =>
+        transport.request((client) => client[WS_METHODS.gitCommitStaged](input)),
       runStackedAction: async (input, options) => {
         let result: GitRunStackedActionResult | null = null;
 

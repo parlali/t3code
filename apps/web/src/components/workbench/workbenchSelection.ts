@@ -23,6 +23,16 @@ export function isFileSelectionAvailable(
 export function isChangeSelectionAvailable(
   files: VcsStatusResult["workingTree"]["files"],
   relativePath: string,
+  source: "working-tree" | "staged" = "working-tree",
 ): boolean {
-  return files.some((file) => file.path === relativePath);
+  return files.some((file) => {
+    if (file.path !== relativePath) return false;
+    if (source === "staged") return file.staged === true;
+    return (
+      file.conflicted === true ||
+      file.untracked === true ||
+      file.unstaged === true ||
+      file.staged !== true
+    );
+  });
 }

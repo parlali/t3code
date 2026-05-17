@@ -14,7 +14,6 @@ import {
   type ScopedThreadRef,
   type ThreadId,
   type TurnId,
-  type KeybindingCommand,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -52,7 +51,6 @@ import { useGitStatus } from "~/lib/gitStatusState";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
-import { readLocalApi } from "../localApi";
 import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
@@ -108,18 +106,11 @@ import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
-import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
-import { type NewProjectScriptInput } from "./ProjectScriptsControl";
-import {
-  commandForProjectScript,
-  nextProjectScriptId,
-  projectScriptIdFromCommand,
-} from "~/projectScripts";
+import { projectScriptIdFromCommand } from "~/projectScripts";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
@@ -158,7 +149,9 @@ import { ChatHeader } from "./chat/ChatHeader";
 import { PANE_HEADER_CLASS } from "./ui/pane-chrome";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
-import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
+import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./RunContext.logic";
+import { RunContextPill } from "./shell/RunContextPill";
+import { useShellStore } from "./shell/shellStore";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
@@ -189,17 +182,17 @@ import {
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useComposerHandleContext } from "../composerHandleContext";
 
-const preloadThreadTerminalDrawer = () => {
+const preloadBottomPanel = () => {
   const startedAtMs = performance.now();
   recordClientPerfEvent("terminal.chunk.preload.start");
-  return import("./ThreadTerminalDrawer").then((module) => {
+  return import("./BottomPanel").then((module) => {
     recordClientPerfEvent("terminal.chunk.preload.finish", {
       durationMs: Math.round(performance.now() - startedAtMs),
     });
     return module;
   });
 };
-const LazyThreadTerminalDrawer = lazy(preloadThreadTerminalDrawer);
+const LazyBottomPanel = lazy(preloadBottomPanel);
 const LazyPlanSidebar = lazy(() => import("./PlanSidebar"));
 const LazyPullRequestThreadDialog = lazy(() =>
   import("./PullRequestThreadDialog").then((module) => ({
@@ -236,11 +229,7 @@ function getProviderUnavailableForSendMessage(status: ServerProvider | null | un
   }
   return `${label} is not ready.`;
 }
-import {
-  useServerAvailableEditors,
-  useServerConfig,
-  useServerKeybindings,
-} from "~/rpc/serverState";
+import { useServerConfig, useServerKeybindings } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
@@ -573,7 +562,7 @@ function useLocalDispatchState(input: {
   };
 }
 
-interface PersistentThreadTerminalDrawerProps {
+interface PersistentBottomPanelProps {
   threadRef: { environmentId: EnvironmentId; threadId: ThreadId };
   threadId: ThreadId;
   visible: boolean;
@@ -586,7 +575,7 @@ interface PersistentThreadTerminalDrawerProps {
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
 }
 
-const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDrawer({
+const PersistentBottomPanel = memo(function PersistentBottomPanel({
   threadRef,
   threadId,
   visible,
@@ -597,7 +586,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   closeShortcutLabel,
   keybindings,
   onAddTerminalContext,
-}: PersistentThreadTerminalDrawerProps) {
+}: PersistentBottomPanelProps) {
   const serverThread = useStore(useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]));
   const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
   const projectRef = serverThread
@@ -731,7 +720,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
           ) : null
         }
       >
-        <LazyThreadTerminalDrawer
+        <LazyBottomPanel
           threadRef={threadRef}
           threadId={threadId}
           cwd={cwd}
@@ -889,7 +878,7 @@ export default function ChatView(props: ChatViewProps) {
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null);
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
-  const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
+  const [, setLastInvokedScriptByProjectId] = useLocalStorage(
     LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
     {},
     LastInvokedScriptByProjectSchema,
@@ -1043,7 +1032,7 @@ export default function ChatView(props: ChatViewProps) {
     if ("requestIdleCallback" in window) {
       const handle = window.requestIdleCallback(
         () => {
-          void preloadThreadTerminalDrawer();
+          void preloadBottomPanel();
         },
         { timeout: 4_000 },
       );
@@ -1053,7 +1042,7 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     const timeout = globalThis.setTimeout(() => {
-      void preloadThreadTerminalDrawer();
+      void preloadBottomPanel();
     }, 2_000);
     return () => {
       globalThis.clearTimeout(timeout);
@@ -1061,7 +1050,7 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThreadId]);
 
   // Compute the list of environments this logical project spans, used to
-  // drive the environment picker in BranchToolbar.
+  // drive the environment picker in the run context pill.
   const allProjects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((s) => s.byId);
@@ -1848,7 +1837,6 @@ export default function ChatView(props: ChatViewProps) {
     : null;
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
   const keybindings = useServerKeybindings();
-  const availableEditors = useServerAvailableEditors();
   // Prefer an instance-id match so a custom Codex instance (e.g.
   // `codex_personal`) surfaces its own status/message in the banner rather
   // than the default Codex's. Falls back to first-match-by-kind when no
@@ -2224,141 +2212,6 @@ export default function ChatView(props: ChatViewProps) {
       terminalState.runningTerminalIds,
       terminalState.terminalIds,
     ],
-  );
-
-  const persistProjectScripts = useCallback(
-    async (input: {
-      projectId: ProjectId;
-      projectCwd: string;
-      previousScripts: ProjectScript[];
-      nextScripts: ProjectScript[];
-      keybinding?: string | null;
-      keybindingCommand: KeybindingCommand;
-    }) => {
-      const api = readEnvironmentApi(environmentId);
-      if (!api) return;
-
-      await api.orchestration.dispatchCommand({
-        type: "project.meta.update",
-        commandId: newCommandId(),
-        projectId: input.projectId,
-        scripts: input.nextScripts,
-      });
-
-      const keybindingRule = decodeProjectScriptKeybindingRule({
-        keybinding: input.keybinding,
-        command: input.keybindingCommand,
-      });
-
-      if (isElectron && keybindingRule) {
-        const localApi = readLocalApi();
-        if (!localApi) {
-          throw new Error("Local API unavailable.");
-        }
-        await localApi.server.upsertKeybinding(keybindingRule);
-      }
-    },
-    [environmentId],
-  );
-  const saveProjectScript = useCallback(
-    async (input: NewProjectScriptInput) => {
-      if (!activeProject) return;
-      const nextId = nextProjectScriptId(
-        input.name,
-        activeProject.scripts.map((script) => script.id),
-      );
-      const nextScript: ProjectScript = {
-        id: nextId,
-        name: input.name,
-        command: input.command,
-        icon: input.icon,
-        runOnWorktreeCreate: input.runOnWorktreeCreate,
-      };
-      const nextScripts = input.runOnWorktreeCreate
-        ? [
-            ...activeProject.scripts.map((script) =>
-              script.runOnWorktreeCreate ? { ...script, runOnWorktreeCreate: false } : script,
-            ),
-            nextScript,
-          ]
-        : [...activeProject.scripts, nextScript];
-
-      await persistProjectScripts({
-        projectId: activeProject.id,
-        projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
-        nextScripts,
-        keybinding: input.keybinding,
-        keybindingCommand: commandForProjectScript(nextId),
-      });
-    },
-    [activeProject, persistProjectScripts],
-  );
-  const updateProjectScript = useCallback(
-    async (scriptId: string, input: NewProjectScriptInput) => {
-      if (!activeProject) return;
-      const existingScript = activeProject.scripts.find((script) => script.id === scriptId);
-      if (!existingScript) {
-        throw new Error("Script not found.");
-      }
-
-      const updatedScript: ProjectScript = {
-        ...existingScript,
-        name: input.name,
-        command: input.command,
-        icon: input.icon,
-        runOnWorktreeCreate: input.runOnWorktreeCreate,
-      };
-      const nextScripts = activeProject.scripts.map((script) =>
-        script.id === scriptId
-          ? updatedScript
-          : input.runOnWorktreeCreate
-            ? { ...script, runOnWorktreeCreate: false }
-            : script,
-      );
-
-      await persistProjectScripts({
-        projectId: activeProject.id,
-        projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
-        nextScripts,
-        keybinding: input.keybinding,
-        keybindingCommand: commandForProjectScript(scriptId),
-      });
-    },
-    [activeProject, persistProjectScripts],
-  );
-  const deleteProjectScript = useCallback(
-    async (scriptId: string) => {
-      if (!activeProject) return;
-      const nextScripts = activeProject.scripts.filter((script) => script.id !== scriptId);
-
-      const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name;
-
-      try {
-        await persistProjectScripts({
-          projectId: activeProject.id,
-          projectCwd: activeProject.cwd,
-          previousScripts: activeProject.scripts,
-          nextScripts,
-          keybinding: null,
-          keybindingCommand: commandForProjectScript(scriptId),
-        });
-        toastManager.add({
-          type: "success",
-          title: `Deleted action "${deletedName ?? "Unknown"}"`,
-        });
-      } catch (error) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not delete action",
-            description: error instanceof Error ? error.message : "An unexpected error occurred.",
-          }),
-        );
-      }
-    },
-    [activeProject, persistProjectScripts],
   );
 
   const handleRuntimeModeChange = useCallback(
@@ -3833,6 +3686,56 @@ export default function ChatView(props: ChatViewProps) {
     void onEditUserMessageRef.current(messageId);
   }, []);
 
+  useEffect(() => {
+    if (!activeThread || !activeThreadRef) {
+      useShellStore.getState().setTerminalActions(null);
+      useShellStore.getState().setRunContextActions(null);
+      return;
+    }
+
+    useShellStore.getState().setTerminalActions({
+      terminalAvailable: activeProject !== undefined,
+      terminalOpen: Boolean(terminalState.terminalOpen),
+      terminalToggleShortcutLabel,
+      threadRef: activeThreadRef,
+      onToggleTerminal: toggleTerminalVisibility,
+    });
+    useShellStore.getState().setRunContextActions({
+      activeThreadBranch,
+      canCheckoutPullRequest: canCheckoutPullRequestIntoThread,
+      canOverrideServerThreadEnvMode,
+      envLocked,
+      environmentId: activeThread.environmentId,
+      threadId: activeThread.id,
+      ...(canCheckoutPullRequestIntoThread
+        ? { onCheckoutPullRequestRequest: openPullRequestDialog }
+        : {}),
+      onComposerFocusRequest: scheduleComposerFocus,
+      onEnvModeChange,
+      onThreadBranchChange: setPendingServerThreadBranch,
+    });
+
+    return () => {
+      useShellStore.getState().setTerminalActions(null);
+      useShellStore.getState().setRunContextActions(null);
+    };
+  }, [
+    activeProject,
+    activeThread,
+    activeThreadBranch,
+    activeThreadRef,
+    canCheckoutPullRequestIntoThread,
+    canOverrideServerThreadEnvMode,
+    envLocked,
+    onEnvModeChange,
+    openPullRequestDialog,
+    scheduleComposerFocus,
+    setPendingServerThreadBranch,
+    terminalState.terminalOpen,
+    terminalToggleShortcutLabel,
+    toggleTerminalVisibility,
+  ]);
+
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
@@ -3855,30 +3758,9 @@ export default function ChatView(props: ChatViewProps) {
         )}
       >
         <ChatHeader
-          activeThreadEnvironmentId={activeThread.environmentId}
-          activeThreadId={activeThread.id}
-          {...(routeKind === "draft" && draftId ? { draftId } : {})}
           activeThreadTitle={activeThread.title}
-          activeProjectName={activeProject?.name}
-          isGitRepo={isGitRepo}
-          openInCwd={gitCwd}
-          activeProjectScripts={activeProject?.scripts}
-          preferredScriptId={
-            activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-          }
-          keybindings={keybindings}
-          availableEditors={availableEditors}
-          terminalAvailable={activeProject !== undefined}
-          terminalOpen={terminalState.terminalOpen}
-          terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           mobileWorkbenchAvailable={mobileWorkbenchAvailable}
           mobileWorkbenchPane={mobileWorkbenchPane}
-          gitCwd={gitCwd}
-          onRunProjectScript={runProjectScript}
-          onAddProjectScript={saveProjectScript}
-          onUpdateProjectScript={updateProjectScript}
-          onDeleteProjectScript={deleteProjectScript}
-          onToggleTerminal={toggleTerminalVisibility}
           {...(onMobileWorkbenchPaneChange ? { onMobileWorkbenchPaneChange } : {})}
         />
       </header>
@@ -4023,7 +3905,7 @@ export default function ChatView(props: ChatViewProps) {
                   </div>
                 </div>
                 {isGitRepo && (
-                  <BranchToolbar
+                  <RunContextPill
                     environmentId={activeThread.environmentId}
                     threadId={activeThread.id}
                     {...(routeKind === "draft" && draftId ? { draftId } : {})}
@@ -4091,7 +3973,7 @@ export default function ChatView(props: ChatViewProps) {
       )}
 
       {mountedTerminalThreadRefs.map(({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
-        <PersistentThreadTerminalDrawer
+        <PersistentBottomPanel
           key={mountedThreadKey}
           threadRef={mountedThreadRef}
           threadId={mountedThreadRef.threadId}

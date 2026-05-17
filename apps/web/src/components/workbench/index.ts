@@ -1,4 +1,3 @@
-export { ExplorerModeToggle, type ExplorerMode } from "./ExplorerModeToggle";
 export {
   ExplorerTree,
   type CreateEntryKind,
@@ -8,7 +7,6 @@ export {
 export { ChangesTree } from "./ChangesTree";
 export { WorkbenchExplorerPanel } from "./WorkbenchExplorerPanel";
 export { WorkbenchCommitGraph } from "./WorkbenchCommitGraph";
-export { WorkbenchToolbarActions } from "./WorkbenchToolbarActions";
 export { WorkbenchTabBar, type WorkbenchTab } from "./WorkbenchTabBar";
 export { WorkbenchBreadcrumbs } from "./WorkbenchBreadcrumbs";
 export { WorkbenchDiffEditor } from "./WorkbenchDiffEditor";
@@ -36,7 +34,6 @@ export {
   markDirty,
   languageFor,
   buildTree,
-  parseChangedLineRanges,
   clampExplorerWidth,
   WORKBENCH_EXPLORER_WIDTH_STORAGE_KEY,
   WORKBENCH_EXPLORER_COLLAPSED_STORAGE_KEY,

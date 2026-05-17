@@ -84,7 +84,7 @@ export function resolveDraftEnvModeAfterBranchChange(input: {
   return "local";
 }
 
-export function resolveBranchToolbarValue(input: {
+export function resolveRunContextBranchValue(input: {
   envMode: EnvMode;
   activeWorktreePath: string | null;
   activeThreadBranch: string | null;

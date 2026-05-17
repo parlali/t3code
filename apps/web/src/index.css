@@ -301,14 +301,6 @@ code {
   width: 6px !important;
 }
 
-.t3-workbench-diff-removed-line {
-  background-color: color-mix(in srgb, var(--destructive) 18%, transparent) !important;
-}
-
-.t3-workbench-diff-inserted-line {
-  background-color: color-mix(in srgb, var(--success) 18%, transparent) !important;
-}
-
 /* Reasoning select -- clickable label surface */
 label:has(> select#reasoning-effort) {
   position: relative;

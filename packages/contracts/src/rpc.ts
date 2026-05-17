@@ -11,6 +11,8 @@ import {
 } from "./filesystem.ts";
 import {
   GitActionProgressEvent,
+  GitCommitStagedInput,
+  GitCommitStagedResult,
   VcsSwitchRefInput,
   VcsSwitchRefResult,
   GitCommandError,
@@ -24,12 +26,16 @@ import {
   VcsListRefsInput,
   VcsListRefsResult,
   GitManagerServiceError,
+  GitGenerateCommitMessageInput,
+  GitGenerateCommitMessageResult,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
   VcsDiffInput,
   VcsDiffResult,
+  VcsFileDiffInput,
   VcsFileDiffResult,
   VcsFileInput,
+  VcsPathsInput,
   VcsApplyPatchInput,
   VcsPullInput,
   GitPullRequestRefInput,
@@ -157,6 +163,9 @@ export const WS_METHODS = {
   vcsDiff: "vcs.diff",
   vcsFileDiff: "vcs.fileDiff",
   vcsStageFile: "vcs.stageFile",
+  vcsStageFiles: "vcs.stageFiles",
+  vcsUnstageFile: "vcs.unstageFile",
+  vcsUnstageFiles: "vcs.unstageFiles",
   vcsRevertFile: "vcs.revertFile",
   vcsApplyPatch: "vcs.applyPatch",
   vcsPull: "vcs.pull",
@@ -170,6 +179,8 @@ export const WS_METHODS = {
   vcsInit: "vcs.init",
 
   // Git workflow methods
+  gitGenerateCommitMessage: "git.generateCommitMessage",
+  gitCommitStaged: "git.commitStaged",
   gitRunStackedAction: "git.runStackedAction",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
@@ -389,13 +400,28 @@ export const WsVcsDiffRpc = Rpc.make(WS_METHODS.vcsDiff, {
 });
 
 export const WsVcsFileDiffRpc = Rpc.make(WS_METHODS.vcsFileDiff, {
-  payload: VcsFileInput,
+  payload: VcsFileDiffInput,
   success: VcsFileDiffResult,
   error: GitCommandError,
 });
 
 export const WsVcsStageFileRpc = Rpc.make(WS_METHODS.vcsStageFile, {
   payload: VcsFileInput,
+  error: GitCommandError,
+});
+
+export const WsVcsStageFilesRpc = Rpc.make(WS_METHODS.vcsStageFiles, {
+  payload: VcsPathsInput,
+  error: GitCommandError,
+});
+
+export const WsVcsUnstageFileRpc = Rpc.make(WS_METHODS.vcsUnstageFile, {
+  payload: VcsFileInput,
+  error: GitCommandError,
+});
+
+export const WsVcsUnstageFilesRpc = Rpc.make(WS_METHODS.vcsUnstageFiles, {
+  payload: VcsPathsInput,
   error: GitCommandError,
 });
 
@@ -426,6 +452,18 @@ export const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction,
   success: GitActionProgressEvent,
   error: GitManagerServiceError,
   stream: true,
+});
+
+export const WsGitGenerateCommitMessageRpc = Rpc.make(WS_METHODS.gitGenerateCommitMessage, {
+  payload: GitGenerateCommitMessageInput,
+  success: GitGenerateCommitMessageResult,
+  error: GitManagerServiceError,
+});
+
+export const WsGitCommitStagedRpc = Rpc.make(WS_METHODS.gitCommitStaged, {
+  payload: GitCommitStagedInput,
+  success: GitCommitStagedResult,
+  error: GitManagerServiceError,
 });
 
 export const WsGitResolvePullRequestRpc = Rpc.make(WS_METHODS.gitResolvePullRequest, {
@@ -666,11 +704,16 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsDiffRpc,
   WsVcsFileDiffRpc,
   WsVcsStageFileRpc,
+  WsVcsStageFilesRpc,
+  WsVcsUnstageFileRpc,
+  WsVcsUnstageFilesRpc,
   WsVcsRevertFileRpc,
   WsVcsApplyPatchRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsVcsCommitGraphRpc,
+  WsGitGenerateCommitMessageRpc,
+  WsGitCommitStagedRpc,
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,

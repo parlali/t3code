@@ -61,7 +61,7 @@ const commonEditorOptions = {
   },
   hideCursorInOverviewRuler: true,
   lineDecorationsWidth: 8,
-  lineHeight: 21,
+  lineHeight: 19,
   lineNumbersMinChars: 3,
   matchBrackets: "never",
   occurrencesHighlight: "off",
@@ -87,7 +87,7 @@ export function workbenchCodeEditorOptions(
 ): Monaco.editor.IStandaloneEditorConstructionOptions {
   return {
     ...commonEditorOptions,
-    fontSize: isMobileLayout ? 12 : 13,
+    fontSize: isMobileLayout ? 11 : 12,
     minimap: { enabled: false },
     scrollBeyondLastLine: false,
   };
@@ -106,7 +106,7 @@ export function workbenchDiffEditorOptions(
       showEmptyDecorations: true,
       showMoves: false,
     },
-    fontSize: isMobileLayout ? 12 : 13,
+    fontSize: isMobileLayout ? 11 : 12,
     ignoreTrimWhitespace: false,
     minimap: { enabled: false },
     originalEditable: false,

@@ -85,6 +85,7 @@ describe("applyGitStatusStreamEvent", () => {
       hasPrimaryRemote: false,
       isDefaultRef: false,
       refName: null,
+      headSha: null,
       hasWorkingTreeChanges: false,
       workingTree: { files: [], insertions: 0, deletions: 0 },
       hasUpstream: true,

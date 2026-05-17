@@ -4,7 +4,12 @@ import { cn } from "../../lib/utils";
 
 export type WorkbenchTab =
   | { readonly id: string; readonly kind: "file"; readonly path: string }
-  | { readonly id: string; readonly kind: "diff"; readonly path: string };
+  | {
+      readonly id: string;
+      readonly kind: "diff";
+      readonly path: string;
+      readonly source: "working-tree" | "staged";
+    };
 
 function basename(path: string): string {
   return path.split("/").at(-1) ?? path;

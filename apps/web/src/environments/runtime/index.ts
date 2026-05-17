@@ -21,6 +21,7 @@ export {
   ensureEnvironmentConnectionBootstrapped,
   getPrimaryEnvironmentConnection,
   readEnvironmentConnection,
+  reconnectAllEnvironmentConnections,
   reconnectSavedEnvironment,
   removeSavedEnvironment,
   requireEnvironmentConnection,

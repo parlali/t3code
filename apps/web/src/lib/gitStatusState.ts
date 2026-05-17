@@ -23,6 +23,10 @@ interface GitStatusState {
 }
 
 type GitStatusClient = Pick<WsRpcClient["vcs"], "onStatus" | "refreshStatus">;
+interface RefreshGitStatusOptions {
+  readonly client?: GitStatusClient | undefined;
+  readonly force?: boolean | undefined;
+}
 interface ResolvedGitStatusClient {
   readonly clientIdentity: string;
   readonly client: GitStatusClient;
@@ -87,6 +91,12 @@ function readResolvedGitStatusClient(target: GitStatusTarget): ResolvedGitStatus
     : null;
 }
 
+function isRefreshGitStatusOptions(
+  value: GitStatusClient | RefreshGitStatusOptions | undefined,
+): value is RefreshGitStatusOptions {
+  return value !== undefined && ("client" in value || "force" in value);
+}
+
 export function getGitStatusSnapshot(target: GitStatusTarget): GitStatusState {
   const targetKey = getGitStatusTargetKey(target);
   if (targetKey === null) {
@@ -118,31 +128,42 @@ export function watchGitStatus(target: GitStatusTarget, client?: GitStatusClient
 
 export function refreshGitStatus(
   target: GitStatusTarget,
-  client?: GitStatusClient,
+  clientOrOptions?: GitStatusClient | RefreshGitStatusOptions,
 ): Promise<VcsStatusResult | null> {
   const targetKey = getGitStatusTargetKey(target);
   if (targetKey === null || target.cwd === null) {
     return Promise.resolve(null);
   }
 
-  const resolvedClient = client ?? readResolvedGitStatusClient(target)?.client;
+  let providedClient: GitStatusClient | undefined;
+  let force = false;
+  if (isRefreshGitStatusOptions(clientOrOptions)) {
+    providedClient = clientOrOptions.client;
+    force = clientOrOptions.force === true;
+  } else {
+    providedClient = clientOrOptions;
+  }
+
+  const resolvedClient = providedClient ?? readResolvedGitStatusClient(target)?.client;
   if (!resolvedClient) {
     return Promise.resolve(getGitStatusSnapshot(target).data);
   }
 
   const currentInFlight = gitStatusRefreshInFlight.get(targetKey);
-  if (currentInFlight) {
+  if (currentInFlight && !force) {
     return currentInFlight;
   }
 
   const lastRequestedAt = gitStatusLastRefreshAtByKey.get(targetKey) ?? 0;
-  if (Date.now() - lastRequestedAt < GIT_STATUS_REFRESH_DEBOUNCE_MS) {
+  if (!force && Date.now() - lastRequestedAt < GIT_STATUS_REFRESH_DEBOUNCE_MS) {
     return Promise.resolve(getGitStatusSnapshot(target).data);
   }
 
   gitStatusLastRefreshAtByKey.set(targetKey, Date.now());
   const refreshPromise = resolvedClient.refreshStatus({ cwd: target.cwd }).finally(() => {
-    gitStatusRefreshInFlight.delete(targetKey);
+    if (gitStatusRefreshInFlight.get(targetKey) === refreshPromise) {
+      gitStatusRefreshInFlight.delete(targetKey);
+    }
   });
   gitStatusRefreshInFlight.set(targetKey, refreshPromise);
   return refreshPromise;

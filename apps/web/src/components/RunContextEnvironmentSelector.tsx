@@ -2,7 +2,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { CloudIcon, MonitorIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
-import type { EnvironmentOption } from "./BranchToolbar.logic";
+import type { EnvironmentOption } from "./RunContext.logic";
 import {
   Select,
   SelectGroup,
@@ -13,19 +13,19 @@ import {
   SelectValue,
 } from "./ui/select";
 
-interface BranchToolbarEnvironmentSelectorProps {
+interface RunContextEnvironmentSelectorProps {
   envLocked: boolean;
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[];
   onEnvironmentChange: (environmentId: EnvironmentId) => void;
 }
 
-export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvironmentSelector({
+export const RunContextEnvironmentSelector = memo(function RunContextEnvironmentSelector({
   envLocked,
   environmentId,
   availableEnvironments,
   onEnvironmentChange,
-}: BranchToolbarEnvironmentSelectorProps) {
+}: RunContextEnvironmentSelectorProps) {
   const activeEnvironment = useMemo(() => {
     return availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
   }, [availableEnvironments, environmentId]);

@@ -6,7 +6,7 @@ import {
   resolveEnvModeLabel,
   resolveLockedWorkspaceLabel,
   type EnvMode,
-} from "./BranchToolbar.logic";
+} from "./RunContext.logic";
 import {
   Select,
   SelectGroup,
@@ -17,19 +17,19 @@ import {
   SelectValue,
 } from "./ui/select";
 
-interface BranchToolbarEnvModeSelectorProps {
+interface RunContextEnvModeSelectorProps {
   envLocked: boolean;
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
   onEnvModeChange: (mode: EnvMode) => void;
 }
 
-export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSelector({
+export const RunContextEnvModeSelector = memo(function RunContextEnvModeSelector({
   envLocked,
   effectiveEnvMode,
   activeWorktreePath,
   onEnvModeChange,
-}: BranchToolbarEnvModeSelectorProps) {
+}: RunContextEnvModeSelectorProps) {
   const envModeItems = useMemo(
     () => [
       { value: "local", label: resolveCurrentWorkspaceLabel(activeWorktreePath) },

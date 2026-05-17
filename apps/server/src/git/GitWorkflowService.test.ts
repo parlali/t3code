@@ -29,6 +29,7 @@ describe("GitWorkflowService", () => {
         hasPrimaryRemote: false,
         isDefaultRef: false,
         refName: null,
+        headSha: null,
         hasWorkingTreeChanges: false,
         workingTree: {
           files: [],
@@ -55,6 +56,7 @@ describe("GitWorkflowService", () => {
         hasPrimaryRemote: false,
         isDefaultRef: false,
         refName: null,
+        headSha: null,
         hasWorkingTreeChanges: false,
         workingTree: {
           files: [],

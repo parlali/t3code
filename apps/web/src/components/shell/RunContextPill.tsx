@@ -10,22 +10,22 @@ import {
 } from "lucide-react";
 import { memo, useMemo } from "react";
 
-import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
-import { useIsMobile } from "../hooks/useMediaQuery";
-import { useStore } from "../store";
-import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
+import { useComposerDraftStore, type DraftId } from "../../composerDraftStore";
+import { useIsMobile } from "../../hooks/useMediaQuery";
+import { useStore } from "../../store";
+import { createProjectSelectorByRef, createThreadSelectorByRef } from "../../storeSelectors";
 import {
   type EnvMode,
   type EnvironmentOption,
   resolveCurrentWorkspaceLabel,
-  resolveEnvModeLabel,
   resolveEffectiveEnvMode,
+  resolveEnvModeLabel,
   resolveLockedWorkspaceLabel,
-} from "./BranchToolbar.logic";
-import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
-import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
-import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
-import { Button } from "./ui/button";
+} from "../RunContext.logic";
+import { RunContextBranchSelector } from "../RunContextBranchSelector";
+import { RunContextEnvModeSelector } from "../RunContextEnvModeSelector";
+import { RunContextEnvironmentSelector } from "../RunContextEnvironmentSelector";
+import { Button } from "../ui/button";
 import {
   Menu,
   MenuGroup,
@@ -35,34 +35,34 @@ import {
   MenuRadioItem,
   MenuSeparator,
   MenuTrigger,
-} from "./ui/menu";
-import { Separator } from "./ui/separator";
+} from "../ui/menu";
+import { Separator } from "../ui/separator";
 
-interface BranchToolbarProps {
-  environmentId: EnvironmentId;
-  threadId: ThreadId;
-  draftId?: DraftId;
-  onEnvModeChange: (mode: EnvMode) => void;
-  effectiveEnvModeOverride?: EnvMode;
-  activeThreadBranchOverride?: string | null;
-  onActiveThreadBranchOverrideChange?: (branch: string | null) => void;
-  envLocked: boolean;
-  onCheckoutPullRequestRequest?: (reference: string) => void;
-  onComposerFocusRequest?: () => void;
-  availableEnvironments?: readonly EnvironmentOption[];
-  onEnvironmentChange?: (environmentId: EnvironmentId) => void;
+interface RunContextPillProps {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly draftId?: DraftId;
+  readonly onEnvModeChange: (mode: EnvMode) => void;
+  readonly effectiveEnvModeOverride?: EnvMode;
+  readonly activeThreadBranchOverride?: string | null;
+  readonly onActiveThreadBranchOverrideChange?: (branch: string | null) => void;
+  readonly envLocked: boolean;
+  readonly onCheckoutPullRequestRequest?: (reference: string) => void;
+  readonly onComposerFocusRequest?: () => void;
+  readonly availableEnvironments?: readonly EnvironmentOption[];
+  readonly onEnvironmentChange?: (environmentId: EnvironmentId) => void;
 }
 
 interface MobileRunContextSelectorProps {
-  envLocked: boolean;
-  envModeLocked: boolean;
-  environmentId: EnvironmentId;
-  availableEnvironments: readonly EnvironmentOption[] | undefined;
-  showEnvironmentPicker: boolean;
-  onEnvironmentChange: ((environmentId: EnvironmentId) => void) | undefined;
-  effectiveEnvMode: EnvMode;
-  activeWorktreePath: string | null;
-  onEnvModeChange: (mode: EnvMode) => void;
+  readonly envLocked: boolean;
+  readonly envModeLocked: boolean;
+  readonly environmentId: EnvironmentId;
+  readonly availableEnvironments: readonly EnvironmentOption[] | undefined;
+  readonly showEnvironmentPicker: boolean;
+  readonly onEnvironmentChange: ((environmentId: EnvironmentId) => void) | undefined;
+  readonly effectiveEnvMode: EnvMode;
+  readonly activeWorktreePath: string | null;
+  readonly onEnvModeChange: (mode: EnvMode) => void;
 }
 
 const MobileRunContextSelector = memo(function MobileRunContextSelector({
@@ -94,11 +94,9 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   const isLocked = envLocked || envModeLocked;
   const EnvironmentIcon = activeEnvironment?.isPrimary ? MonitorIcon : CloudIcon;
   const icon = showEnvironmentPicker ? (
-    // Button's base styles apply `-mx-0.5` to descendant SVGs, which eats 4px
-    // out of whatever gap we set. mx-0! cancels that so gap-0.5 reads as 2px.
     <span className="inline-flex shrink-0 items-center gap-0.5">
-      <EnvironmentIcon className="size-3 shrink-0 mx-0!" />
-      <WorkspaceIcon className="size-3 shrink-0 mx-0!" />
+      <EnvironmentIcon className="mx-0! size-3 shrink-0" />
+      <WorkspaceIcon className="mx-0! size-3 shrink-0" />
     </span>
   ) : (
     <WorkspaceIcon className="size-3 shrink-0" />
@@ -189,7 +187,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   );
 });
 
-export const BranchToolbar = memo(function BranchToolbar({
+export const RunContextPill = memo(function RunContextPill({
   environmentId,
   threadId,
   draftId,
@@ -202,7 +200,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   onComposerFocusRequest,
   availableEnvironments,
   onEnvironmentChange,
-}: BranchToolbarProps) {
+}: RunContextPillProps) {
   const threadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -232,7 +230,6 @@ export const BranchToolbar = memo(function BranchToolbar({
       draftThreadEnvMode: draftThread?.envMode,
     });
   const envModeLocked = envLocked || (serverThread !== undefined && activeWorktreePath !== null);
-
   const showEnvironmentPicker = Boolean(
     availableEnvironments && availableEnvironments.length > 1 && onEnvironmentChange,
   );
@@ -241,7 +238,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   if (!hasActiveThread || !activeProject) return null;
 
   return (
-    <div className="mx-auto flex w-full max-w-208 items-center gap-2 px-2.5 pb-3 pt-1 sm:px-3">
+    <div className="mx-auto flex w-full max-w-208 items-center gap-2 px-2.5 pb-2 pt-1 sm:px-3">
       {isMobile ? (
         <MobileRunContextSelector
           envLocked={envLocked}
@@ -258,7 +255,7 @@ export const BranchToolbar = memo(function BranchToolbar({
         <div className="flex min-w-0 shrink-0 items-center gap-1">
           {showEnvironmentPicker && availableEnvironments && onEnvironmentChange && (
             <>
-              <BranchToolbarEnvironmentSelector
+              <RunContextEnvironmentSelector
                 envLocked={envLocked}
                 environmentId={environmentId}
                 availableEnvironments={availableEnvironments}
@@ -267,7 +264,7 @@ export const BranchToolbar = memo(function BranchToolbar({
               <Separator orientation="vertical" className="mx-0.5 h-3.5!" />
             </>
           )}
-          <BranchToolbarEnvModeSelector
+          <RunContextEnvModeSelector
             envLocked={envModeLocked}
             effectiveEnvMode={effectiveEnvMode}
             activeWorktreePath={activeWorktreePath}
@@ -276,7 +273,7 @@ export const BranchToolbar = memo(function BranchToolbar({
         </div>
       )}
 
-      <BranchToolbarBranchSelector
+      <RunContextBranchSelector
         className="min-w-0 flex-1 justify-end md:ml-auto md:flex-none"
         environmentId={environmentId}
         threadId={threadId}

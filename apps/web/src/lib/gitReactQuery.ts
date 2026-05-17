@@ -34,7 +34,8 @@ export const gitQueryKeys = {
     environmentId: EnvironmentId | null,
     cwd: string | null,
     relativePath: string | null,
-  ) => ["git", "file-diff", environmentId ?? null, cwd, relativePath] as const,
+    source: "working-tree" | "staged",
+  ) => ["git", "file-diff", environmentId ?? null, cwd, relativePath, source] as const,
   branchSearch: (environmentId: EnvironmentId | null, cwd: string | null, query: string) =>
     ["git", "refs", environmentId ?? null, cwd, "search", query] as const,
   commitGraphScope: (environmentId: EnvironmentId | null, cwd: string | null) =>
@@ -174,16 +175,18 @@ export function gitFileDiffQueryOptions(input: {
   environmentId: EnvironmentId | null;
   cwd: string | null;
   relativePath: string | null;
+  source?: "working-tree" | "staged";
   enabled?: boolean;
 }) {
+  const source = input.source ?? "working-tree";
   return queryOptions({
-    queryKey: gitQueryKeys.fileDiff(input.environmentId, input.cwd, input.relativePath),
+    queryKey: gitQueryKeys.fileDiff(input.environmentId, input.cwd, input.relativePath, source),
     queryFn: async () => {
       if (!input.cwd || !input.environmentId || !input.relativePath) {
         throw new Error("Git file diff is unavailable.");
       }
       const api = ensureEnvironmentApi(input.environmentId);
-      return api.vcs.fileDiff({ cwd: input.cwd, relativePath: input.relativePath });
+      return api.vcs.fileDiff({ cwd: input.cwd, relativePath: input.relativePath, source });
     },
     enabled:
       (input.enabled ?? true) &&

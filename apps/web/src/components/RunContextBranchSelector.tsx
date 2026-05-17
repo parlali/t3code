@@ -27,11 +27,11 @@ import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeS
 import {
   deriveLocalBranchNameFromRemoteRef,
   resolveBranchSelectionTarget,
-  resolveBranchToolbarValue,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
+  resolveRunContextBranchValue,
   shouldIncludeBranchPickerItem,
-} from "./BranchToolbar.logic";
+} from "./RunContext.logic";
 import { Button } from "./ui/button";
 import {
   Combobox,
@@ -46,7 +46,7 @@ import {
 } from "./ui/combobox";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
-interface BranchToolbarBranchSelectorProps {
+interface RunContextBranchSelectorProps {
   className?: string;
   environmentId: EnvironmentId;
   threadId: ThreadId;
@@ -78,7 +78,7 @@ function getBranchTriggerLabel(input: {
   return resolvedActiveBranch;
 }
 
-export function BranchToolbarBranchSelector({
+export function RunContextBranchSelector({
   className,
   environmentId,
   threadId,
@@ -89,7 +89,7 @@ export function BranchToolbarBranchSelector({
   onActiveThreadBranchOverrideChange,
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
-}: BranchToolbarBranchSelectorProps) {
+}: RunContextBranchSelectorProps) {
   // ---------------------------------------------------------------------------
   // Thread / project state (pushed down from parent to colocate with mutation)
   // ---------------------------------------------------------------------------
@@ -236,7 +236,7 @@ export function BranchToolbarBranchSelector({
     [branchStatusQuery.data?.sourceControlProvider],
   );
   const SourceControlIcon = sourceControlPresentation.Icon;
-  const canonicalActiveBranch = resolveBranchToolbarValue({
+  const canonicalActiveBranch = resolveRunContextBranchValue({
     envMode: effectiveEnvMode,
     activeWorktreePath,
     activeThreadBranch,

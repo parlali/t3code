@@ -3,6 +3,10 @@ import { Context, Effect, Layer } from "effect";
 import {
   GitManagerError,
   GitCommandError,
+  type GitCommitStagedInput,
+  type GitCommitStagedResult,
+  type GitGenerateCommitMessageInput,
+  type GitGenerateCommitMessageResult,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
   type VcsCreateRefInput,
@@ -11,8 +15,10 @@ import {
   type VcsCommitGraphResult,
   type VcsDiffInput,
   type VcsDiffResult,
+  type VcsFileDiffInput,
   type VcsFileDiffResult,
   type VcsFileInput,
+  type VcsPathsInput,
   type VcsApplyPatchInput,
   type VcsCreateWorktreeInput,
   type VcsCreateWorktreeResult,
@@ -52,17 +58,26 @@ export interface GitWorkflowServiceShape {
   readonly invalidateStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
   readonly diff: (input: VcsDiffInput) => Effect.Effect<VcsDiffResult, GitCommandError>;
-  readonly fileDiff: (input: VcsFileInput) => Effect.Effect<VcsFileDiffResult, GitCommandError>;
+  readonly fileDiff: (input: VcsFileDiffInput) => Effect.Effect<VcsFileDiffResult, GitCommandError>;
   readonly commitGraph: (
     input: VcsCommitGraphInput,
   ) => Effect.Effect<VcsCommitGraphResult, GitCommandError>;
   readonly stageFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
+  readonly stageFiles: (input: VcsPathsInput) => Effect.Effect<void, GitCommandError>;
+  readonly unstageFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
+  readonly unstageFiles: (input: VcsPathsInput) => Effect.Effect<void, GitCommandError>;
   readonly revertFile: (input: VcsFileInput) => Effect.Effect<void, GitCommandError>;
   readonly applyPatch: (input: VcsApplyPatchInput) => Effect.Effect<void, GitCommandError>;
   readonly runStackedAction: (
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
   ) => Effect.Effect<GitRunStackedActionResult, GitManagerServiceError>;
+  readonly generateCommitMessage: (
+    input: GitGenerateCommitMessageInput,
+  ) => Effect.Effect<GitGenerateCommitMessageResult, GitManagerServiceError>;
+  readonly commitStaged: (
+    input: GitCommitStagedInput,
+  ) => Effect.Effect<GitCommitStagedResult, GitManagerServiceError>;
   readonly resolvePullRequest: (
     input: GitPullRequestRefInput,
   ) => Effect.Effect<GitResolvePullRequestResult, GitManagerServiceError>;
@@ -310,6 +325,18 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
       ensureGitCommand("GitWorkflowService.stageFile", input.cwd).pipe(
         Effect.andThen(git.stageFile(input)),
       ),
+    stageFiles: (input) =>
+      ensureGitCommand("GitWorkflowService.stageFiles", input.cwd).pipe(
+        Effect.andThen(git.stageFiles(input)),
+      ),
+    unstageFile: (input) =>
+      ensureGitCommand("GitWorkflowService.unstageFile", input.cwd).pipe(
+        Effect.andThen(git.unstageFile(input)),
+      ),
+    unstageFiles: (input) =>
+      ensureGitCommand("GitWorkflowService.unstageFiles", input.cwd).pipe(
+        Effect.andThen(git.unstageFiles(input)),
+      ),
     revertFile: (input) =>
       ensureGitCommand("GitWorkflowService.revertFile", input.cwd).pipe(
         Effect.andThen(git.revertFile(input)),
@@ -321,6 +348,14 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
     runStackedAction: (input, options) =>
       ensureGit("GitWorkflowService.runStackedAction", input.cwd).pipe(
         Effect.andThen(gitManager.runStackedAction(input, options)),
+      ),
+    generateCommitMessage: (input) =>
+      ensureGit("GitWorkflowService.generateCommitMessage", input.cwd).pipe(
+        Effect.andThen(gitManager.generateCommitMessage(input)),
+      ),
+    commitStaged: (input) =>
+      ensureGit("GitWorkflowService.commitStaged", input.cwd).pipe(
+        Effect.andThen(gitManager.commitStaged(input)),
       ),
     resolvePullRequest: routeGitManager(
       "GitWorkflowService.resolvePullRequest",

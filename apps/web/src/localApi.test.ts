@@ -142,6 +142,7 @@ vi.mock("./environments/runtime", () => ({
     reconnect: async () => undefined,
     dispose: async () => undefined,
   }),
+  reconnectAllEnvironmentConnections: vi.fn(),
   resetEnvironmentServiceForTests: vi.fn(),
   resetSavedEnvironmentRegistryStoreForTests: vi.fn(),
   resetSavedEnvironmentRuntimeStoreForTests: vi.fn(),

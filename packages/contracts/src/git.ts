@@ -7,6 +7,7 @@ const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const GIT_LIST_BRANCHES_MAX_LIMIT = 200;
 const GIT_COMMIT_GRAPH_MAX_LIMIT = 500;
 const VCS_RELATIVE_PATH_MAX_LENGTH = 512;
+const VCS_RELATIVE_PATHS_MAX_COUNT = 1_000;
 const VcsRelativePath = TrimmedNonEmptyStringSchema.check(
   Schema.isMaxLength(VCS_RELATIVE_PATH_MAX_LENGTH),
 );
@@ -127,6 +128,25 @@ export const VcsFileInput = Schema.Struct({
 });
 export type VcsFileInput = typeof VcsFileInput.Type;
 
+export const VcsPathsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  relativePaths: Schema.Array(VcsRelativePath).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(VCS_RELATIVE_PATHS_MAX_COUNT),
+  ),
+});
+export type VcsPathsInput = typeof VcsPathsInput.Type;
+
+export const VcsFileDiffSource = Schema.Literals(["working-tree", "staged"]);
+export type VcsFileDiffSource = typeof VcsFileDiffSource.Type;
+
+export const VcsFileDiffInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  relativePath: VcsRelativePath,
+  source: Schema.optional(VcsFileDiffSource),
+});
+export type VcsFileDiffInput = typeof VcsFileDiffInput.Type;
+
 export const VcsApplyPatchInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   patch: Schema.String.check(Schema.isMaxLength(1_000_000)),
@@ -145,6 +165,30 @@ export const GitRunStackedActionInput = Schema.Struct({
   ),
 });
 export type GitRunStackedActionInput = typeof GitRunStackedActionInput.Type;
+
+export const GitGenerateCommitMessageInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  filePaths: Schema.optional(
+    Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1)),
+  ),
+});
+export type GitGenerateCommitMessageInput = typeof GitGenerateCommitMessageInput.Type;
+
+export const GitGenerateCommitMessageResult = Schema.Struct({
+  commitMessage: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000)),
+});
+export type GitGenerateCommitMessageResult = typeof GitGenerateCommitMessageResult.Type;
+
+export const GitCommitStagedInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  commitMessage: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000)),
+});
+export type GitCommitStagedInput = typeof GitCommitStagedInput.Type;
+
+export const GitCommitStagedResult = Schema.Struct({
+  commitSha: TrimmedNonEmptyStringSchema,
+});
+export type GitCommitStagedResult = typeof GitCommitStagedResult.Type;
 
 export const VcsListRefsInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
@@ -240,6 +284,13 @@ const VcsStatusLocalShape = {
         path: TrimmedNonEmptyStringSchema,
         insertions: NonNegativeInt,
         deletions: NonNegativeInt,
+        status: Schema.optional(TrimmedNonEmptyStringSchema),
+        indexStatus: Schema.optional(Schema.String),
+        worktreeStatus: Schema.optional(Schema.String),
+        staged: Schema.optional(Schema.Boolean),
+        unstaged: Schema.optional(Schema.Boolean),
+        untracked: Schema.optional(Schema.Boolean),
+        conflicted: Schema.optional(Schema.Boolean),
       }),
     ),
     insertions: NonNegativeInt,

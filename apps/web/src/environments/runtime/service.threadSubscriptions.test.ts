@@ -470,6 +470,43 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("reconnects every registered environment connection for manual websocket recovery", async () => {
+    const environmentId = EnvironmentId.make("env-remote");
+    const record = {
+      environmentId,
+      label: "Remote env",
+      httpBaseUrl: "http://remote.example.test",
+      wsBaseUrl: "ws://remote.example.test",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      lastConnectedAt: "2026-05-01T00:00:00.000Z",
+    };
+    mockListSavedEnvironmentRecords.mockReturnValue([record]);
+    mockGetSavedEnvironmentRecord.mockReturnValue(record);
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue("bearer-token");
+
+    const {
+      listEnvironmentConnections,
+      reconnectAllEnvironmentConnections,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    savedEnvironmentRegistryListener?.();
+    await vi.waitFor(() => {
+      expect(listEnvironmentConnections()).toHaveLength(2);
+    });
+
+    await reconnectAllEnvironmentConnections("test");
+
+    expect(mockConnectionReconnects).toHaveLength(2);
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[1]).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
   it("does not reconnect healthy environment streams when the browser resumes", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();

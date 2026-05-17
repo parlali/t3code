@@ -11,7 +11,7 @@ import {
   WS_RECONNECT_MAX_ATTEMPTS,
 } from "../rpc/wsConnectionState";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { getPrimaryEnvironmentConnection } from "../environments/runtime";
+import { reconnectAllEnvironmentConnections } from "../environments/runtime";
 
 const FORCED_WS_RECONNECT_DEBOUNCE_MS = 5_000;
 const RECOVERED_TOAST_MIN_DISCONNECT_MS = 10_000;
@@ -188,26 +188,23 @@ export function WebSocketConnectionCoordinator() {
       toastResetTimerRef.current = null;
     }
     lastForcedReconnectAtRef.current = Date.now();
-    void getPrimaryEnvironmentConnection()
-      .reconnect()
-      .catch((error) => {
-        if (!showFailureToast) {
-          console.warn("Automatic WebSocket reconnect failed", { error });
-          return;
-        }
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Reconnect failed",
-            description:
-              error instanceof Error ? error.message : "Unable to restart the WebSocket.",
-            data: {
-              dismissAfterVisibleMs: 8_000,
-              hideCopyButton: true,
-            },
-          }),
-        );
-      });
+    void reconnectAllEnvironmentConnections("websocket-coordinator").catch((error) => {
+      if (!showFailureToast) {
+        console.warn("Automatic WebSocket reconnect failed", { error });
+        return;
+      }
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Reconnect failed",
+          description: error instanceof Error ? error.message : "Unable to restart the WebSocket.",
+          data: {
+            dismissAfterVisibleMs: 8_000,
+            hideCopyButton: true,
+          },
+        }),
+      );
+    });
   });
   const syncBrowserOnlineStatus = useEffectEvent(() => {
     setBrowserOnlineStatus(navigator.onLine !== false);

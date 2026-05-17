@@ -1531,25 +1531,64 @@ function stopActiveService() {
   activeService = null;
 }
 
+async function reconnectEnvironmentConnections(input?: {
+  readonly reason?: string;
+  readonly onlyStale?: boolean;
+}): Promise<void> {
+  const connections = [...environmentConnections.values()];
+  if (connections.length === 0) {
+    const primaryConnection = maybeCreatePrimaryEnvironmentConnection();
+    if (primaryConnection) {
+      connections.push(primaryConnection);
+    }
+  }
+
+  const targets = input?.onlyStale
+    ? connections.filter((connection) => !connection.client.isHeartbeatFresh())
+    : connections;
+  if (targets.length === 0) {
+    return;
+  }
+
+  const results = await Promise.allSettled(targets.map((connection) => connection.reconnect()));
+  const failures = results.filter(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (failures.length === 0) {
+    return;
+  }
+
+  for (const [index, result] of results.entries()) {
+    if (result.status === "fulfilled") {
+      continue;
+    }
+    const target = targets[index];
+    console.warn("Environment reconnect failed", {
+      environmentId: target?.environmentId,
+      reason: input?.reason ?? "manual",
+      error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+    });
+  }
+
+  if (failures.length === targets.length) {
+    throw failures[0]?.reason ?? new Error("Environment reconnect failed.");
+  }
+}
+
 function reconnectEnvironmentConnectionsAfterBrowserResume(reason: string): void {
   const now = Date.now();
   if (now - lastBrowserResumeReconnectAt < BROWSER_RESUME_RECONNECT_COOLDOWN_MS) {
     return;
   }
 
-  for (const connection of environmentConnections.values()) {
-    if (connection.client.isHeartbeatFresh()) {
-      continue;
-    }
-    lastBrowserResumeReconnectAt = now;
-    void connection.reconnect().catch((error) => {
-      console.warn("Environment reconnect after browser resume failed", {
-        environmentId: connection.environmentId,
-        reason,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
+  if (
+    [...environmentConnections.values()].every((connection) => connection.client.isHeartbeatFresh())
+  ) {
+    return;
   }
+
+  lastBrowserResumeReconnectAt = now;
+  void reconnectEnvironmentConnections({ onlyStale: true, reason }).catch(() => undefined);
 }
 
 function subscribeBrowserResumeReconnects(): () => void {
@@ -1610,6 +1649,10 @@ export function requireEnvironmentConnection(environmentId: EnvironmentId): Envi
 
 export function getPrimaryEnvironmentConnection(): EnvironmentConnection {
   return createPrimaryEnvironmentConnection();
+}
+
+export async function reconnectAllEnvironmentConnections(reason = "manual"): Promise<void> {
+  await reconnectEnvironmentConnections({ reason });
 }
 
 export async function disconnectSavedEnvironment(environmentId: EnvironmentId): Promise<void> {

@@ -115,15 +115,29 @@ export function buildCommitGraphLayout(
     const inputSwimlanes = compactSwimlanes(previousOutputSwimlanes);
     const outputSwimlanes: CommitGraphSwimlane[] = [];
     let firstParentAdded = false;
+    const makeParentLane = (
+      parentId: string,
+      parentIndex: number,
+      fallbackColor: string | null,
+    ): CommitGraphSwimlane => {
+      const parentCommit = commitBySha.get(parentId);
+      return {
+        id: parentId,
+        color:
+          parentIndex === 0
+            ? (refColor(commit.refs) ?? fallbackColor ?? allocColor())
+            : (refColor(parentCommit?.refs ?? []) ?? allocColor()),
+      };
+    };
 
     if (parents.length > 0) {
       for (const lane of inputSwimlanes) {
         if (lane.id === commit.sha) {
           if (!firstParentAdded) {
-            outputSwimlanes.push({
-              id: parents[0]!,
-              color: refColor(commit.refs) ?? lane.color,
-            });
+            outputSwimlanes.push(makeParentLane(parents[0]!, 0, lane.color));
+            for (let parentIndex = 1; parentIndex < parents.length; parentIndex++) {
+              outputSwimlanes.push(makeParentLane(parents[parentIndex]!, parentIndex, null));
+            }
             firstParentAdded = true;
           }
           continue;
@@ -132,16 +146,12 @@ export function buildCommitGraphLayout(
       }
     }
 
-    for (let parentIndex = firstParentAdded ? 1 : 0; parentIndex < parents.length; parentIndex++) {
-      const parentId = parents[parentIndex]!;
-      const parentCommit = commitBySha.get(parentId);
-      outputSwimlanes.push({
-        id: parentId,
-        color:
-          parentIndex === 0
-            ? (refColor(commit.refs) ?? allocColor())
-            : (refColor(parentCommit?.refs ?? []) ?? allocColor()),
-      });
+    for (
+      let parentIndex = firstParentAdded ? parents.length : 0;
+      parentIndex < parents.length;
+      parentIndex++
+    ) {
+      outputSwimlanes.push(makeParentLane(parents[parentIndex]!, parentIndex, null));
     }
 
     const compactedOutputSwimlanes = compactSwimlanes(outputSwimlanes);

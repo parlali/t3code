@@ -1,68 +1,53 @@
-import { lazy, Suspense, useEffect, type ReactNode } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useEffect, type ReactNode } from "react";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 
-import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
 import {
   clearShortcutModifierState,
   syncShortcutModifierStateFromKeyboardEvent,
 } from "../shortcutModifierState";
+import { ActivityRail } from "./shell/ActivityRail";
+import { SidePanel } from "./shell/SidePanel";
+import { resolveShellWorkspaceRouteFromPathname, useShellStore } from "./shell/shellStore";
+import { SidebarProvider } from "./ui/sidebar";
 
-const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
-const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
-const THREAD_MAIN_CONTENT_MIN_WIDTH = 28 * 16;
-const THREAD_MESSAGE_PANE_SELECTOR = "[data-thread-message-pane='true']";
-const ThreadSidebar = lazy(() => import("./Sidebar"));
-
-function shouldAcceptThreadSidebarWidth(input: {
-  readonly currentWidth?: number;
-  readonly nextWidth: number;
-  readonly wrapper: HTMLElement;
-}): boolean {
-  const messagePane = input.wrapper.querySelector<HTMLElement>(THREAD_MESSAGE_PANE_SELECTOR);
-  if (!messagePane) {
-    return input.wrapper.clientWidth - input.nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH;
-  }
-
-  const sidebarContainer = input.wrapper.querySelector<HTMLElement>(
-    "[data-slot='sidebar-container']",
-  );
-  const currentSidebarWidth =
-    input.currentWidth ?? sidebarContainer?.getBoundingClientRect().width ?? 0;
-  if (currentSidebarWidth <= 0) {
-    return true;
-  }
-
-  const sidebarDelta = input.nextWidth - currentSidebarWidth;
-  if (sidebarDelta <= 0) {
-    return true;
-  }
-
-  const nextMessagePaneWidth = messagePane.getBoundingClientRect().width - sidebarDelta;
-  return nextMessagePaneWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH;
-}
-
-function ThreadSidebarLoadingState() {
+function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
   return (
-    <div className="flex h-full min-h-0 flex-col bg-card text-card-foreground">
-      <div className="h-12 shrink-0 border-b border-border" />
-      <div className="min-h-0 flex-1 px-2 py-3">
-        <div className="h-7 rounded-md bg-muted/45" />
-        <div className="mt-3 space-y-2">
-          <div className="h-5 rounded-md bg-muted/35" />
-          <div className="h-5 rounded-md bg-muted/25" />
-          <div className="h-5 rounded-md bg-muted/20" />
-        </div>
-      </div>
-    </div>
+    target.isContentEditable ||
+    target.closest("input, textarea, select, [contenteditable='true']") !== null
   );
 }
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const pathname = useLocation({ select: (location) => location.pathname });
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       syncShortcutModifierStateFromKeyboardEvent(event);
+
+      if (event.defaultPrevented || isEditableShortcutTarget(event.target)) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      const primaryModifier = event.metaKey || event.ctrlKey;
+      if (!primaryModifier || event.altKey || event.shiftKey) {
+        return;
+      }
+
+      if (key === "b") {
+        event.preventDefault();
+        event.stopPropagation();
+        useShellStore.getState().togglePanel();
+      } else if (key === "j") {
+        const terminalActions = useShellStore.getState().terminalActions;
+        if (!terminalActions?.terminalAvailable) return;
+        event.preventDefault();
+        event.stopPropagation();
+        terminalActions.onToggleTerminal();
+        useShellStore.getState().toggleBottomPanel();
+      }
     };
     const onWindowKeyUp = (event: KeyboardEvent) => {
       syncShortcutModifierStateFromKeyboardEvent(event);
@@ -90,7 +75,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
 
     const unsubscribe = onMenuAction((action) => {
       if (action === "open-settings") {
-        void navigate({ to: "/settings" });
+        useShellStore.getState().setActiveMode("settings");
+        void navigate({ to: "/settings/general" });
       }
     });
 
@@ -99,24 +85,36 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     };
   }, [navigate]);
 
+  useEffect(() => {
+    if (pathname.startsWith("/settings")) {
+      const shellStore = useShellStore.getState();
+      if (shellStore.activeMode !== "settings") {
+        shellStore.setActiveMode("settings");
+      }
+      return;
+    }
+
+    const workspaceRoute = resolveShellWorkspaceRouteFromPathname(pathname);
+    if (!workspaceRoute) {
+      return;
+    }
+
+    const shellStore = useShellStore.getState();
+    shellStore.setLastWorkspaceRoute(workspaceRoute);
+    if (shellStore.activeMode === "settings") {
+      shellStore.setActiveMode("threads");
+    }
+  }, [pathname]);
+
   return (
-    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
-      <Sidebar
-        side="left"
-        collapsible="offcanvas"
-        className="border-r border-border bg-card text-foreground group-data-[collapsible=offcanvas]:border-r-0"
-        resizable={{
-          minWidth: THREAD_SIDEBAR_MIN_WIDTH,
-          shouldAcceptWidth: shouldAcceptThreadSidebarWidth,
-          storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
-        }}
-      >
-        <Suspense fallback={<ThreadSidebarLoadingState />}>
-          <ThreadSidebar />
-        </Suspense>
-        <SidebarRail />
-      </Sidebar>
-      {children}
+    <SidebarProvider className="h-dvh! min-h-0! overflow-hidden" defaultOpen>
+      <div className="flex h-full min-h-0 w-full overflow-hidden bg-background text-foreground">
+        <ActivityRail />
+        <SidePanel />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col pb-[calc(3rem+env(safe-area-inset-bottom))] md:pb-0">
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
+        </div>
+      </div>
     </SidebarProvider>
   );
 }

@@ -13,7 +13,14 @@ describe("workbenchSelection", () => {
       source: "files",
       relativePath: "README.md",
     });
-    expect(selectionForTab({ id: "diff:README.md", kind: "diff", path: "README.md" })).toEqual({
+    expect(
+      selectionForTab({
+        id: "diff:working-tree:README.md",
+        kind: "diff",
+        path: "README.md",
+        source: "working-tree",
+      }),
+    ).toEqual({
       source: "changes",
       relativePath: "README.md",
     });
@@ -23,9 +30,10 @@ describe("workbenchSelection", () => {
       path: "src/App.tsx",
     });
     expect(tabForSelection({ source: "changes", relativePath: "src/App.tsx" })).toEqual({
-      id: "diff:src/App.tsx",
+      id: "diff:working-tree:src/App.tsx",
       kind: "diff",
       path: "src/App.tsx",
+      source: "working-tree",
     });
   });
 
