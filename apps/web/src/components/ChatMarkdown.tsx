@@ -28,6 +28,7 @@ import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "../markdown-links";
 import { readLocalApi } from "../localApi";
+import { requestWorkbenchOpen } from "../workbenchEvents";
 import { cn } from "../lib/utils";
 
 class CodeHighlightErrorBoundary extends React.Component<
@@ -273,6 +274,8 @@ interface MarkdownFileLinkProps {
   displayPath: string;
   filePath: string;
   label: string;
+  line?: number;
+  column?: number;
   theme: "light" | "dark";
   className?: string | undefined;
 }
@@ -363,9 +366,20 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   displayPath,
   filePath,
   label,
+  line,
+  column,
   theme,
   className,
 }: MarkdownFileLinkProps) {
+  const handleOpenInWorkbench = useCallback(() => {
+    requestWorkbenchOpen({
+      mode: "files",
+      path: filePath,
+      ...(line !== undefined ? { line } : {}),
+      ...(column !== undefined ? { column } : {}),
+    });
+  }, [column, filePath, line]);
+
   const handleOpen = useCallback(() => {
     const api = readLocalApi();
     if (!api) {
@@ -461,7 +475,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              handleOpen();
+              handleOpenInWorkbench();
             }}
             onContextMenu={handleContextMenu}
           >
@@ -497,6 +511,8 @@ function areMarkdownFileLinkPropsEqual(
     previous.displayPath === next.displayPath &&
     previous.filePath === next.filePath &&
     previous.label === next.label &&
+    previous.line === next.line &&
+    previous.column === next.column &&
     previous.theme === next.theme &&
     previous.className === next.className
   );
@@ -554,6 +570,8 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
             displayPath={fileLinkMeta.displayPath}
             filePath={fileLinkMeta.filePath}
             label={labelParts.join(" · ")}
+            {...(fileLinkMeta.line !== undefined ? { line: fileLinkMeta.line } : {})}
+            {...(fileLinkMeta.column !== undefined ? { column: fileLinkMeta.column } : {})}
             theme={resolvedTheme}
             className={props.className}
           />

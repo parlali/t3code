@@ -48,11 +48,20 @@ import {
   workbenchCodeEditorOptions,
   workbenchEditorTheme,
   MOBILE_LAYOUT_MEDIA_QUERY,
+  resolveWorkbenchRelativePath,
 } from "./workbench";
 
 interface WorkbenchTabState {
   readonly tabs: readonly WorkbenchTab[];
   readonly activeTabId: string | null;
+}
+
+type WorkbenchEditor = Parameters<OnMount>[0];
+
+interface PendingEditorReveal {
+  readonly tabId: string;
+  readonly line: number;
+  readonly column: number;
 }
 
 const EMPTY_TREE_ENTRIES: readonly ProjectEntry[] = Object.freeze([]);
@@ -67,6 +76,11 @@ function WorkbenchMessage(props: { readonly children: ReactNode }) {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error && error.message.length > 0 ? error.message : "Unknown error";
+}
+
+function normalizeEditorPositionValue(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.floor(value));
 }
 
 export interface WorkspaceWorkbenchProps {
@@ -115,10 +129,15 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   const [diffLineWrap, setDiffLineWrap] = useState(false);
   const [diffLayout, setDiffLayout] = useState<"side-by-side" | "inline">("side-by-side");
   const workbenchRef = useRef<HTMLElement | null>(null);
+  const editorRef = useRef<{ readonly tabId: string; readonly editor: WorkbenchEditor } | null>(
+    null,
+  );
   const fileBuffersRef = useRef(fileBuffers);
   const diffBuffersRef = useRef(diffBuffers);
   const saveActiveRef = useRef<() => void>(() => undefined);
   const workbenchSelectionVersionRef = useRef(0);
+  const [pendingEditorReveal, setPendingEditorReveal] = useState<PendingEditorReveal | null>(null);
+  const [editorMountVersion, setEditorMountVersion] = useState(0);
 
   const { tabs, activeTabId } = tabState;
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
@@ -157,6 +176,10 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   const fileQueryContents = fileQuery.data?.contents;
   const diffQueryOriginal = diffQuery.data?.original;
   const diffQueryModified = diffQuery.data?.modified;
+  const activeFileReady =
+    activeKind === "file" &&
+    activePath !== null &&
+    (fileBuffers[activePath] !== undefined || fileQueryContents !== undefined);
 
   const persistWorkbenchSelection = useCallback(
     (selection: ThreadWorkbenchSelection | null) => {
@@ -192,20 +215,58 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   useEffect(() => {
     return subscribeWorkbenchOpen((request) => {
       if (request.path) {
+        const relativePath = resolveWorkbenchRelativePath(request.path, cwd);
+        if (!relativePath) return;
+
         if (request.mode === "files") {
-          openTab(tabFor("file", request.path));
+          const tab = tabFor("file", relativePath);
+          if (request.line !== undefined) {
+            setPendingEditorReveal({
+              tabId: tab.id,
+              line: normalizeEditorPositionValue(request.line, 1),
+              column: normalizeEditorPositionValue(request.column, 1),
+            });
+          } else {
+            setPendingEditorReveal(null);
+          }
+          openTab(tab);
           return;
         }
+        setPendingEditorReveal(null);
         openTab(
           tabFor(
             "diff",
-            request.path,
+            relativePath,
             request.source === undefined ? undefined : { source: request.source },
           ),
         );
       }
     });
-  }, [openTab]);
+  }, [cwd, openTab]);
+
+  useEffect(() => {
+    const pending = pendingEditorReveal;
+    const mountedEditor = editorRef.current;
+    if (
+      !pending ||
+      !mountedEditor ||
+      mountedEditor.tabId !== pending.tabId ||
+      activeTabId !== pending.tabId ||
+      !activeFileReady
+    ) {
+      return;
+    }
+
+    const editor = mountedEditor.editor;
+    const model = editor.getModel();
+    const lineNumber = Math.min(pending.line, Math.max(1, model?.getLineCount() ?? pending.line));
+    const column = Math.min(pending.column, Math.max(1, model?.getLineMaxColumn(lineNumber) ?? 1));
+    const position = { lineNumber, column };
+    editor.setPosition(position);
+    editor.revealPositionInCenterIfOutsideViewport(position);
+    editor.focus();
+    setPendingEditorReveal(null);
+  }, [activeFileReady, activeTabId, editorMountVersion, pendingEditorReveal]);
 
   useEffect(() => {
     if (fileQueryContents !== undefined && activeKind === "file" && activePath && !activeTabDirty) {
@@ -347,6 +408,11 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   }, []);
 
   const onEditorMount: OnMount = useCallback((editor, monaco) => {
+    const tab = activeTabRef.current;
+    if (tab) {
+      editorRef.current = { tabId: tab.id, editor };
+    }
+    setEditorMountVersion((version) => version + 1);
     editor.focus();
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       saveActiveRef.current();

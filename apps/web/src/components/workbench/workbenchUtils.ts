@@ -21,6 +21,63 @@ export function relativePathAncestors(path: string): string[] {
   return ancestors;
 }
 
+function normalizePathSeparators(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+function canonicalizeWindowsDrivePath(path: string): string {
+  return /^\/[A-Za-z]:\//.test(path) ? path.slice(1) : path;
+}
+
+function trimTrailingPathSeparators(path: string): string {
+  return path.replace(/[\\/]+$/, "");
+}
+
+function stripRelativePrefixes(path: string): string {
+  return path.replace(/^\.\/+/, "").replace(/^\/+/, "");
+}
+
+function isSafeRelativePath(path: string): boolean {
+  return (
+    path.length > 0 &&
+    !path.split("/").some((segment) => segment.length === 0 || segment === "." || segment === "..")
+  );
+}
+
+function isAbsolutePath(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
+
+export function resolveWorkbenchRelativePath(
+  path: string,
+  cwd: string | null | undefined,
+): string | null {
+  const trimmedPath = path.trim();
+  const normalizedPath = canonicalizeWindowsDrivePath(normalizePathSeparators(trimmedPath));
+  if (normalizedPath.length === 0) return null;
+
+  if (!isAbsolutePath(trimmedPath)) {
+    const relativePath = stripRelativePrefixes(normalizedPath);
+    return isSafeRelativePath(relativePath) ? relativePath : null;
+  }
+
+  if (!cwd) return null;
+
+  const normalizedCwd = canonicalizeWindowsDrivePath(
+    normalizePathSeparators(trimTrailingPathSeparators(cwd)),
+  );
+  const pathForCompare = normalizedPath.toLowerCase();
+  const cwdForCompare = normalizedCwd.toLowerCase();
+  const cwdWithSeparator = `${cwdForCompare}/`;
+
+  if (pathForCompare.startsWith(cwdWithSeparator)) {
+    const relativePath = normalizedPath.slice(normalizedCwd.length + 1);
+    return isSafeRelativePath(relativePath) ? relativePath : null;
+  }
+
+  return null;
+}
+
 export function normalizeNewEntryName(input: string): string | null {
   const segments = input
     .trim()

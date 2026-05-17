@@ -26,6 +26,7 @@ export {
   basename,
   parentPath,
   relativePathAncestors,
+  resolveWorkbenchRelativePath,
   normalizeNewEntryName,
   buildNewEntryRelativePath,
   sortTreeNodes,

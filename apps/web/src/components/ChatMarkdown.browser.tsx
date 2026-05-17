@@ -3,6 +3,7 @@ import "../index.css";
 import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
+import { subscribeWorkbenchOpen, type WorkbenchOpenRequest } from "../workbenchEvents";
 
 const { openInPreferredEditorMock, readLocalApiMock } = vi.hoisted(() => ({
   openInPreferredEditorMock: vi.fn(async () => "vscode"),
@@ -33,12 +34,22 @@ describe("ChatMarkdown", () => {
     document.body.innerHTML = "";
   });
 
+  function collectWorkbenchOpenRequests(): {
+    readonly requests: WorkbenchOpenRequest[];
+    readonly unsubscribe: () => void;
+  } {
+    const requests: WorkbenchOpenRequest[] = [];
+    const unsubscribe = subscribeWorkbenchOpen((request) => requests.push(request));
+    return { requests, unsubscribe };
+  }
+
   it("rewrites file uri hrefs into direct paths before rendering", async () => {
     const filePath =
       "/Users/yashsingh/p/sco/claude-code-extract/src/utils/permissions/PermissionRule.ts";
     const screen = await render(
       <ChatMarkdown text={`[PermissionRule.ts](file://${filePath})`} cwd="/repo/project" />,
     );
+    const workbenchRequests = collectWorkbenchOpenRequests();
 
     try {
       const link = page.getByRole("link", { name: "PermissionRule.ts" });
@@ -48,9 +59,13 @@ describe("ChatMarkdown", () => {
       await link.click();
 
       await vi.waitFor(() => {
-        expect(openInPreferredEditorMock).toHaveBeenCalledWith(expect.anything(), filePath);
+        expect(workbenchRequests.requests).toContainEqual({
+          mode: "files",
+          path: filePath,
+        });
       });
     } finally {
+      workbenchRequests.unsubscribe();
       await screen.unmount();
     }
   });
@@ -61,6 +76,7 @@ describe("ChatMarkdown", () => {
     const screen = await render(
       <ChatMarkdown text={`[PermissionRule.ts:1](file://${filePath}#L1)`} cwd="/repo/project" />,
     );
+    const workbenchRequests = collectWorkbenchOpenRequests();
 
     try {
       const link = page.getByRole("link", { name: "PermissionRule.ts · L1" });
@@ -70,9 +86,14 @@ describe("ChatMarkdown", () => {
       await link.click();
 
       await vi.waitFor(() => {
-        expect(openInPreferredEditorMock).toHaveBeenCalledWith(expect.anything(), `${filePath}:1`);
+        expect(workbenchRequests.requests).toContainEqual({
+          mode: "files",
+          path: filePath,
+          line: 1,
+        });
       });
     } finally {
+      workbenchRequests.unsubscribe();
       await screen.unmount();
     }
   });
@@ -83,6 +104,7 @@ describe("ChatMarkdown", () => {
     const screen = await render(
       <ChatMarkdown text={`[PermissionRule.ts](file://${filePath}#L1C7)`} cwd="/repo/project" />,
     );
+    const workbenchRequests = collectWorkbenchOpenRequests();
 
     try {
       const link = page.getByRole("link", { name: "PermissionRule.ts · L1:C7" });
@@ -92,12 +114,15 @@ describe("ChatMarkdown", () => {
       await link.click();
 
       await vi.waitFor(() => {
-        expect(openInPreferredEditorMock).toHaveBeenCalledWith(
-          expect.anything(),
-          `${filePath}:1:7`,
-        );
+        expect(workbenchRequests.requests).toContainEqual({
+          mode: "files",
+          path: filePath,
+          line: 1,
+          column: 7,
+        });
       });
     } finally {
+      workbenchRequests.unsubscribe();
       await screen.unmount();
     }
   });

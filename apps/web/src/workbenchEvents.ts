@@ -3,6 +3,8 @@ import type { TurnId } from "@t3tools/contracts";
 export interface WorkbenchOpenRequest {
   readonly mode?: "files" | "changes";
   readonly path?: string;
+  readonly line?: number;
+  readonly column?: number;
   readonly source?: "working-tree" | "staged";
   readonly turnId?: TurnId;
 }
