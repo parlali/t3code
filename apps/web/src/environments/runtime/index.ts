@@ -23,6 +23,7 @@ export {
   readEnvironmentConnection,
   reconnectAllEnvironmentConnections,
   reconnectSavedEnvironment,
+  reconnectStaleEnvironmentConnections,
   removeSavedEnvironment,
   requireEnvironmentConnection,
   resetEnvironmentServiceForTests,

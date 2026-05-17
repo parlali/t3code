@@ -415,6 +415,9 @@ export function useSettingsRestore(onRestored?: () => void) {
         : []),
       ...(isGitWritingModelDirty ? ["Git writing model"] : []),
       ...(areProviderSettingsDirty ? ["Providers"] : []),
+      ...(!Equal.equals(settings.integrations, DEFAULT_UNIFIED_SETTINGS.integrations)
+        ? ["Integrations"]
+        : []),
     ],
     [
       areProviderSettingsDirty,
@@ -428,6 +431,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffWordWrap,
       settings.automaticGitFetchInterval,
       settings.enableAssistantStreaming,
+      settings.integrations,
       settings.timestampFormat,
       theme,
     ],

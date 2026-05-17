@@ -63,6 +63,32 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   });
 });
 
+describe("ServerSettings.integrations", () => {
+  it("defaults Chrome DevTools MCP to disabled", () => {
+    expect(DEFAULT_SERVER_SETTINGS.integrations.chromeDevToolsMcp).toEqual({
+      enabled: false,
+    });
+  });
+
+  it("decodes legacy configs without integrations", () => {
+    const decoded = decodeServerSettings({});
+
+    expect(decoded.integrations.chromeDevToolsMcp.enabled).toBe(false);
+  });
+
+  it("decodes Chrome DevTools MCP patch updates", () => {
+    const patch = decodeServerSettingsPatch({
+      integrations: {
+        chromeDevToolsMcp: {
+          enabled: true,
+        },
+      },
+    });
+
+    expect(patch.integrations?.chromeDevToolsMcp?.enabled).toBe(true);
+  });
+});
+
 describe("ServerSettingsPatch.providerInstances", () => {
   it("treats providerInstances as an optional whole-map replacement", () => {
     const patch = decodeServerSettingsPatch({});

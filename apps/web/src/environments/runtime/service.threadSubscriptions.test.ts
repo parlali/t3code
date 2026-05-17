@@ -191,7 +191,7 @@ describe("retainThreadDetailSubscription", () => {
         knownEnvironment: input.knownEnvironment,
         client: input.client,
         ensureBootstrapped: vi.fn(async () => undefined),
-        isConnectionOpen: vi.fn(() => false),
+        isConnectionOpen: vi.fn(() => true),
         reconnect,
         dispose: vi.fn(async () => undefined),
       };
@@ -464,6 +464,100 @@ describe("retainThreadDetailSubscription", () => {
 
     visibilityState = "visible";
     documentTarget.dispatchEvent(new Event("visibilitychange"));
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("reconnects stale visible environment streams on focus, online, and health checks", async () => {
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      visibilityState: "visible",
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+    mockCreateWsRpcClient.mockReturnValue({
+      isConnectionOpen: vi.fn(() => true),
+      server: {
+        getConfig: vi.fn(async () => ({
+          environment: {
+            environmentId: EnvironmentId.make("env-remote"),
+            label: "Remote env",
+            platform: { os: "darwin", arch: "arm64" },
+            serverVersion: "0.0.0-test",
+            capabilities: { repositoryIdentity: true },
+          },
+        })),
+      },
+      isHeartbeatFresh: vi.fn(() => false),
+      orchestration: {
+        subscribeThread: mockSubscribeThread,
+      },
+    });
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    expect(mockConnectionReconnects).toHaveLength(1);
+
+    windowTarget.dispatchEvent(new Event("focus"));
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+
+    windowTarget.dispatchEvent(new Event("online"));
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    windowTarget.dispatchEvent(new Event("online"));
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(3);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("reconnects closed environment streams even when the last heartbeat is fresh", async () => {
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      visibilityState: "visible",
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+    mockCreateEnvironmentConnection.mockImplementation((input) => {
+      const reconnect = vi.fn(async () => undefined);
+      mockConnectionReconnects.push(reconnect);
+      return {
+        kind: input.kind,
+        environmentId: input.knownEnvironment.environmentId,
+        knownEnvironment: input.knownEnvironment,
+        client: input.client,
+        ensureBootstrapped: vi.fn(async () => undefined),
+        isConnectionOpen: vi.fn(() => false),
+        reconnect,
+        dispose: vi.fn(async () => undefined),
+      };
+    });
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    expect(mockConnectionReconnects).toHaveLength(1);
+
+    windowTarget.dispatchEvent(new Event("focus"));
     expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
 
     stop();

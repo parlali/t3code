@@ -130,7 +130,6 @@ const lastAppliedProjectionVersionByEnvironment = new Map<
 
 let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
-let lastBrowserHiddenAt: number | null = null;
 let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
 
 // Thread detail subscription cache policy:
@@ -143,6 +142,7 @@ let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
 const BROWSER_RESUME_RECONNECT_COOLDOWN_MS = 2_000;
+const BROWSER_CONNECTION_HEALTH_CHECK_INTERVAL_MS = 30_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
 const NOOP = () => undefined;
 const SSH_HTTP_STATUS_RE = /^\[ssh_http:(\d+)\]\s/u;
@@ -1543,9 +1543,7 @@ async function reconnectEnvironmentConnections(input?: {
     }
   }
 
-  const targets = input?.onlyStale
-    ? connections.filter((connection) => !connection.client.isHeartbeatFresh())
-    : connections;
+  const targets = input?.onlyStale ? connections.filter(isEnvironmentConnectionStale) : connections;
   if (targets.length === 0) {
     return;
   }
@@ -1575,20 +1573,26 @@ async function reconnectEnvironmentConnections(input?: {
   }
 }
 
-function reconnectEnvironmentConnectionsAfterBrowserResume(reason: string): void {
+function isEnvironmentConnectionStale(connection: EnvironmentConnection): boolean {
+  return !connection.isConnectionOpen() || !connection.client.isHeartbeatFresh();
+}
+
+export async function reconnectStaleEnvironmentConnections(reason = "manual"): Promise<void> {
+  await reconnectEnvironmentConnections({ onlyStale: true, reason });
+}
+
+function requestStaleEnvironmentReconnect(reason: string): void {
   const now = Date.now();
   if (now - lastBrowserResumeReconnectAt < BROWSER_RESUME_RECONNECT_COOLDOWN_MS) {
     return;
   }
 
-  if (
-    [...environmentConnections.values()].every((connection) => connection.client.isHeartbeatFresh())
-  ) {
+  if (![...environmentConnections.values()].some(isEnvironmentConnectionStale)) {
     return;
   }
 
   lastBrowserResumeReconnectAt = now;
-  void reconnectEnvironmentConnections({ onlyStale: true, reason }).catch(() => undefined);
+  void reconnectStaleEnvironmentConnections(reason).catch(() => undefined);
 }
 
 function subscribeBrowserResumeReconnects(): () => void {
@@ -1598,27 +1602,42 @@ function subscribeBrowserResumeReconnects(): () => void {
 
   const handleVisibilityChange = () => {
     if (document.visibilityState === "hidden") {
-      lastBrowserHiddenAt = Date.now();
       return;
     }
-    if (document.visibilityState === "visible" && lastBrowserHiddenAt !== null) {
-      lastBrowserHiddenAt = null;
-      reconnectEnvironmentConnectionsAfterBrowserResume("visibilitychange");
+    if (document.visibilityState === "visible") {
+      requestStaleEnvironmentReconnect("visibilitychange");
     }
   };
 
-  const handlePageShow = (event: PageTransitionEvent) => {
-    if (event.persisted || lastBrowserHiddenAt !== null) {
-      lastBrowserHiddenAt = null;
-      reconnectEnvironmentConnectionsAfterBrowserResume("pageshow");
-    }
+  const handlePageShow = () => {
+    requestStaleEnvironmentReconnect("pageshow");
   };
+
+  const handleFocus = () => {
+    requestStaleEnvironmentReconnect("focus");
+  };
+
+  const handleOnline = () => {
+    requestStaleEnvironmentReconnect("online");
+  };
+
+  const healthCheckIntervalId = globalThis.setInterval(() => {
+    if (document.visibilityState === "hidden") {
+      return;
+    }
+    requestStaleEnvironmentReconnect("visible-healthcheck");
+  }, BROWSER_CONNECTION_HEALTH_CHECK_INTERVAL_MS);
 
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("pageshow", handlePageShow);
+  window.addEventListener("focus", handleFocus);
+  window.addEventListener("online", handleOnline);
   return () => {
+    globalThis.clearInterval(healthCheckIntervalId);
     document.removeEventListener("visibilitychange", handleVisibilityChange);
     window.removeEventListener("pageshow", handlePageShow);
+    window.removeEventListener("focus", handleFocus);
+    window.removeEventListener("online", handleOnline);
   };
 }
 
@@ -1908,7 +1927,6 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
 
 export async function resetEnvironmentServiceForTests(): Promise<void> {
   stopActiveService();
-  lastBrowserHiddenAt = null;
   lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
   lastAppliedProjectionVersionByEnvironment.clear();
   pendingSavedEnvironmentConnections.clear();

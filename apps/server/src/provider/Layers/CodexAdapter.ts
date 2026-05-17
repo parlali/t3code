@@ -34,6 +34,7 @@ import {
   getModelSelectionStringOptionValue,
 } from "@t3tools/shared/model";
 
+import { buildChromeDevToolsMcpCodexConfigArgs } from "../../integrations/chromeDevToolsMcp.ts";
 import {
   ProviderAdapterRequestError,
   ProviderAdapterProcessError,
@@ -45,6 +46,7 @@ import {
 import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import {
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
@@ -1138,6 +1140,46 @@ function mapToRuntimeEvents(
     ];
   }
 
+  if (event.method === "mcpServer/startupStatus/updated") {
+    const payload = readPayload(
+      EffectCodexSchema.V2McpServerStatusUpdatedNotification,
+      event.payload,
+    );
+    if (!payload) {
+      return [];
+    }
+    const error = trimText(payload.error);
+    const status = {
+      name: payload.name,
+      status: payload.status,
+      ...(error ? { error } : {}),
+    };
+    const events: Array<ProviderRuntimeEvent> = [
+      {
+        type: "mcp.status.updated",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: {
+          status,
+        },
+      },
+    ];
+
+    if (payload.status === "failed" || payload.status === "cancelled") {
+      events.push({
+        type: "runtime.warning",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: {
+          message: error
+            ? `MCP server '${payload.name}' startup ${payload.status}: ${error}`
+            : `MCP server '${payload.name}' startup ${payload.status}.`,
+          detail: status,
+        },
+      });
+    }
+
+    return events;
+  }
+
   if (event.method === "thread/realtime/started") {
     const payload = readPayload(
       EffectCodexSchema.V2ThreadRealtimeStartedNotification,
@@ -1346,6 +1388,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const serverConfig = yield* Effect.service(ServerConfig);
+  const serverSettings = yield* ServerSettingsService;
   const nativeEventLogger =
     options?.nativeEventLogger ??
     (options?.nativeEventLogPath !== undefined
@@ -1374,12 +1417,27 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           yield* Effect.suspend(() => stopSessionInternal(existing));
         }
 
+        const settings = yield* serverSettings.getSettings.pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterProcessError({
+                provider: PROVIDER,
+                threadId: input.threadId,
+                detail: cause.message,
+                cause,
+              }),
+          ),
+        );
+        const managedConfigArgs = buildChromeDevToolsMcpCodexConfigArgs(
+          settings.integrations.chromeDevToolsMcp,
+        );
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
           cwd: input.cwd ?? process.cwd(),
           binaryPath: codexConfig.binaryPath,
           ...(options?.environment ? { environment: options.environment } : {}),
+          ...(managedConfigArgs.length > 0 ? { managedConfigArgs } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
           ...(Schema.is(CodexResumeCursorSchema)(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }

@@ -322,6 +322,18 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+export const ChromeDevToolsMcpIntegrationSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+});
+export type ChromeDevToolsMcpIntegrationSettings = typeof ChromeDevToolsMcpIntegrationSettings.Type;
+
+export const ServerIntegrationsSettings = Schema.Struct({
+  chromeDevToolsMcp: ChromeDevToolsMcpIntegrationSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+}).pipe(Schema.withDecodingDefault(Effect.succeed({})));
+export type ServerIntegrationsSettings = typeof ServerIntegrationsSettings.Type;
+
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL_MS = 30_000;
 
 export const ServerSettings = Schema.Struct({
@@ -363,6 +375,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  integrations: ServerIntegrationsSettings,
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -428,6 +441,10 @@ const OpenCodeSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const ChromeDevToolsMcpIntegrationSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+});
+
 export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
@@ -447,6 +464,11 @@ export const ServerSettingsPatch = Schema.Struct({
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
       cursor: Schema.optionalKey(CursorSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
+    }),
+  ),
+  integrations: Schema.optionalKey(
+    Schema.Struct({
+      chromeDevToolsMcp: Schema.optionalKey(ChromeDevToolsMcpIntegrationSettingsPatch),
     }),
   ),
   // Whole-map replacement for the new instance config. Patching individual

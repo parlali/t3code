@@ -11,6 +11,7 @@ import {
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 import {
+  buildCodexAppServerArgs,
   buildTurnStartParams,
   isRecoverableThreadResumeError,
   openCodexThread,
@@ -144,6 +145,20 @@ describe("buildTurnStartParams", () => {
         },
       ],
     });
+  });
+});
+
+describe("buildCodexAppServerArgs", () => {
+  it("appends managed config args after app-server", () => {
+    assert.deepEqual(buildCodexAppServerArgs(["-c", 'mcp_servers.chrome-devtools.command="npx"']), [
+      "app-server",
+      "-c",
+      'mcp_servers.chrome-devtools.command="npx"',
+    ]);
+  });
+
+  it("returns the plain app-server command when no managed config is present", () => {
+    assert.deepEqual(buildCodexAppServerArgs(undefined), ["app-server"]);
   });
 });
 

@@ -24,6 +24,7 @@ import { it, vi } from "@effect/vitest";
 import { Context, Effect, Exit, Fiber, Layer, Option, Queue, Schema, Scope, Stream } from "effect";
 import * as CodexErrors from "effect-codex-app-server/errors";
 
+import { buildChromeDevToolsMcpCodexConfigArgs } from "../../integrations/chromeDevToolsMcp.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
@@ -276,6 +277,47 @@ validationLayer("CodexAdapterLive validation", (it) => {
       });
     }),
   );
+
+  it.effect("reads latest Chrome DevTools MCP integration settings for new sessions", () => {
+    const runtimeFactory = makeRuntimeFactory();
+    const customLayer = Layer.effect(
+      CodexAdapter,
+      Effect.gen(function* () {
+        const codexConfig = Schema.decodeSync(CodexSettings)({});
+        return yield* makeCodexAdapter(codexConfig, {
+          makeRuntime: runtimeFactory.factory,
+        });
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      yield* serverSettings.updateSettings({
+        integrations: {
+          chromeDevToolsMcp: {
+            enabled: true,
+          },
+        },
+      });
+
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-chrome-mcp"),
+        runtimeMode: "full-access",
+      });
+
+      assert.deepStrictEqual(
+        runtimeFactory.lastRuntime?.options.managedConfigArgs,
+        buildChromeDevToolsMcpCodexConfigArgs({ enabled: true }),
+      );
+    }).pipe(Effect.provide(customLayer));
+  });
 });
 
 const sessionRuntimeFactory = makeRuntimeFactory();
@@ -879,6 +921,47 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       assert.equal(secondEvent?.type, "runtime.warning");
       if (secondEvent?.type === "runtime.warning") {
         assert.equal(secondEvent.payload.message, "Sandbox setup failed");
+      }
+    }),
+  );
+
+  it.effect("maps MCP startup status failures to status and warning events", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+        Effect.forkChild,
+      );
+
+      yield* runtime.emit({
+        id: asEventId("evt-mcp-startup-failed"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-1"),
+        createdAt: new Date().toISOString(),
+        method: "mcpServer/startupStatus/updated",
+        payload: {
+          name: "chrome-devtools",
+          status: "failed",
+          error: "Chrome executable not found",
+        },
+      });
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+
+      assert.equal(events.length, 2);
+      assert.equal(events[0]?.type, "mcp.status.updated");
+      if (events[0]?.type === "mcp.status.updated") {
+        assert.deepEqual(events[0].payload.status, {
+          name: "chrome-devtools",
+          status: "failed",
+          error: "Chrome executable not found",
+        });
+      }
+      assert.equal(events[1]?.type, "runtime.warning");
+      if (events[1]?.type === "runtime.warning") {
+        assert.equal(
+          events[1].payload.message,
+          "MCP server 'chrome-devtools' startup failed: Chrome executable not found",
+        );
       }
     }),
   );

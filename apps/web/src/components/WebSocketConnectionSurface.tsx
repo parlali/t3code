@@ -13,10 +13,8 @@ import {
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { reconnectAllEnvironmentConnections } from "../environments/runtime";
 
-const FORCED_WS_RECONNECT_DEBOUNCE_MS = 5_000;
 const RECOVERED_TOAST_MIN_DISCONNECT_MS = 10_000;
 const RECOVERED_TOAST_THROTTLE_MS = 60_000;
-type WsAutoReconnectTrigger = "focus" | "online";
 
 const connectionTimeFormatter = new Intl.DateTimeFormat(undefined, {
   day: "numeric",
@@ -113,28 +111,6 @@ function SlowRpcAckRequestDetails({ requests }: { requests: ReadonlyArray<SlowRp
   );
 }
 
-export function shouldAutoReconnect(
-  status: WsConnectionStatus,
-  trigger: WsAutoReconnectTrigger,
-): boolean {
-  const uiState = getWsConnectionUiState(status);
-
-  if (trigger === "online") {
-    return (
-      uiState === "offline" ||
-      uiState === "reconnecting" ||
-      uiState === "error" ||
-      status.reconnectPhase === "exhausted"
-    );
-  }
-
-  return (
-    status.online &&
-    status.hasConnected &&
-    (uiState === "reconnecting" || status.reconnectPhase === "exhausted")
-  );
-}
-
 export function shouldRestartStalledReconnect(
   status: WsConnectionStatus,
   expectedNextRetryAt: string,
@@ -175,7 +151,6 @@ export function shouldShowRecoveredToast(
 export function WebSocketConnectionCoordinator() {
   const status = useWsConnectionStatus();
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const lastForcedReconnectAtRef = useRef(0);
   const toastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
   const toastResetTimerRef = useRef<number | null>(null);
   const lastRecoveredToastAtRef = useRef(0);
@@ -187,7 +162,6 @@ export function WebSocketConnectionCoordinator() {
       window.clearTimeout(toastResetTimerRef.current);
       toastResetTimerRef.current = null;
     }
-    lastForcedReconnectAtRef.current = Date.now();
     void reconnectAllEnvironmentConnections("websocket-coordinator").catch((error) => {
       if (!showFailureToast) {
         console.warn("Automatic WebSocket reconnect failed", { error });
@@ -212,36 +186,18 @@ export function WebSocketConnectionCoordinator() {
   const triggerManualReconnect = useEffectEvent(() => {
     runReconnect(true);
   });
-  const triggerAutoReconnect = useEffectEvent((trigger: WsAutoReconnectTrigger) => {
-    const currentStatus =
-      trigger === "online" ? setBrowserOnlineStatus(true) : getWsConnectionStatus();
-
-    if (!shouldAutoReconnect(currentStatus, trigger)) {
-      return;
-    }
-    if (Date.now() - lastForcedReconnectAtRef.current < FORCED_WS_RECONNECT_DEBOUNCE_MS) {
-      return;
-    }
-
-    runReconnect(false);
-  });
 
   useEffect(() => {
     const handleOnline = () => {
-      triggerAutoReconnect("online");
-    };
-    const handleFocus = () => {
-      triggerAutoReconnect("focus");
+      setBrowserOnlineStatus(true);
     };
 
     syncBrowserOnlineStatus();
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", syncBrowserOnlineStatus);
-    window.addEventListener("focus", handleFocus);
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", syncBrowserOnlineStatus);
-      window.removeEventListener("focus", handleFocus);
     };
   }, []);
 
