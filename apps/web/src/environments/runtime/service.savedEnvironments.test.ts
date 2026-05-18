@@ -144,8 +144,7 @@ vi.mock("~/terminalStateStore", () => ({
 vi.mock("~/uiStateStore", () => ({
   useUiStateStore: {
     getState: () => ({
-      clearThreadUi: vi.fn(),
-      syncPromotedDraftThreadRefs: vi.fn(),
+      syncProjects: vi.fn(),
     }),
   },
 }));
@@ -199,10 +198,20 @@ function createClient() {
       getStatusSnapshot: vi.fn(async () => ({ sessions: [], updatedAt: new Date().toISOString() })),
       onEvent: vi.fn(() => () => undefined),
     },
-    threadRead: {
-      getSnapshot: vi.fn(async () => ({ receipts: [], updatedAt: new Date().toISOString() })),
-      markVisited: vi.fn(async () => undefined),
-      markUnread: vi.fn(async () => undefined),
+    threadAttention: {
+      getSnapshot: vi.fn(async () => ({ states: [], updatedAt: new Date().toISOString() })),
+      markSeen: vi.fn(async (input) => ({
+        type: "state-cleared" as const,
+        threadId: input.threadId,
+        updatedAt: input.observedAt ?? new Date().toISOString(),
+        revision: 1,
+      })),
+      markUnseen: vi.fn(async (input) => ({
+        type: "state-cleared" as const,
+        threadId: input.threadId,
+        updatedAt: input.observedAt ?? new Date().toISOString(),
+        revision: 1,
+      })),
       subscribe: vi.fn(() => () => undefined),
     },
     threadWorkbench: {

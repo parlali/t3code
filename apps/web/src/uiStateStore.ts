@@ -27,15 +27,11 @@ export interface UiProjectState {
   projectOrder: string[];
 }
 
-export interface UiThreadState {
-  threadLastVisitedAtById: Record<string, string>;
-}
-
 export interface UiEndpointState {
   defaultAdvertisedEndpointKey: string | null;
 }
 
-export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {}
+export interface UiState extends UiProjectState, UiEndpointState {}
 
 export interface SyncProjectInput {
   /** Physical project key (env + cwd). Used for manual sort order. */
@@ -45,15 +41,9 @@ export interface SyncProjectInput {
   cwd: string;
 }
 
-export interface SyncThreadInput {
-  key: string;
-  seedVisitedAt?: string | undefined;
-}
-
 const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
-  threadLastVisitedAtById: {},
   defaultAdvertisedEndpointKey: null,
 };
 
@@ -335,90 +325,6 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
   };
 }
 
-export function syncThreads(state: UiState, threads: readonly SyncThreadInput[]): UiState {
-  const retainedThreadIds = new Set(threads.map((thread) => thread.key));
-  const nextThreadLastVisitedAtById = Object.fromEntries(
-    Object.entries(state.threadLastVisitedAtById).filter(([threadId]) =>
-      retainedThreadIds.has(threadId),
-    ),
-  );
-  for (const thread of threads) {
-    if (
-      nextThreadLastVisitedAtById[thread.key] === undefined &&
-      thread.seedVisitedAt !== undefined &&
-      thread.seedVisitedAt.length > 0
-    ) {
-      nextThreadLastVisitedAtById[thread.key] = thread.seedVisitedAt;
-    }
-  }
-  if (recordsEqual(state.threadLastVisitedAtById, nextThreadLastVisitedAtById)) {
-    return state;
-  }
-  return {
-    ...state,
-    threadLastVisitedAtById: nextThreadLastVisitedAtById,
-  };
-}
-
-export function markThreadVisited(state: UiState, threadId: string, visitedAt?: string): UiState {
-  const at = visitedAt ?? new Date().toISOString();
-  const visitedAtMs = Date.parse(at);
-  const previousVisitedAt = state.threadLastVisitedAtById[threadId];
-  const previousVisitedAtMs = previousVisitedAt ? Date.parse(previousVisitedAt) : NaN;
-  if (
-    Number.isFinite(previousVisitedAtMs) &&
-    Number.isFinite(visitedAtMs) &&
-    previousVisitedAtMs >= visitedAtMs
-  ) {
-    return state;
-  }
-  return {
-    ...state,
-    threadLastVisitedAtById: {
-      ...state.threadLastVisitedAtById,
-      [threadId]: at,
-    },
-  };
-}
-
-export function markThreadUnread(
-  state: UiState,
-  threadId: string,
-  latestTurnCompletedAt: string | null | undefined,
-): UiState {
-  if (!latestTurnCompletedAt) {
-    return state;
-  }
-  const latestTurnCompletedAtMs = Date.parse(latestTurnCompletedAt);
-  if (Number.isNaN(latestTurnCompletedAtMs)) {
-    return state;
-  }
-  const unreadVisitedAt = new Date(latestTurnCompletedAtMs - 1).toISOString();
-  if (state.threadLastVisitedAtById[threadId] === unreadVisitedAt) {
-    return state;
-  }
-  return {
-    ...state,
-    threadLastVisitedAtById: {
-      ...state.threadLastVisitedAtById,
-      [threadId]: unreadVisitedAt,
-    },
-  };
-}
-
-export function clearThreadUi(state: UiState, threadId: string): UiState {
-  const hasVisitedState = threadId in state.threadLastVisitedAtById;
-  if (!hasVisitedState) {
-    return state;
-  }
-  const nextThreadLastVisitedAtById = { ...state.threadLastVisitedAtById };
-  delete nextThreadLastVisitedAtById[threadId];
-  return {
-    ...state,
-    threadLastVisitedAtById: nextThreadLastVisitedAtById,
-  };
-}
-
 export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | null): UiState {
   const nextKey = key && key.length > 0 ? key : null;
   if (state.defaultAdvertisedEndpointKey === nextKey) {
@@ -499,10 +405,6 @@ export function reorderProjects(
 
 interface UiStateStore extends UiState {
   syncProjects: (projects: readonly SyncProjectInput[]) => void;
-  syncThreads: (threads: readonly SyncThreadInput[]) => void;
-  markThreadVisited: (threadId: string, visitedAt?: string) => void;
-  markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
-  clearThreadUi: (threadId: string) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
   toggleProject: (projectId: string) => void;
   setProjectExpanded: (projectId: string, expanded: boolean) => void;
@@ -515,12 +417,6 @@ interface UiStateStore extends UiState {
 export const useUiStateStore = create<UiStateStore>((set) => ({
   ...readPersistedState(),
   syncProjects: (projects) => set((state) => syncProjects(state, projects)),
-  syncThreads: (threads) => set((state) => syncThreads(state, threads)),
-  markThreadVisited: (threadId, visitedAt) =>
-    set((state) => markThreadVisited(state, threadId, visitedAt)),
-  markThreadUnread: (threadId, latestTurnCompletedAt) =>
-    set((state) => markThreadUnread(state, threadId, latestTurnCompletedAt)),
-  clearThreadUi: (threadId) => set((state) => clearThreadUi(state, threadId)),
   setDefaultAdvertisedEndpointKey: (key) =>
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),

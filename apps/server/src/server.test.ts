@@ -93,7 +93,7 @@ import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./server
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
-import { ThreadReadReceipts, type ThreadReadReceiptsShape } from "./threadReadReceipts.ts";
+import { ThreadAttention, type ThreadAttentionShape } from "./threadAttention.ts";
 import { ThreadWorkbenchStates, type ThreadWorkbenchStateShape } from "./threadWorkbenchState.ts";
 import {
   BrowserTraceCollector,
@@ -347,7 +347,7 @@ const buildAppUnderTest = (options?: {
     vcsStatusBroadcaster?: Partial<VcsStatusBroadcaster.VcsStatusBroadcasterShape>;
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunnerShape>;
     terminalManager?: Partial<TerminalManagerShape>;
-    threadReadReceipts?: Partial<ThreadReadReceiptsShape>;
+    threadAttention?: Partial<ThreadAttentionShape>;
     threadWorkbenchStates?: Partial<ThreadWorkbenchStateShape>;
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
@@ -596,28 +596,30 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ThreadReadReceipts)({
-          getSnapshot: Effect.succeed({ receipts: [], updatedAt: TEST_EPOCH_ISO }),
-          markVisited: (input) =>
+        Layer.mock(ThreadAttention)({
+          getSnapshot: () => Effect.succeed({ states: [], updatedAt: TEST_EPOCH_ISO }),
+          markSeen: (_viewerId, input) =>
             Effect.succeed({
+              type: "state-cleared" as const,
               threadId: input.threadId,
-              lastVisitedAt: input.visitedAt ?? TEST_EPOCH_ISO,
-              updatedAt: TEST_EPOCH_ISO,
+              updatedAt: input.observedAt ?? TEST_EPOCH_ISO,
+              revision: 1,
             }),
-          markUnread: (input) =>
+          markUnseen: (_viewerId, input) =>
             Effect.succeed({
+              type: "state-cleared" as const,
               threadId: input.threadId,
-              lastVisitedAt: new Date(Date.parse(input.latestTurnCompletedAt) - 1).toISOString(),
-              updatedAt: TEST_EPOCH_ISO,
+              updatedAt: input.observedAt ?? TEST_EPOCH_ISO,
+              revision: 1,
             }),
-          streamChanges: Stream.empty,
-          streamWithSnapshot: Effect.succeed(
-            Stream.make({
-              type: "snapshot" as const,
-              snapshot: { receipts: [], updatedAt: TEST_EPOCH_ISO },
-            }),
-          ),
-          ...options?.layers?.threadReadReceipts,
+          streamWithSnapshot: (_viewerId, _domainEvents) =>
+            Effect.succeed(
+              Stream.make({
+                type: "snapshot" as const,
+                snapshot: { states: [], updatedAt: TEST_EPOCH_ISO },
+              }),
+            ),
+          ...options?.layers?.threadAttention,
         }),
       ),
       Layer.provide(

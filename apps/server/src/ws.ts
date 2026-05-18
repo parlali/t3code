@@ -56,7 +56,7 @@ import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
-import { ThreadReadReceipts } from "./threadReadReceipts.ts";
+import { ThreadAttention } from "./threadAttention.ts";
 import { ThreadWorkbenchStates } from "./threadWorkbenchState.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
@@ -220,7 +220,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const vcsProvisioning = yield* VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager;
-      const threadReadReceipts = yield* ThreadReadReceipts;
+      const threadAttention = yield* ThreadAttention;
       const threadWorkbenchStates = yield* ThreadWorkbenchStates;
       const providerRegistry = yield* ProviderRegistry;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
@@ -1346,20 +1346,24 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             terminalManager.getStatusSnapshot(input),
             { "rpc.aggregate": "terminal" },
           ),
-        [WS_METHODS.threadReadGetSnapshot]: (_input) =>
-          observeRpcEffect(WS_METHODS.threadReadGetSnapshot, threadReadReceipts.getSnapshot, {
-            "rpc.aggregate": "threadRead",
-          }),
-        [WS_METHODS.threadReadMarkVisited]: (input) =>
+        [WS_METHODS.threadAttentionGetSnapshot]: (_input) =>
           observeRpcEffect(
-            WS_METHODS.threadReadMarkVisited,
-            threadReadReceipts.markVisited(input),
-            { "rpc.aggregate": "threadRead" },
+            WS_METHODS.threadAttentionGetSnapshot,
+            threadAttention.getSnapshot(currentSessionId),
+            { "rpc.aggregate": "threadAttention" },
           ),
-        [WS_METHODS.threadReadMarkUnread]: (input) =>
-          observeRpcEffect(WS_METHODS.threadReadMarkUnread, threadReadReceipts.markUnread(input), {
-            "rpc.aggregate": "threadRead",
-          }),
+        [WS_METHODS.threadAttentionMarkSeen]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadAttentionMarkSeen,
+            threadAttention.markSeen(currentSessionId, input),
+            { "rpc.aggregate": "threadAttention" },
+          ),
+        [WS_METHODS.threadAttentionMarkUnseen]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadAttentionMarkUnseen,
+            threadAttention.markUnseen(currentSessionId, input),
+            { "rpc.aggregate": "threadAttention" },
+          ),
         [WS_METHODS.threadWorkbenchGetState]: (input) =>
           observeRpcEffect(
             WS_METHODS.threadWorkbenchGetState,
@@ -1387,11 +1391,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "terminal" },
           ),
-        [WS_METHODS.subscribeThreadReadReceipts]: (_input) =>
+        [WS_METHODS.subscribeThreadAttention]: (_input) =>
           observeRpcStreamEffect(
-            WS_METHODS.subscribeThreadReadReceipts,
-            threadReadReceipts.streamWithSnapshot,
-            { "rpc.aggregate": "threadRead" },
+            WS_METHODS.subscribeThreadAttention,
+            threadAttention.streamWithSnapshot(
+              currentSessionId,
+              orchestrationEngine.streamDomainEvents,
+            ),
+            { "rpc.aggregate": "threadAttention" },
           ),
         [WS_METHODS.subscribeServerConfig]: (_input) =>
           observeRpcStreamEffect(

@@ -141,7 +141,7 @@ import {
   type TerminalContextSelection,
 } from "../lib/terminalContext";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
-import { useThreadReadReceiptStore } from "../threadReadReceiptStore";
+import { useThreadAttentionStore } from "../threadAttentionStore";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
@@ -976,6 +976,21 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const activeThreadAttention = useThreadAttentionStore((state) =>
+    activeThreadKey ? state.attentionByThreadKey[activeThreadKey] : undefined,
+  );
+  const [attentionVisibilityEpoch, setAttentionVisibilityEpoch] = useState(0);
+  useEffect(() => {
+    const notifyVisibilityChanged = () => {
+      setAttentionVisibilityEpoch((epoch) => epoch + 1);
+    };
+    window.addEventListener("focus", notifyVisibilityChanged);
+    document.addEventListener("visibilitychange", notifyVisibilityChanged);
+    return () => {
+      window.removeEventListener("focus", notifyVisibilityChanged);
+      document.removeEventListener("visibilitychange", notifyVisibilityChanged);
+    };
+  }, []);
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
@@ -1283,49 +1298,25 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     if (!serverThread?.id) return;
-    const visitedAt = new Date().toISOString();
-    useThreadReadReceiptStore
-      .getState()
-      .markVisitedOptimistic(serverThread.environmentId, serverThread.id, visitedAt, visitedAt);
-    void readEnvironmentApi(serverThread.environmentId)
-      ?.threadRead.markVisited({
-        threadId: serverThread.id,
-        visitedAt,
-        observedAt: visitedAt,
-      })
-      .catch((error: unknown) => {
-        console.warn("Failed to mark thread visited", error);
-      });
-  }, [serverThread?.environmentId, serverThread?.id]);
-
-  useEffect(() => {
-    if (!serverThread?.id) return;
-    if (!latestTurnSettled) return;
-    if (!activeLatestTurn?.completedAt) return;
-    const turnCompletedAt = Date.parse(activeLatestTurn.completedAt);
-    if (Number.isNaN(turnCompletedAt)) return;
+    if (!activeThreadAttention) return;
+    if (document.visibilityState !== "visible") return;
+    if (!document.hasFocus()) return;
     const observedAt = new Date().toISOString();
 
-    useThreadReadReceiptStore
-      .getState()
-      .markVisitedOptimistic(
-        serverThread.environmentId,
-        serverThread.id,
-        activeLatestTurn.completedAt,
-        observedAt,
-      );
     void readEnvironmentApi(serverThread.environmentId)
-      ?.threadRead.markVisited({
+      ?.threadAttention.markSeen({
         threadId: serverThread.id,
-        visitedAt: activeLatestTurn.completedAt,
         observedAt,
       })
+      .then((event) => {
+        useThreadAttentionStore.getState().applyStreamEvent(serverThread.environmentId, event);
+      })
       .catch((error: unknown) => {
-        console.warn("Failed to mark thread visited", error);
+        console.warn("Failed to mark thread attention seen", error);
       });
   }, [
-    activeLatestTurn?.completedAt,
-    latestTurnSettled,
+    activeThreadAttention?.revision,
+    attentionVisibilityEpoch,
     serverThread?.environmentId,
     serverThread?.id,
   ]);

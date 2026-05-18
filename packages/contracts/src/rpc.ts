@@ -99,13 +99,13 @@ import {
   TerminalWriteInput,
 } from "./terminal.ts";
 import {
-  ThreadReadReceipt,
-  ThreadReadReceiptError,
-  ThreadReadReceiptMarkUnreadInput,
-  ThreadReadReceiptMarkVisitedInput,
-  ThreadReadReceiptSnapshot,
-  ThreadReadReceiptStreamEvent,
-} from "./threadReadReceipts.ts";
+  ThreadAttentionError,
+  ThreadAttentionMarkSeenInput,
+  ThreadAttentionMarkUnseenInput,
+  ThreadAttentionMutationEvent,
+  ThreadAttentionSnapshot,
+  ThreadAttentionStreamEvent,
+} from "./threadAttention.ts";
 import {
   ThreadWorkbenchGetStateInput,
   ThreadWorkbenchSetStateInput,
@@ -194,10 +194,10 @@ export const WS_METHODS = {
   terminalClose: "terminal.close",
   terminalGetStatusSnapshot: "terminal.getStatusSnapshot",
 
-  // Thread read receipt methods
-  threadReadGetSnapshot: "threadRead.getSnapshot",
-  threadReadMarkVisited: "threadRead.markVisited",
-  threadReadMarkUnread: "threadRead.markUnread",
+  // Thread attention methods
+  threadAttentionGetSnapshot: "threadAttention.getSnapshot",
+  threadAttentionMarkSeen: "threadAttention.markSeen",
+  threadAttentionMarkUnseen: "threadAttention.markUnseen",
 
   // Thread workbench state methods
   threadWorkbenchGetState: "threadWorkbench.getState",
@@ -225,7 +225,7 @@ export const WS_METHODS = {
   // Streaming subscriptions
   subscribeVcsStatus: "subscribeVcsStatus",
   subscribeTerminalEvents: "subscribeTerminalEvents",
-  subscribeThreadReadReceipts: "subscribeThreadReadReceipts",
+  subscribeThreadAttention: "subscribeThreadAttention",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
@@ -549,22 +549,22 @@ export const WsTerminalGetStatusSnapshotRpc = Rpc.make(WS_METHODS.terminalGetSta
   success: TerminalRuntimeStatusSnapshot,
 });
 
-export const WsThreadReadGetSnapshotRpc = Rpc.make(WS_METHODS.threadReadGetSnapshot, {
+export const WsThreadAttentionGetSnapshotRpc = Rpc.make(WS_METHODS.threadAttentionGetSnapshot, {
   payload: Schema.Struct({}),
-  success: ThreadReadReceiptSnapshot,
-  error: ThreadReadReceiptError,
+  success: ThreadAttentionSnapshot,
+  error: ThreadAttentionError,
 });
 
-export const WsThreadReadMarkVisitedRpc = Rpc.make(WS_METHODS.threadReadMarkVisited, {
-  payload: ThreadReadReceiptMarkVisitedInput,
-  success: ThreadReadReceipt,
-  error: ThreadReadReceiptError,
+export const WsThreadAttentionMarkSeenRpc = Rpc.make(WS_METHODS.threadAttentionMarkSeen, {
+  payload: ThreadAttentionMarkSeenInput,
+  success: ThreadAttentionMutationEvent,
+  error: ThreadAttentionError,
 });
 
-export const WsThreadReadMarkUnreadRpc = Rpc.make(WS_METHODS.threadReadMarkUnread, {
-  payload: ThreadReadReceiptMarkUnreadInput,
-  success: ThreadReadReceipt,
-  error: ThreadReadReceiptError,
+export const WsThreadAttentionMarkUnseenRpc = Rpc.make(WS_METHODS.threadAttentionMarkUnseen, {
+  payload: ThreadAttentionMarkUnseenInput,
+  success: ThreadAttentionMutationEvent,
+  error: ThreadAttentionError,
 });
 
 export const WsThreadWorkbenchGetStateRpc = Rpc.make(WS_METHODS.threadWorkbenchGetState, {
@@ -650,10 +650,10 @@ export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTermina
   stream: true,
 });
 
-export const WsSubscribeThreadReadReceiptsRpc = Rpc.make(WS_METHODS.subscribeThreadReadReceipts, {
+export const WsSubscribeThreadAttentionRpc = Rpc.make(WS_METHODS.subscribeThreadAttention, {
   payload: Schema.Struct({}),
-  success: ThreadReadReceiptStreamEvent,
-  error: ThreadReadReceiptError,
+  success: ThreadAttentionStreamEvent,
+  error: ThreadAttentionError,
   stream: true,
 });
 
@@ -730,13 +730,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
   WsTerminalGetStatusSnapshotRpc,
-  WsThreadReadGetSnapshotRpc,
-  WsThreadReadMarkVisitedRpc,
-  WsThreadReadMarkUnreadRpc,
+  WsThreadAttentionGetSnapshotRpc,
+  WsThreadAttentionMarkSeenRpc,
+  WsThreadAttentionMarkUnseenRpc,
   WsThreadWorkbenchGetStateRpc,
   WsThreadWorkbenchSetStateRpc,
   WsSubscribeTerminalEventsRpc,
-  WsSubscribeThreadReadReceiptsRpc,
+  WsSubscribeThreadAttentionRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,

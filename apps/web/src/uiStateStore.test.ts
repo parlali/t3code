@@ -1,11 +1,8 @@
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import { ProjectId } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  clearThreadUi,
   hydratePersistedProjectState,
-  markThreadVisited,
-  markThreadUnread,
   PERSISTED_STATE_KEY,
   type PersistedUiState,
   persistState,
@@ -13,7 +10,6 @@ import {
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
   syncProjects,
-  syncThreads,
   type UiState,
 } from "./uiStateStore";
 
@@ -21,62 +17,12 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
     projectExpandedById: {},
     projectOrder: [],
-    threadLastVisitedAtById: {},
     defaultAdvertisedEndpointKey: null,
     ...overrides,
   };
 }
 
 describe("uiStateStore pure functions", () => {
-  it("markThreadVisited stores the provided server timestamp", () => {
-    const threadId = ThreadId.make("thread-1");
-    const initialState = makeUiState();
-
-    const next = markThreadVisited(initialState, threadId, "2026-02-25T12:30:00.700Z");
-
-    expect(next.threadLastVisitedAtById[threadId]).toBe("2026-02-25T12:30:00.700Z");
-  });
-
-  it("markThreadVisited does not move visit state backwards under clock skew", () => {
-    const threadId = ThreadId.make("thread-1");
-    const initialState = makeUiState({
-      threadLastVisitedAtById: {
-        [threadId]: "2026-02-25T12:30:00.700Z",
-      },
-    });
-
-    const next = markThreadVisited(initialState, threadId, "2026-02-25T12:30:00.000Z");
-
-    expect(next).toBe(initialState);
-  });
-
-  it("markThreadUnread moves lastVisitedAt before completion for a completed thread", () => {
-    const threadId = ThreadId.make("thread-1");
-    const latestTurnCompletedAt = "2026-02-25T12:30:00.000Z";
-    const initialState = makeUiState({
-      threadLastVisitedAtById: {
-        [threadId]: "2026-02-25T12:35:00.000Z",
-      },
-    });
-
-    const next = markThreadUnread(initialState, threadId, latestTurnCompletedAt);
-
-    expect(next.threadLastVisitedAtById[threadId]).toBe("2026-02-25T12:29:59.999Z");
-  });
-
-  it("markThreadUnread does not change a thread without a completed turn", () => {
-    const threadId = ThreadId.make("thread-1");
-    const initialState = makeUiState({
-      threadLastVisitedAtById: {
-        [threadId]: "2026-02-25T12:35:00.000Z",
-      },
-    });
-
-    const next = markThreadUnread(initialState, threadId, null);
-
-    expect(next).toBe(initialState);
-  });
-
   it("reorderProjects moves a project to a target index", () => {
     const project1 = ProjectId.make("project-1");
     const project2 = ProjectId.make("project-2");
@@ -334,39 +280,6 @@ describe("uiStateStore pure functions", () => {
     expect(next.projectExpandedById[nextLogicalKey]).toBe(false);
   });
 
-  it("syncThreads prunes missing thread UI state", () => {
-    const thread1 = ThreadId.make("thread-1");
-    const thread2 = ThreadId.make("thread-2");
-    const initialState = makeUiState({
-      threadLastVisitedAtById: {
-        [thread1]: "2026-02-25T12:35:00.000Z",
-        [thread2]: "2026-02-25T12:36:00.000Z",
-      },
-    });
-
-    const next = syncThreads(initialState, [{ key: thread1 }]);
-
-    expect(next.threadLastVisitedAtById).toEqual({
-      [thread1]: "2026-02-25T12:35:00.000Z",
-    });
-  });
-
-  it("syncThreads seeds visit state for unseen snapshot threads", () => {
-    const thread1 = ThreadId.make("thread-1");
-    const initialState = makeUiState();
-
-    const next = syncThreads(initialState, [
-      {
-        key: thread1,
-        seedVisitedAt: "2026-02-25T12:35:00.000Z",
-      },
-    ]);
-
-    expect(next.threadLastVisitedAtById).toEqual({
-      [thread1]: "2026-02-25T12:35:00.000Z",
-    });
-  });
-
   it("setProjectExpanded updates expansion without touching order", () => {
     const project1 = ProjectId.make("project-1");
     const initialState = makeUiState({
@@ -380,19 +293,6 @@ describe("uiStateStore pure functions", () => {
 
     expect(next.projectExpandedById[project1]).toBe(false);
     expect(next.projectOrder).toEqual([project1]);
-  });
-
-  it("clearThreadUi removes visit state for deleted threads", () => {
-    const thread1 = ThreadId.make("thread-1");
-    const initialState = makeUiState({
-      threadLastVisitedAtById: {
-        [thread1]: "2026-02-25T12:35:00.000Z",
-      },
-    });
-
-    const next = clearThreadUi(initialState, thread1);
-
-    expect(next.threadLastVisitedAtById).toEqual({});
   });
 });
 

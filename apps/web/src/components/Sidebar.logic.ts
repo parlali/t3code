@@ -58,10 +58,8 @@ type ThreadStatusInput = Pick<
   | "session"
   | "updatedAt"
 > & {
-  lastVisitedAt?: string | undefined;
+  hasUnseenAttention?: boolean | undefined;
 };
-
-type ThreadUnreadAnchorInput = Pick<SidebarThreadSummary, "createdAt" | "latestTurn" | "updatedAt">;
 
 export interface ThreadJumpHintVisibilityController {
   sync: (shouldShow: boolean) => void;
@@ -146,39 +144,6 @@ export function useThreadJumpHintVisibility(): {
     showThreadJumpHints,
     updateThreadJumpHintsVisibility,
   };
-}
-
-function isValidTimestamp(value: string | null | undefined): value is string {
-  return typeof value === "string" && !Number.isNaN(Date.parse(value));
-}
-
-export function resolveThreadUnreadAnchor(thread: ThreadUnreadAnchorInput): string | null {
-  if (!thread.latestTurn) {
-    return isValidTimestamp(thread.createdAt) ? thread.createdAt : null;
-  }
-  if (isValidTimestamp(thread.latestTurn.completedAt)) {
-    return thread.latestTurn.completedAt;
-  }
-  if (thread.latestTurn.state === "running") {
-    return null;
-  }
-  const fallback =
-    thread.updatedAt ??
-    thread.latestTurn.startedAt ??
-    thread.latestTurn.requestedAt ??
-    thread.createdAt;
-  return isValidTimestamp(fallback) ? fallback : null;
-}
-
-export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
-  const unreadAnchor = resolveThreadUnreadAnchor(thread);
-  if (!unreadAnchor) return false;
-  const completedAt = Date.parse(unreadAnchor);
-  if (!thread.lastVisitedAt) return thread.latestTurn !== null;
-
-  const lastVisitedAt = Date.parse(thread.lastVisitedAt);
-  if (Number.isNaN(lastVisitedAt)) return true;
-  return completedAt > lastVisitedAt;
 }
 
 export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null): boolean {
@@ -407,7 +372,7 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (hasUnseenCompletion(thread)) {
+  if (thread.hasUnseenAttention) {
     return {
       label: "Completed",
       colorClass: "text-emerald-600 dark:text-emerald-300/90",

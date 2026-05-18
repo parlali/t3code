@@ -9,7 +9,7 @@ import {
   type ServerConfig,
   type TerminalEvent,
   type TerminalRuntimeStatusSnapshot,
-  type ThreadReadReceiptStreamEvent,
+  type ThreadAttentionStreamEvent,
   ThreadId,
 } from "@t3tools/contracts";
 import { type QueryClient } from "@tanstack/react-query";
@@ -65,7 +65,7 @@ import {
 } from "~/store";
 import { useTerminalStateStore } from "~/terminalStateStore";
 import { useTerminalRuntimeStatusStore } from "~/terminalRuntimeStatusStore";
-import { useThreadReadReceiptStore } from "~/threadReadReceiptStore";
+import { useThreadAttentionStore } from "~/threadAttentionStore";
 import { useUiStateStore } from "~/uiStateStore";
 import type { WsProtocolCloseContext, WsProtocolLifecycleHandlers } from "../../rpc/protocol";
 import { getServerConfig } from "../../rpc/serverState";
@@ -920,30 +920,9 @@ function syncProjectUiFromStore() {
 
 function syncThreadUiFromStore() {
   const threads = selectThreadsAcrossEnvironments(useStore.getState());
-  useUiStateStore.getState().syncThreads(
-    threads.map((thread) => ({
-      key: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      seedVisitedAt: thread.updatedAt ?? thread.createdAt,
-    })),
-  );
   markPromotedDraftThreadsByRef(
     threads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
   );
-  const threadsByEnvironment = new Map<EnvironmentId, typeof threads>();
-  for (const thread of threads) {
-    const environmentThreads = threadsByEnvironment.get(thread.environmentId) ?? [];
-    environmentThreads.push(thread);
-    threadsByEnvironment.set(thread.environmentId, environmentThreads);
-  }
-  for (const [environmentId, environmentThreads] of threadsByEnvironment) {
-    useThreadReadReceiptStore.getState().syncThreadSeeds(
-      environmentId,
-      environmentThreads.map((thread) => ({
-        threadId: thread.id,
-        seedVisitedAt: thread.createdAt,
-      })),
-    );
-  }
 }
 
 function reconcileSnapshotDerivedState() {
@@ -960,7 +939,7 @@ function reconcileSnapshotDerivedState() {
     draftThreadKeys: useComposerDraftStore.getState().listDraftThreadKeys(),
   });
   useTerminalStateStore.getState().removeOrphanedTerminalStates(activeThreadKeys);
-  useThreadReadReceiptStore.getState().removeOrphanedThreads(activeThreadKeys);
+  useThreadAttentionStore.getState().removeOrphanedThreads(activeThreadKeys);
 }
 
 export function shouldApplyTerminalEvent(input: {
@@ -1022,10 +1001,7 @@ function applyRecoveredEventBatch(
   }
   for (const threadId of batchEffects.clearDeletedThreadIds) {
     draftStore.clearDraftThread(scopeThreadRef(environmentId, threadId));
-    useUiStateStore
-      .getState()
-      .clearThreadUi(scopedThreadKey(scopeThreadRef(environmentId, threadId)));
-    useThreadReadReceiptStore.getState().removeThread(environmentId, threadId);
+    useThreadAttentionStore.getState().clearThread(environmentId, threadId);
   }
   for (const event of events) {
     if (event.type === "project.deleted") {
@@ -1090,10 +1066,9 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
       if (threadRef) {
         disposeThreadDetailSubscriptionByKey(scopedThreadKey(threadRef));
         useComposerDraftStore.getState().clearDraftThread(threadRef);
-        useUiStateStore.getState().clearThreadUi(scopedThreadKey(threadRef));
         useTerminalStateStore.getState().removeTerminalState(threadRef);
         useTerminalRuntimeStatusStore.getState().removeThread(environmentId, event.threadId);
-        useThreadReadReceiptStore.getState().removeThread(environmentId, event.threadId);
+        useThreadAttentionStore.getState().clearThread(environmentId, event.threadId);
       }
       syncThreadUiFromStore();
       return;
@@ -1144,11 +1119,11 @@ function createEnvironmentConnectionHandlers() {
     ) => {
       useTerminalRuntimeStatusStore.getState().syncSnapshot(environmentId, snapshot);
     },
-    applyThreadReadReceiptEvent: (
-      event: ThreadReadReceiptStreamEvent,
+    applyThreadAttentionEvent: (
+      event: ThreadAttentionStreamEvent,
       environmentId: EnvironmentId,
     ) => {
-      useThreadReadReceiptStore.getState().applyStreamEvent(environmentId, event);
+      useThreadAttentionStore.getState().applyStreamEvent(environmentId, event);
     },
   };
 }

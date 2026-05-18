@@ -9,13 +9,11 @@ import {
   getFallbackThreadIdAfterDelete,
   getVisibleThreadsForProject,
   getProjectSortTimestamp,
-  hasUnseenCompletion,
   isContextMenuPointerDown,
   orderItemsByPreferredIds,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
-  resolveThreadUnreadAnchor,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
@@ -55,75 +53,6 @@ function makeLatestTurn(overrides?: {
     completedAt,
   };
 }
-
-describe("hasUnseenCompletion", () => {
-  it("returns true when a thread completed after its last visit", () => {
-    expect(
-      hasUnseenCompletion({
-        createdAt: "2026-03-09T09:55:00.000Z",
-        hasActionableProposedPlan: false,
-        hasPendingApprovals: false,
-        hasPendingUserInput: false,
-        interactionMode: "default",
-        latestTurn: makeLatestTurn(),
-        lastVisitedAt: "2026-03-09T10:04:00.000Z",
-        session: null,
-        updatedAt: "2026-03-09T10:05:00.000Z",
-      }),
-    ).toBe(true);
-  });
-});
-
-describe("resolveThreadUnreadAnchor", () => {
-  it("prefers the latest turn completion timestamp", () => {
-    expect(
-      resolveThreadUnreadAnchor({
-        createdAt: "2026-03-09T09:55:00.000Z",
-        latestTurn: makeLatestTurn({
-          completedAt: "2026-03-09T10:05:00.000Z",
-        }),
-        updatedAt: "2026-03-09T10:06:00.000Z",
-      }),
-    ).toBe("2026-03-09T10:05:00.000Z");
-  });
-
-  it("falls back to thread update time for settled turns missing completedAt", () => {
-    expect(
-      resolveThreadUnreadAnchor({
-        createdAt: "2026-03-09T09:55:00.000Z",
-        latestTurn: makeLatestTurn({
-          completedAt: null,
-        }),
-        updatedAt: "2026-03-09T10:06:00.000Z",
-      }),
-    ).toBe("2026-03-09T10:06:00.000Z");
-  });
-
-  it("does not mark a running turn without a completion timestamp unread", () => {
-    expect(
-      resolveThreadUnreadAnchor({
-        createdAt: "2026-03-09T09:55:00.000Z",
-        latestTurn: {
-          ...makeLatestTurn({
-            completedAt: null,
-          }),
-          state: "running",
-        },
-        updatedAt: "2026-03-09T10:06:00.000Z",
-      }),
-    ).toBeNull();
-  });
-
-  it("uses creation time for thread summaries without latest-turn metadata", () => {
-    expect(
-      resolveThreadUnreadAnchor({
-        createdAt: "2026-03-09T09:55:00.000Z",
-        latestTurn: null,
-        updatedAt: "2026-03-09T10:06:00.000Z",
-      }),
-    ).toBe("2026-03-09T09:55:00.000Z");
-  });
-});
 
 describe("createThreadJumpHintVisibilityController", () => {
   beforeEach(() => {
@@ -537,7 +466,7 @@ describe("resolveThreadStatusPill", () => {
     hasPendingUserInput: false,
     interactionMode: "plan" as const,
     latestTurn: null,
-    lastVisitedAt: undefined,
+    hasUnseenAttention: false,
     session: {
       provider: ProviderDriverKind.make("codex"),
       status: "running" as const,
@@ -610,7 +539,7 @@ describe("resolveThreadStatusPill", () => {
           },
         },
       }),
-    ).toMatchObject({ label: "Completed", pulse: false });
+    ).toBeNull();
   });
 
   it("shows completed when there is an unseen completion and no active blocker", () => {
@@ -620,7 +549,7 @@ describe("resolveThreadStatusPill", () => {
           ...baseThread,
           interactionMode: "default",
           latestTurn: makeLatestTurn(),
-          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+          hasUnseenAttention: true,
           session: {
             ...baseThread.session,
             status: "ready",
@@ -631,51 +560,18 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Completed", pulse: false });
   });
 
-  it("shows completed for a settled latest turn that has activity but no completedAt", () => {
+  it("does not infer completed from latest-turn metadata without attention state", () => {
     expect(
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
           interactionMode: "default",
-          latestTurn: makeLatestTurn({
-            completedAt: null,
-          }),
-          lastVisitedAt: "2026-03-09T10:04:00.000Z",
-          session: {
-            ...baseThread.session,
-            status: "ready",
-            orchestrationStatus: "ready",
-          },
-          updatedAt: "2026-03-09T10:05:00.000Z",
-        },
-      }),
-    ).toMatchObject({ label: "Completed", pulse: false });
-  });
-
-  it("does not show completed for an unseeded thread without latest-turn metadata", () => {
-    expect(
-      resolveThreadStatusPill({
-        thread: {
-          ...baseThread,
-          latestTurn: null,
-          lastVisitedAt: undefined,
+          latestTurn: makeLatestTurn(),
+          hasUnseenAttention: false,
           session: null,
         },
       }),
     ).toBeNull();
-  });
-
-  it("shows completed after manually marking a no-latest-turn thread unread", () => {
-    expect(
-      resolveThreadStatusPill({
-        thread: {
-          ...baseThread,
-          latestTurn: null,
-          lastVisitedAt: "2026-03-09T09:54:59.999Z",
-          session: null,
-        },
-      }),
-    ).toMatchObject({ label: "Completed", pulse: false });
   });
 });
 

@@ -76,12 +76,12 @@ import type {
   TerminalWriteInput,
 } from "./terminal.ts";
 import type {
-  ThreadReadReceipt,
-  ThreadReadReceiptMarkUnreadInput,
-  ThreadReadReceiptMarkVisitedInput,
-  ThreadReadReceiptSnapshot,
-  ThreadReadReceiptStreamEvent,
-} from "./threadReadReceipts.ts";
+  ThreadAttentionMarkSeenInput,
+  ThreadAttentionMarkUnseenInput,
+  ThreadAttentionMutationEvent,
+  ThreadAttentionSnapshot,
+  ThreadAttentionStreamEvent,
+} from "./threadAttention.ts";
 import type {
   ThreadWorkbenchGetStateInput,
   ThreadWorkbenchSetStateInput,
@@ -387,11 +387,11 @@ export interface EnvironmentApi {
       options?: { readonly onResubscribe?: () => void },
     ) => () => void;
   };
-  threadRead: {
-    getSnapshot: () => Promise<ThreadReadReceiptSnapshot>;
-    markVisited: (input: ThreadReadReceiptMarkVisitedInput) => Promise<ThreadReadReceipt>;
-    markUnread: (input: ThreadReadReceiptMarkUnreadInput) => Promise<ThreadReadReceipt>;
-    subscribe: (callback: (event: ThreadReadReceiptStreamEvent) => void) => () => void;
+  threadAttention: {
+    getSnapshot: () => Promise<ThreadAttentionSnapshot>;
+    markSeen: (input: ThreadAttentionMarkSeenInput) => Promise<ThreadAttentionMutationEvent>;
+    markUnseen: (input: ThreadAttentionMarkUnseenInput) => Promise<ThreadAttentionMutationEvent>;
+    subscribe: (callback: (event: ThreadAttentionStreamEvent) => void) => () => void;
   };
   threadWorkbench: {
     getState: (input: ThreadWorkbenchGetStateInput) => Promise<ThreadWorkbenchState>;

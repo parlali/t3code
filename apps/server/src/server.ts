@@ -37,7 +37,7 @@ import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { TerminalManagerLive } from "./terminal/Layers/Manager.ts";
-import { ThreadReadReceiptsLive } from "./threadReadReceipts.ts";
+import { ThreadAttentionLive } from "./threadAttention.ts";
 import { ThreadWorkbenchStatesLive } from "./threadWorkbenchState.ts";
 import * as GitManager from "./git/GitManager.ts";
 import { KeybindingsLive } from "./keybindings.ts";
@@ -283,7 +283,7 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
-const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+const RuntimeCoreServicesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
@@ -291,7 +291,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(TerminalLayerLive),
-  Layer.provideMerge(ThreadReadReceiptsLive),
+  Layer.provideMerge(ThreadAttentionLive),
   Layer.provideMerge(ThreadWorkbenchStatesLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
@@ -308,6 +308,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Provided once at the runtime level so every consumer sees the same
   // logger instances.
   Layer.provideMerge(ProviderEventLoggersLive),
+);
+
+const RuntimeCoreDependenciesLive = RuntimeCoreServicesLive.pipe(
   // `OpenCodeDriver.create()` yields `OpenCodeRuntime`; previously the old
   // `ProviderRegistryLive` pulled `OpenCodeRuntimeLive` in for itself, but
   // the rewritten registry reads snapshots off the instance registry and

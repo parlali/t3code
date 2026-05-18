@@ -19,11 +19,11 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       onSessionEvent: (input, callback, options) =>
         rpcClient.terminal.onSessionEvent(input, callback, options),
     },
-    threadRead: {
-      getSnapshot: () => rpcClient.threadRead.getSnapshot(),
-      markVisited: (input) => rpcClient.threadRead.markVisited(input),
-      markUnread: (input) => rpcClient.threadRead.markUnread(input),
-      subscribe: (callback) => rpcClient.threadRead.subscribe(callback),
+    threadAttention: {
+      getSnapshot: () => rpcClient.threadAttention.getSnapshot(),
+      markSeen: (input) => rpcClient.threadAttention.markSeen(input),
+      markUnseen: (input) => rpcClient.threadAttention.markUnseen(input),
+      subscribe: (callback) => rpcClient.threadAttention.subscribe(callback),
     },
     threadWorkbench: {
       getState: rpcClient.threadWorkbench.getState,

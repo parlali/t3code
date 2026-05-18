@@ -203,17 +203,19 @@ function createMockEnvironmentApi(input: {
 }): EnvironmentApi {
   return {
     terminal: {} as EnvironmentApi["terminal"],
-    threadRead: {
-      getSnapshot: async () => ({ receipts: [], updatedAt: new Date().toISOString() }),
-      markVisited: async (receipt) => ({
-        threadId: receipt.threadId,
-        lastVisitedAt: receipt.visitedAt ?? new Date().toISOString(),
-        updatedAt: receipt.observedAt ?? new Date().toISOString(),
+    threadAttention: {
+      getSnapshot: async () => ({ states: [], updatedAt: new Date().toISOString() }),
+      markSeen: async (input) => ({
+        type: "state-cleared" as const,
+        threadId: input.threadId,
+        updatedAt: input.observedAt ?? new Date().toISOString(),
+        revision: 1,
       }),
-      markUnread: async (receipt) => ({
-        threadId: receipt.threadId,
-        lastVisitedAt: new Date(Date.parse(receipt.latestTurnCompletedAt) - 1).toISOString(),
-        updatedAt: receipt.observedAt ?? new Date().toISOString(),
+      markUnseen: async (input) => ({
+        type: "state-cleared" as const,
+        threadId: input.threadId,
+        updatedAt: input.observedAt ?? new Date().toISOString(),
+        revision: 1,
       }),
       subscribe: () => () => undefined,
     },
@@ -1752,7 +1754,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
     useUiStateStore.setState({
       projectExpandedById: {},
       projectOrder: [],
-      threadLastVisitedAtById: {},
     });
     useTerminalStateStore.persist.clearStorage();
     useTerminalStateStore.setState({
@@ -1839,7 +1840,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
         [PROJECT_LOGICAL_KEY]: false,
       },
       projectOrder: [PROJECT_LOGICAL_KEY],
-      threadLastVisitedAtById: {},
     });
 
     const mounted = await mountChatView({

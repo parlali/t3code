@@ -70,7 +70,11 @@ import {
   useStore,
 } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
-import { useThreadReadReceiptStore } from "../threadReadReceiptStore";
+import {
+  selectThreadTerminalRuntimeStatus,
+  useTerminalRuntimeStatusStore,
+} from "../terminalRuntimeStatusStore";
+import { useThreadAttentionStore } from "../threadAttentionStore";
 import { useUiStateStore } from "../uiStateStore";
 import {
   resolveShortcutCommand,
@@ -154,7 +158,6 @@ import {
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
-  resolveThreadUnreadAnchor,
   orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
@@ -323,13 +326,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
-  const lastVisitedAt = useThreadReadReceiptStore(
-    (state) => state.receiptByThreadKey[threadKey]?.lastVisitedAt,
+  const hasUnseenAttention = useThreadAttentionStore(
+    (state) => state.attentionByThreadKey[threadKey] !== undefined,
   );
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const hasSelection = useThreadSelectionStore((state) => state.selectedThreadKeys.size > 0);
-  const terminalOpen = useTerminalStateStore(
-    (state) => selectThreadTerminalState(state.terminalStateByThreadKey, threadRef).terminalOpen,
+  const hasOpenTerminal = useTerminalRuntimeStatusStore(
+    (state) =>
+      selectThreadTerminalRuntimeStatus(state, thread.environmentId, thread.id).openTerminalIds
+        .length > 0,
   );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isRemoteThread =
@@ -365,12 +370,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
-      lastVisitedAt,
+      hasUnseenAttention,
     },
   });
   const pr = resolveThreadPr(thread.branch, gitStatus.data);
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
-  const terminalStatus = terminalStatusFromOpenState(terminalOpen);
+  const terminalStatus = terminalStatusFromOpenState(hasOpenTerminal);
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
@@ -1030,21 +1035,18 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   // thread-list change).
   const sidebarThreadByKeyRef = useRef(sidebarThreadByKey);
   sidebarThreadByKeyRef.current = sidebarThreadByKey;
-  const markThreadUnread = useCallback((thread: SidebarThreadSummary | null | undefined) => {
+  const markThreadUnseen = useCallback((thread: SidebarThreadSummary | null | undefined) => {
     if (!thread) {
       return;
     }
-    const unreadAnchor = resolveThreadUnreadAnchor(thread);
-    if (!unreadAnchor) return;
     const observedAt = new Date().toISOString();
-    useThreadReadReceiptStore
-      .getState()
-      .markUnreadOptimistic(thread.environmentId, thread.id, unreadAnchor, observedAt);
     void readEnvironmentApi(thread.environmentId)
-      ?.threadRead.markUnread({
+      ?.threadAttention.markUnseen({
         threadId: thread.id,
-        latestTurnCompletedAt: unreadAnchor,
         observedAt,
+      })
+      .then((event) => {
+        useThreadAttentionStore.getState().applyStreamEvent(thread.environmentId, event);
       })
       .catch((error: unknown) => {
         console.warn("Failed to mark thread unread", error);
@@ -1054,12 +1056,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const projectExpanded = useUiStateStore(
     (state) => state.projectExpandedById[project.projectKey] ?? true,
   );
-  const threadLastVisitedAts = useThreadReadReceiptStore(
+  const threadAttentionFlags = useThreadAttentionStore(
     useShallow((state) =>
       projectThreads.map(
         (thread) =>
-          state.receiptByThreadKey[scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))]
-            ?.lastVisitedAt ?? null,
+          state.attentionByThreadKey[
+            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))
+          ] !== undefined,
       ),
     ),
   );
@@ -1105,20 +1108,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   }, [memberProjectByScopedKey, project.memberProjects, projectThreads]);
 
   const { projectStatus, visibleProjectThreads, orderedProjectThreadKeys } = useMemo(() => {
-    const lastVisitedAtByThreadKey = new Map(
+    const hasAttentionByThreadKey = new Map(
       projectThreads.map((thread, index) => [
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        threadLastVisitedAts[index] ?? null,
+        threadAttentionFlags[index] ?? false,
       ]),
     );
     const resolveProjectThreadStatus = (thread: SidebarThreadSummary) => {
-      const lastVisitedAt = lastVisitedAtByThreadKey.get(
+      const hasUnseenAttention = hasAttentionByThreadKey.get(
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       );
       return resolveThreadStatusPill({
         thread: {
           ...thread,
-          ...(lastVisitedAt !== null && lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
+          hasUnseenAttention,
         },
       });
     };
@@ -1136,7 +1139,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       projectStatus,
       visibleProjectThreads,
     };
-  }, [projectThreads, threadLastVisitedAts, threadSortOrder]);
+  }, [projectThreads, threadAttentionFlags, threadSortOrder]);
 
   const pinnedCollapsedThread = useMemo(() => {
     const activeThreadKey = activeRouteThreadKey ?? undefined;
@@ -1158,20 +1161,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     showEmptyThreadState,
     shouldShowThreadPanel,
   } = useMemo(() => {
-    const lastVisitedAtByThreadKey = new Map(
+    const hasAttentionByThreadKey = new Map(
       projectThreads.map((thread, index) => [
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        threadLastVisitedAts[index] ?? null,
+        threadAttentionFlags[index] ?? false,
       ]),
     );
     const resolveProjectThreadStatus = (thread: SidebarThreadSummary) => {
-      const lastVisitedAt = lastVisitedAtByThreadKey.get(
+      const hasUnseenAttention = hasAttentionByThreadKey.get(
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       );
       return resolveThreadStatusPill({
         thread: {
           ...thread,
-          ...(lastVisitedAt !== null && lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
+          hasUnseenAttention,
         },
       });
     };
@@ -1208,7 +1211,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     pinnedCollapsedThread,
     projectExpanded,
     projectThreads,
-    threadLastVisitedAts,
+    threadAttentionFlags,
     visibleProjectThreads,
   ]);
 
@@ -1619,7 +1622,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (clicked === "mark-unread") {
         for (const threadKey of threadKeys) {
           const thread = sidebarThreadByKeyRef.current.get(threadKey);
-          markThreadUnread(thread);
+          markThreadUnseen(thread);
         }
         clearSelection();
         return;
@@ -1651,7 +1654,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       appSettingsConfirmThreadDelete,
       clearSelection,
       deleteThread,
-      markThreadUnread,
+      markThreadUnseen,
       removeFromSelection,
     ],
   );
@@ -1937,7 +1940,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       }
 
       if (clicked === "mark-unread") {
-        markThreadUnread(thread);
+        markThreadUnseen(thread);
         return;
       }
       if (clicked === "copy-path") {
@@ -1977,7 +1980,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
-      markThreadUnread,
+      markThreadUnseen,
       memberProjectByScopedKey,
       project.cwd,
     ],

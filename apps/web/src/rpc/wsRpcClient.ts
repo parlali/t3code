@@ -73,11 +73,11 @@ export interface WsRpcClient {
     readonly onEvent: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
     readonly onSessionEvent: RpcInputStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
   };
-  readonly threadRead: {
-    readonly getSnapshot: RpcUnaryNoArgMethod<typeof WS_METHODS.threadReadGetSnapshot>;
-    readonly markVisited: RpcUnaryMethod<typeof WS_METHODS.threadReadMarkVisited>;
-    readonly markUnread: RpcUnaryMethod<typeof WS_METHODS.threadReadMarkUnread>;
-    readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeThreadReadReceipts>;
+  readonly threadAttention: {
+    readonly getSnapshot: RpcUnaryNoArgMethod<typeof WS_METHODS.threadAttentionGetSnapshot>;
+    readonly markSeen: RpcUnaryMethod<typeof WS_METHODS.threadAttentionMarkSeen>;
+    readonly markUnseen: RpcUnaryMethod<typeof WS_METHODS.threadAttentionMarkUnseen>;
+    readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeThreadAttention>;
   };
   readonly threadWorkbench: {
     readonly getState: RpcUnaryMethod<typeof WS_METHODS.threadWorkbenchGetState>;
@@ -242,20 +242,20 @@ export function createWsRpcClient(
           },
         ),
     },
-    threadRead: {
+    threadAttention: {
       getSnapshot: () =>
-        transport.request((client) => client[WS_METHODS.threadReadGetSnapshot]({})),
-      markVisited: (input) =>
-        transport.request((client) => client[WS_METHODS.threadReadMarkVisited](input)),
-      markUnread: (input) =>
-        transport.request((client) => client[WS_METHODS.threadReadMarkUnread](input)),
+        transport.request((client) => client[WS_METHODS.threadAttentionGetSnapshot]({})),
+      markSeen: (input) =>
+        transport.request((client) => client[WS_METHODS.threadAttentionMarkSeen](input)),
+      markUnseen: (input) =>
+        transport.request((client) => client[WS_METHODS.threadAttentionMarkUnseen](input)),
       subscribe: (listener, options) =>
         streamTransport.subscribe(
-          (client) => client[WS_METHODS.subscribeThreadReadReceipts]({}),
+          (client) => client[WS_METHODS.subscribeThreadAttention]({}),
           listener,
           {
             ...options,
-            tag: WS_METHODS.subscribeThreadReadReceipts,
+            tag: WS_METHODS.subscribeThreadAttention,
           },
         ),
     },
