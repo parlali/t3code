@@ -29,7 +29,7 @@ const PRIMARY_ITEMS: readonly RailItem[] = [
   { mode: "threads", label: "Threads", icon: MessageSquareTextIcon },
   { mode: "explorer", label: "Explorer", icon: FilesIcon },
   { mode: "changes", label: "Changes", icon: GitBranchIcon },
-  { mode: "search", label: "Search", icon: SearchIcon },
+  { mode: "search", label: "Search", icon: SearchIcon, disabled: true },
   { mode: "settings", label: "Settings", icon: SettingsIcon },
 ];
 

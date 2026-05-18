@@ -91,6 +91,7 @@ function readBoolean(key: string, fallback: boolean): boolean {
 
 function readActiveMode(): ShellPanelMode {
   const stored = readString(ACTIVE_MODE_STORAGE_KEY);
+  if (stored === "search") return "threads";
   return PANEL_MODES.has(stored as ShellPanelMode) ? (stored as ShellPanelMode) : "threads";
 }
 

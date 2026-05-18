@@ -388,14 +388,30 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
         : diffBuffersRef.current[activeTab.id];
     if (contents === undefined) return;
     const api = ensureEnvironmentApi(props.environmentId);
+    const activeQueryKey =
+      activeTab.kind === "file"
+        ? projectQueryKeys.readFile(props.environmentId, cwd, activeTab.path)
+        : gitQueryKeys.fileDiff(props.environmentId, cwd, activeTab.path, "working-tree");
+    await queryClient.cancelQueries({ queryKey: activeQueryKey, exact: true });
     await api.projects.writeFile({ cwd, relativePath: activeTab.path, contents });
+    if (activeTab.kind === "file") {
+      queryClient.setQueryData(
+        projectQueryKeys.readFile(props.environmentId, cwd, activeTab.path),
+        { relativePath: activeTab.path, contents },
+      );
+    } else {
+      queryClient.setQueryData(
+        gitQueryKeys.fileDiff(props.environmentId, cwd, activeTab.path, "working-tree"),
+        (current) => (current ? { ...current, modified: contents } : current),
+      );
+    }
     setDirtyTabs((current) => {
       const next = new Set(current);
       next.delete(activeTab.id);
       return next;
     });
     await refreshWorkspace();
-  }, [activeTab, cwd, props.environmentId, refreshWorkspace]);
+  }, [activeTab, cwd, props.environmentId, queryClient, refreshWorkspace]);
 
   useEffect(() => {
     saveActiveRef.current = () => {
