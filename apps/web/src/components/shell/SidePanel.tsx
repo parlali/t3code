@@ -22,13 +22,14 @@ import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { SettingsSidebarNav } from "../settings/SettingsSidebarNav";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { PANE_RESIZE_RAIL_CLASS } from "../ui/pane-chrome";
 import { startResizeInteraction, type ResizeInteractionHandle } from "../ui/resize-interaction";
 import { SidePanelWorkbenchMode } from "./SidePanelWorkbenchMode";
 import { clampShellPanelWidth, type ShellPanelMode, useShellStore } from "./shellStore";
 import { useActiveShellContext } from "./useActiveShellContext";
 
 const ThreadSidebar = lazy(() => import("../Sidebar"));
+const SIDE_PANEL_RESIZE_RAIL_CLASS =
+  "relative z-1 hidden w-0 shrink-0 touch-none select-none outline-none md:block before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-border/70 before:transition-colors after:absolute after:inset-y-0 after:-left-2 after:w-4 after:cursor-col-resize after:bg-transparent hover:before:bg-primary/45 focus-visible:before:bg-primary/45";
 
 function PanelLoadingState() {
   return (
@@ -373,8 +374,8 @@ export function SidePanel() {
     <>
       <aside
         className={cn(
-          "hidden h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-border bg-card text-card-foreground md:flex",
-          !panelOpen && "w-0 border-r-0",
+          "hidden h-full min-h-0 shrink-0 flex-col overflow-hidden bg-card text-card-foreground md:flex",
+          !panelOpen && "w-0",
         )}
         style={panelOpen ? { width } : undefined}
       >
@@ -385,10 +386,7 @@ export function SidePanel() {
         ) : null}
       </aside>
       {panelOpen ? (
-        <div
-          className={cn(PANE_RESIZE_RAIL_CLASS, "hidden md:block")}
-          onPointerDown={startResize}
-        />
+        <div className={SIDE_PANEL_RESIZE_RAIL_CLASS} onPointerDown={startResize} />
       ) : (
         <Button
           size="icon-sm"

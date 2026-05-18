@@ -20,12 +20,34 @@ const CHROME_DEVTOOLS_MCP_ENV = {
   T3CODE_MANAGED_CHROME_MCP: "1",
 } as const;
 
+interface ManagedStdioMcpServer {
+  readonly name: typeof CHROME_DEVTOOLS_MCP_SERVER_NAME;
+  readonly command: "npx";
+  readonly args: ReadonlyArray<string>;
+  readonly env: Record<string, string>;
+}
+
 function tomlString(value: string): string {
   return JSON.stringify(value);
 }
 
 function tomlStringArray(values: ReadonlyArray<string>): string {
   return `[${values.map(tomlString).join(", ")}]`;
+}
+
+function buildChromeDevToolsMcpStdioServer(
+  settings: ChromeDevToolsMcpIntegrationSettings,
+): ManagedStdioMcpServer | undefined {
+  if (!settings.enabled) {
+    return undefined;
+  }
+
+  return {
+    name: CHROME_DEVTOOLS_MCP_SERVER_NAME,
+    command: "npx",
+    args: buildChromeDevToolsMcpNpxArgs(),
+    env: buildChromeDevToolsMcpEnv(),
+  };
 }
 
 export function buildChromeDevToolsMcpNpxArgs(): ReadonlyArray<string> {
@@ -39,22 +61,73 @@ export function buildChromeDevToolsMcpEnv(): Record<string, string> {
 export function buildChromeDevToolsMcpCodexConfigArgs(
   settings: ChromeDevToolsMcpIntegrationSettings,
 ): ReadonlyArray<string> {
-  if (!settings.enabled) {
+  const server = buildChromeDevToolsMcpStdioServer(settings);
+  if (!server) {
     return [];
   }
 
-  const mcpServerKey = `mcp_servers.${CHROME_DEVTOOLS_MCP_SERVER_NAME}`;
-  const args = buildChromeDevToolsMcpNpxArgs();
-  const env = buildChromeDevToolsMcpEnv();
+  const mcpServerKey = `mcp_servers.${server.name}`;
 
   return [
     "-c",
-    `${mcpServerKey}.command=${tomlString("npx")}`,
+    `${mcpServerKey}.command=${tomlString(server.command)}`,
     "-c",
-    `${mcpServerKey}.args=${tomlStringArray(args)}`,
-    ...Object.entries(env).flatMap(([name, value]) => [
+    `${mcpServerKey}.args=${tomlStringArray(server.args)}`,
+    ...Object.entries(server.env).flatMap(([name, value]) => [
       "-c",
       `${mcpServerKey}.env.${name}=${tomlString(value)}`,
     ]),
+  ];
+}
+
+export function buildChromeDevToolsMcpClaudeServers(settings: ChromeDevToolsMcpIntegrationSettings):
+  | Record<
+      typeof CHROME_DEVTOOLS_MCP_SERVER_NAME,
+      {
+        readonly type: "stdio";
+        readonly command: string;
+        readonly args: string[];
+        readonly env: Record<string, string>;
+      }
+    >
+  | undefined {
+  const server = buildChromeDevToolsMcpStdioServer(settings);
+  if (!server) {
+    return undefined;
+  }
+
+  return {
+    [server.name]: {
+      type: "stdio",
+      command: server.command,
+      args: [...server.args],
+      env: { ...server.env },
+    },
+  };
+}
+
+export function buildChromeDevToolsMcpAcpServers(
+  settings: ChromeDevToolsMcpIntegrationSettings,
+): ReadonlyArray<{
+  readonly name: string;
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+  readonly env: ReadonlyArray<{
+    readonly name: string;
+    readonly value: string;
+  }>;
+}> {
+  const server = buildChromeDevToolsMcpStdioServer(settings);
+  if (!server) {
+    return [];
+  }
+
+  return [
+    {
+      name: server.name,
+      command: server.command,
+      args: server.args,
+      env: Object.entries(server.env).map(([name, value]) => ({ name, value })),
+    },
   ];
 }

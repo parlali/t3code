@@ -27,8 +27,8 @@ export function IntegrationsSettings() {
       <SettingsSection title="Integrations">
         <SettingsRow
           title="Chrome DevTools MCP"
-          description="Runs managed headless Chrome on the backend for new Codex sessions."
-          status={chromeDevToolsEnabled ? "Enabled for new Codex sessions" : "Disabled"}
+          description="Runs managed headless Chrome on the backend for new Codex, Claude, and Cursor sessions."
+          status={chromeDevToolsEnabled ? "Enabled for new agent sessions" : "Disabled"}
           control={
             <Switch
               checked={chromeDevToolsEnabled}

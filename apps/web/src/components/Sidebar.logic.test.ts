@@ -1029,6 +1029,33 @@ describe("sortProjectsForSidebar", () => {
     ]);
   });
 
+  it("sorts projects alphabetically by name", () => {
+    const sorted = sortProjectsForSidebar(
+      [
+        makeProject({ id: ProjectId.make("project-3"), name: "Gamma" }),
+        makeProject({ id: ProjectId.make("project-1"), name: "Alpha" }),
+        makeProject({ id: ProjectId.make("project-2"), name: "Beta" }),
+      ],
+      [
+        makeThread({
+          projectId: ProjectId.make("project-3"),
+          updatedAt: "2026-03-09T10:30:00.000Z",
+        }),
+        makeThread({
+          projectId: ProjectId.make("project-1"),
+          updatedAt: "2026-03-09T10:00:00.000Z",
+        }),
+      ],
+      "alphabetical",
+    );
+
+    expect(sorted.map((project) => project.id)).toEqual([
+      ProjectId.make("project-1"),
+      ProjectId.make("project-2"),
+      ProjectId.make("project-3"),
+    ]);
+  });
+
   it("ignores archived threads when sorting projects", () => {
     const sorted = sortProjectsForSidebar(
       [

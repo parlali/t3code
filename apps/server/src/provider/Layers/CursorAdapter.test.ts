@@ -18,6 +18,7 @@ import {
 } from "@t3tools/contracts";
 
 import { ServerConfig } from "../../config.ts";
+import { buildChromeDevToolsMcpAcpServers } from "../../integrations/chromeDevToolsMcp.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import type { CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { makeCursorAdapter } from "./CursorAdapter.ts";
@@ -371,6 +372,46 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
           (modeRequest?.params as Record<string, unknown> | undefined)?.modeId ??
             (modeRequest?.params as Record<string, unknown> | undefined)?.value,
         ),
+      );
+    }),
+  );
+
+  it.effect("passes managed Chrome DevTools MCP servers to new ACP sessions", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const serverSettings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-chrome-mcp-probe");
+      const tempDir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "cursor-acp-")));
+      const requestLogPath = path.join(tempDir, "requests.ndjson");
+      const argvLogPath = path.join(tempDir, "argv.txt");
+      yield* Effect.promise(() => writeFile(requestLogPath, "", "utf8"));
+      const wrapperPath = yield* Effect.promise(() =>
+        makeProbeWrapper(requestLogPath, argvLogPath),
+      );
+      yield* serverSettings.updateSettings({
+        providers: { cursor: { binaryPath: wrapperPath } },
+        integrations: {
+          chromeDevToolsMcp: {
+            enabled: true,
+          },
+        },
+      });
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+      yield* adapter.stopSession(threadId);
+
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+      const createRequest = requests.find((entry) => entry.method === "session/new");
+      assert.isDefined(createRequest);
+      assert.deepEqual(
+        (createRequest?.params as Record<string, unknown> | undefined)?.mcpServers,
+        buildChromeDevToolsMcpAcpServers({ enabled: true }),
       );
     }),
   );

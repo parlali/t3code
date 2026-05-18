@@ -1,6 +1,7 @@
 import type { ProjectEntriesStreamEvent, ProjectEntry, VcsStatusResult } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as Schema from "effect/Schema";
+import { type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckIcon,
   ChevronRightIcon,
@@ -22,16 +23,22 @@ import { buildTurnDiffTree } from "../../lib/turnDiffTree";
 import { cn, randomUUID } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
 import { requestWorkbenchOpen } from "../../workbenchEvents";
+import { getLocalStorageItem, setLocalStorageItem } from "../../hooks/useLocalStorage";
 import { Button } from "../ui/button";
 import { Group, GroupSeparator } from "../ui/group";
 import { Menu, MenuGroup, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { PANE_RESIZE_RAIL_HORIZONTAL_CLASS } from "../ui/pane-chrome";
+import { startResizeInteraction, type ResizeInteractionHandle } from "../ui/resize-interaction";
 import { Textarea } from "../ui/textarea";
 import {
   buildNewEntryRelativePath,
   buildTree,
+  clampGraphHeightRatio,
+  DEFAULT_GRAPH_HEIGHT_RATIO,
   parentPath,
   relativePathAncestors,
   ChangesTree,
+  WORKBENCH_GRAPH_HEIGHT_RATIO_STORAGE_KEY,
   type CreateEntryKind,
   type ExplorerCreateDraft,
   WorkbenchCommitGraph,
@@ -116,6 +123,12 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
   const untrackedFiles = useMemo(() => sectionFiles(changedFiles, "untracked"), [changedFiles]);
   const conflictFiles = useMemo(() => sectionFiles(changedFiles, "conflicts"), [changedFiles]);
   const [commitMessage, setCommitMessage] = useState("");
+  const [graphHeightRatio, setGraphHeightRatio] = useState(() =>
+    clampGraphHeightRatio(
+      getLocalStorageItem(WORKBENCH_GRAPH_HEIGHT_RATIO_STORAGE_KEY, Schema.Finite) ??
+        DEFAULT_GRAPH_HEIGHT_RATIO,
+    ),
+  );
   const [sourceControlError, setSourceControlError] = useState<string | null>(null);
   const [sourceControlBusy, setSourceControlBusy] = useState<"commit" | "generate" | "push" | null>(
     null,
@@ -125,6 +138,16 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
   );
   const changeActionBusyRef = useRef(false);
   const commitMessageRef = useRef<HTMLTextAreaElement | null>(null);
+  const changesSplitRef = useRef<HTMLDivElement | null>(null);
+  const graphResizeRef = useRef<{
+    readonly interaction: ResizeInteractionHandle;
+    readonly pointerId: number;
+    readonly startY: number;
+    readonly startRatio: number;
+    readonly splitHeight: number;
+    pendingRatio: number;
+    rafId: number | null;
+  } | null>(null);
 
   const refreshWorkspace = useCallback(async () => {
     await Promise.all([
@@ -134,12 +157,88 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
     ]);
   }, [cwd, environmentId, queryClient]);
 
+  const beginGraphResize = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      const splitElement = changesSplitRef.current;
+      if (!splitElement) return;
+
+      const splitHeight = splitElement.getBoundingClientRect().height;
+      if (splitHeight <= 0) return;
+
+      graphResizeRef.current?.interaction.release();
+      graphResizeRef.current = {
+        interaction: startResizeInteraction(event, { cursor: "row-resize", stopPropagation: true }),
+        pointerId: event.pointerId,
+        startY: event.clientY,
+        startRatio: graphHeightRatio,
+        splitHeight,
+        pendingRatio: graphHeightRatio,
+        rafId: null,
+      };
+    },
+    [graphHeightRatio],
+  );
+
+  const updateGraphResize = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const resizeState = graphResizeRef.current;
+    if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+
+    const delta = event.clientY - resizeState.startY;
+    resizeState.pendingRatio = clampGraphHeightRatio(
+      resizeState.startRatio - delta / resizeState.splitHeight,
+    );
+
+    if (resizeState.rafId !== null) return;
+    resizeState.rafId = window.requestAnimationFrame(() => {
+      const activeResizeState = graphResizeRef.current;
+      if (!activeResizeState) return;
+      activeResizeState.rafId = null;
+      setGraphHeightRatio(activeResizeState.pendingRatio);
+    });
+  }, []);
+
+  const finishGraphResize = useCallback(() => {
+    const resizeState = graphResizeRef.current;
+    if (!resizeState) return;
+
+    if (resizeState.rafId !== null) {
+      window.cancelAnimationFrame(resizeState.rafId);
+    }
+    resizeState.interaction.release();
+    setLocalStorageItem(
+      WORKBENCH_GRAPH_HEIGHT_RATIO_STORAGE_KEY,
+      resizeState.pendingRatio,
+      Schema.Finite,
+    );
+    graphResizeRef.current = null;
+  }, []);
+
+  const endGraphResize = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      const resizeState = graphResizeRef.current;
+      if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+      finishGraphResize();
+    },
+    [finishGraphResize],
+  );
+
   useEffect(() => {
     const element = commitMessageRef.current;
     if (!element) return;
     element.style.height = "0px";
     element.style.height = `${Math.min(element.scrollHeight, 160)}px`;
   }, [commitMessage]);
+
+  useEffect(() => {
+    return () => {
+      const resizeState = graphResizeRef.current;
+      if (resizeState?.rafId != null) {
+        window.cancelAnimationFrame(resizeState.rafId);
+      }
+      resizeState?.interaction.release();
+      graphResizeRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!cwd || !environmentId) return;
@@ -412,7 +511,7 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
     ].filter((section) => section.files.length > 0);
 
     return (
-      <div className="flex h-full min-h-0 flex-col">
+      <div ref={changesSplitRef} className="flex h-full min-h-0 flex-col">
         <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2">
           <span className="min-w-0 flex-1 truncate text-sm font-medium">Changes</span>
           <Button
@@ -573,7 +672,10 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
             </div>
           ) : null}
         </div>
-        <div className="min-h-0 flex-1 overflow-auto px-1 py-2">
+        <div
+          className="min-h-0 overflow-auto px-1 py-2"
+          style={{ flex: `1 1 ${Math.max(0, 1 - graphHeightRatio) * 100}%` }}
+        >
           {gitStatus.error ? (
             <div className="px-3 py-8 text-center text-xs text-destructive">
               {getErrorMessage(gitStatus.error)}
@@ -698,7 +800,22 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
             })
           )}
         </div>
-        <div className="flex h-48 shrink-0 flex-col border-t border-border">
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize graph"
+          title="Drag to resize graph"
+          tabIndex={0}
+          className={PANE_RESIZE_RAIL_HORIZONTAL_CLASS}
+          onPointerDown={beginGraphResize}
+          onPointerMove={updateGraphResize}
+          onPointerUp={endGraphResize}
+          onPointerCancel={endGraphResize}
+        />
+        <div
+          className="flex min-h-20 flex-col border-t border-border"
+          style={{ flex: `0 0 ${graphHeightRatio * 100}%` }}
+        >
           <div className="flex h-7 shrink-0 items-center px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             Graph
           </div>

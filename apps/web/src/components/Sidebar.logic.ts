@@ -514,7 +514,7 @@ export function getFallbackThreadIdAfterDelete<
 export function getProjectSortTimestamp(
   project: SidebarProject,
   projectThreads: readonly ThreadSortInput[],
-  sortOrder: Exclude<SidebarProjectSortOrder, "manual">,
+  sortOrder: Exclude<SidebarProjectSortOrder, "alphabetical" | "manual">,
 ): number {
   if (projectThreads.length > 0) {
     return projectThreads.reduce(
@@ -539,6 +539,12 @@ export function sortProjectsForSidebar<
 ): TProject[] {
   if (sortOrder === "manual") {
     return [...projects];
+  }
+
+  if (sortOrder === "alphabetical") {
+    return [...projects].toSorted(
+      (left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
+    );
   }
 
   const threadsByProjectId = new Map<string, TThread[]>();

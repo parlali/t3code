@@ -26,6 +26,7 @@ import { Context, Effect, Fiber, Layer, Random, Schema, Stream } from "effect";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { buildChromeDevToolsMcpClaudeServers } from "../../integrations/chromeDevToolsMcp.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
@@ -323,6 +324,36 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(createInput?.options.settingSources, ["user", "project", "local"]);
       assert.equal(createInput?.options.permissionMode, undefined);
       assert.equal(createInput?.options.allowDangerouslySkipPermissions, undefined);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("reads latest Chrome DevTools MCP integration settings for new sessions", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      yield* serverSettings.updateSettings({
+        integrations: {
+          chromeDevToolsMcp: {
+            enabled: true,
+          },
+        },
+      });
+
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.deepEqual(
+        createInput?.options.mcpServers,
+        buildChromeDevToolsMcpClaudeServers({ enabled: true }),
+      );
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

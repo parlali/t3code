@@ -189,6 +189,7 @@ const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
   created_at: "Created at",
+  alphabetical: "Alphabetical",
   manual: "Manual",
 };
 const SIDEBAR_THREAD_SORT_LABELS: Record<SidebarThreadSortOrder, string> = {
@@ -2966,6 +2967,7 @@ export default function Sidebar() {
     const sortableProjects = sidebarProjects.map((project) => ({
       ...project,
       id: project.projectKey,
+      name: project.displayName,
     }));
     const sortableThreads = visibleThreads.map((thread) => {
       const physicalKey =
