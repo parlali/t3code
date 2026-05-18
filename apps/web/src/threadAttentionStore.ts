@@ -20,12 +20,15 @@ export interface ThreadAttentionEntry {
 
 interface ThreadAttentionStoreState {
   readonly attentionByThreadKey: Record<string, ThreadAttentionEntry>;
+  readonly manuallyUnseenThreadKeys: Record<string, true>;
   readonly syncSnapshot: (environmentId: EnvironmentId, snapshot: ThreadAttentionSnapshot) => void;
   readonly applyStreamEvent: (
     environmentId: EnvironmentId,
     event: ThreadAttentionStreamEvent,
   ) => void;
   readonly applyState: (environmentId: EnvironmentId, state: ThreadAttentionState) => void;
+  readonly holdThreadUnseen: (environmentId: EnvironmentId, threadId: ThreadId) => void;
+  readonly releaseThreadUnseenHold: (environmentId: EnvironmentId, threadId: ThreadId) => void;
   readonly clearThread: (
     environmentId: EnvironmentId,
     threadId: ThreadId,
@@ -63,6 +66,7 @@ function shouldApplyRevision(
 
 export const useThreadAttentionStore = create<ThreadAttentionStoreState>()((set) => ({
   attentionByThreadKey: {},
+  manuallyUnseenThreadKeys: {},
   syncSnapshot: (environmentId, snapshot) =>
     set((state) => {
       const prefix = environmentKeyPrefix(environmentId);
@@ -104,6 +108,29 @@ export const useThreadAttentionStore = create<ThreadAttentionStoreState>()((set)
         },
       };
     }),
+  holdThreadUnseen: (environmentId, threadId) =>
+    set((state) => {
+      const key = keyFor(environmentId, threadId);
+      if (state.manuallyUnseenThreadKeys[key]) {
+        return state;
+      }
+      return {
+        manuallyUnseenThreadKeys: {
+          ...state.manuallyUnseenThreadKeys,
+          [key]: true,
+        },
+      };
+    }),
+  releaseThreadUnseenHold: (environmentId, threadId) =>
+    set((state) => {
+      const key = keyFor(environmentId, threadId);
+      if (!state.manuallyUnseenThreadKeys[key]) {
+        return state;
+      }
+      const next = { ...state.manuallyUnseenThreadKeys };
+      delete next[key];
+      return { manuallyUnseenThreadKeys: next };
+    }),
   clearThread: (environmentId, threadId, revision) =>
     set((state) => {
       const key = keyFor(environmentId, threadId);
@@ -120,9 +147,15 @@ export const useThreadAttentionStore = create<ThreadAttentionStoreState>()((set)
       const next = Object.fromEntries(
         Object.entries(state.attentionByThreadKey).filter(([key]) => activeThreadKeys.has(key)),
       ) as Record<string, ThreadAttentionEntry>;
-      if (Object.keys(next).length === Object.keys(state.attentionByThreadKey).length) {
+      const nextManualHolds = Object.fromEntries(
+        Object.entries(state.manuallyUnseenThreadKeys).filter(([key]) => activeThreadKeys.has(key)),
+      ) as Record<string, true>;
+      if (
+        Object.keys(next).length === Object.keys(state.attentionByThreadKey).length &&
+        Object.keys(nextManualHolds).length === Object.keys(state.manuallyUnseenThreadKeys).length
+      ) {
         return state;
       }
-      return { attentionByThreadKey: next };
+      return { attentionByThreadKey: next, manuallyUnseenThreadKeys: nextManualHolds };
     }),
 }));

@@ -244,6 +244,7 @@ export class WsTransport {
     }
     this.disposed = true;
     this.connectedSessionId = 0;
+    clearAllTrackedRpcRequests();
     await this.closeSession(this.session);
   }
 

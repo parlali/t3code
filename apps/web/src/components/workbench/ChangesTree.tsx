@@ -1,4 +1,4 @@
-import { ChevronRightIcon, MinusIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import { ChevronRightIcon, MinusIcon, PlusIcon, Undo2Icon } from "lucide-react";
 import { memo } from "react";
 import { cn } from "../../lib/utils";
 import type { TurnDiffTreeNode } from "../../lib/turnDiffTree";
@@ -91,7 +91,7 @@ export const ChangesTree = memo(function ChangesTree(props: ChangesTreeProps) {
                     title="Discard all"
                     onClick={() => props.onRevertPaths?.(descendantPaths)}
                   >
-                    <RefreshCwIcon className="size-3.5" />
+                    <Undo2Icon className="size-3.5" />
                   </button>
                 )}
               </div>
@@ -167,7 +167,7 @@ export const ChangesTree = memo(function ChangesTree(props: ChangesTreeProps) {
                 title="Revert"
                 onClick={() => props.onRevertFile?.(node.path)}
               >
-                <RefreshCwIcon className="size-3.5" />
+                <Undo2Icon className="size-3.5" />
               </button>
             )}
           </div>

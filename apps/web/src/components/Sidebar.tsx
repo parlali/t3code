@@ -70,10 +70,6 @@ import {
   useStore,
 } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
-import {
-  selectThreadTerminalRuntimeStatus,
-  useTerminalRuntimeStatusStore,
-} from "../terminalRuntimeStatusStore";
 import { useThreadAttentionStore } from "../threadAttentionStore";
 import { useUiStateStore } from "../uiStateStore";
 import {
@@ -331,10 +327,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const hasSelection = useThreadSelectionStore((state) => state.selectedThreadKeys.size > 0);
-  const hasOpenTerminal = useTerminalRuntimeStatusStore(
-    (state) =>
-      selectThreadTerminalRuntimeStatus(state, thread.environmentId, thread.id).openTerminalIds
-        .length > 0,
+  const hasOpenTerminal = useTerminalStateStore(
+    (state) => selectThreadTerminalState(state.terminalStateByThreadKey, threadRef).terminalOpen,
   );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isRemoteThread =
@@ -1035,23 +1029,37 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   // thread-list change).
   const sidebarThreadByKeyRef = useRef(sidebarThreadByKey);
   sidebarThreadByKeyRef.current = sidebarThreadByKey;
-  const markThreadUnseen = useCallback((thread: SidebarThreadSummary | null | undefined) => {
-    if (!thread) {
-      return;
-    }
-    const observedAt = new Date().toISOString();
-    void readEnvironmentApi(thread.environmentId)
-      ?.threadAttention.markUnseen({
-        threadId: thread.id,
-        observedAt,
-      })
-      .then((event) => {
-        useThreadAttentionStore.getState().applyStreamEvent(thread.environmentId, event);
-      })
-      .catch((error: unknown) => {
-        console.warn("Failed to mark thread unread", error);
-      });
-  }, []);
+  const markThreadUnseen = useCallback(
+    (thread: SidebarThreadSummary | null | undefined) => {
+      if (!thread) {
+        return;
+      }
+      const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+      const threadKey = scopedThreadKey(threadRef);
+      const shouldHoldUnread = threadKey === activeRouteThreadKey;
+      const observedAt = new Date().toISOString();
+      if (shouldHoldUnread) {
+        useThreadAttentionStore.getState().holdThreadUnseen(thread.environmentId, thread.id);
+      }
+      void readEnvironmentApi(thread.environmentId)
+        ?.threadAttention.markUnseen({
+          threadId: thread.id,
+          observedAt,
+        })
+        .then((event) => {
+          useThreadAttentionStore.getState().applyStreamEvent(thread.environmentId, event);
+        })
+        .catch((error: unknown) => {
+          if (shouldHoldUnread) {
+            useThreadAttentionStore
+              .getState()
+              .releaseThreadUnseenHold(thread.environmentId, thread.id);
+          }
+          console.warn("Failed to mark thread unread", error);
+        });
+    },
+    [activeRouteThreadKey],
+  );
   const projectThreads = sidebarThreads;
   const projectExpanded = useUiStateStore(
     (state) => state.projectExpandedById[project.projectKey] ?? true,

@@ -22,7 +22,7 @@ function attentionState(overrides: { revision?: number } = {}) {
 
 describe("threadAttentionStore", () => {
   beforeEach(() => {
-    useThreadAttentionStore.setState({ attentionByThreadKey: {} });
+    useThreadAttentionStore.setState({ attentionByThreadKey: {}, manuallyUnseenThreadKeys: {} });
   });
 
   it("syncs unseen attention snapshot entries by environment", () => {
@@ -75,5 +75,25 @@ describe("threadAttentionStore", () => {
     });
 
     expect(useThreadAttentionStore.getState().attentionByThreadKey[threadKey]).toBeUndefined();
+  });
+
+  it("tracks manually held unseen threads separately from attention state", () => {
+    const store = useThreadAttentionStore.getState();
+    store.holdThreadUnseen(environmentId, threadId);
+
+    expect(useThreadAttentionStore.getState().manuallyUnseenThreadKeys[threadKey]).toBe(true);
+
+    store.applyStreamEvent(environmentId, {
+      type: "state-cleared",
+      threadId,
+      updatedAt: "2026-05-09T10:01:00.000Z",
+      revision: 2,
+    });
+
+    expect(useThreadAttentionStore.getState().manuallyUnseenThreadKeys[threadKey]).toBe(true);
+
+    store.releaseThreadUnseenHold(environmentId, threadId);
+
+    expect(useThreadAttentionStore.getState().manuallyUnseenThreadKeys[threadKey]).toBeUndefined();
   });
 });

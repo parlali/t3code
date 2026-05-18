@@ -13,6 +13,7 @@ import {
   RefreshCwIcon,
   SendIcon,
   SparklesIcon,
+  Undo2Icon,
 } from "lucide-react";
 
 import { ensureEnvironmentApi } from "../../environmentApi";
@@ -760,7 +761,7 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
                           title="Discard all"
                           onClick={() => void revertPaths(sectionPaths)}
                         >
-                          <RefreshCwIcon className="size-3.5" />
+                          <Undo2Icon className="size-3.5" />
                         </button>
                       ) : null}
                     </div>

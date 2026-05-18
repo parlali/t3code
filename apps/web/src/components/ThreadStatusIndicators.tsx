@@ -9,10 +9,7 @@ import {
 } from "../environments/runtime";
 import { useGitStatus } from "../lib/gitStatusState";
 import { type AppState, selectProjectByRef, useStore } from "../store";
-import {
-  selectThreadTerminalRuntimeStatus,
-  useTerminalRuntimeStatusStore,
-} from "../terminalRuntimeStatusStore";
+import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadAttentionStore } from "../threadAttentionStore";
 import { resolveChangeRequestPresentation } from "../sourceControlPresentation";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "./Sidebar.logic";
@@ -196,10 +193,12 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
  * environment indicator, matching the sidebar's trailing indicators.
  */
 export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSummary }) {
-  const hasOpenTerminal = useTerminalRuntimeStatusStore(
-    (state) =>
-      selectThreadTerminalRuntimeStatus(state, thread.environmentId, thread.id).openTerminalIds
-        .length > 0,
+  const threadRef = useMemo(
+    () => scopeThreadRef(thread.environmentId, thread.id),
+    [thread.environmentId, thread.id],
+  );
+  const hasOpenTerminal = useTerminalStateStore(
+    (state) => selectThreadTerminalState(state.terminalStateByThreadKey, threadRef).terminalOpen,
   );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isRemoteThread =

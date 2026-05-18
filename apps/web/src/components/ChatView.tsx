@@ -979,6 +979,34 @@ export default function ChatView(props: ChatViewProps) {
   const activeThreadAttention = useThreadAttentionStore((state) =>
     activeThreadKey ? state.attentionByThreadKey[activeThreadKey] : undefined,
   );
+  const activeThreadUnseenHeld = useThreadAttentionStore((state) =>
+    activeThreadKey ? state.manuallyUnseenThreadKeys[activeThreadKey] === true : false,
+  );
+  const previousActiveThreadRef = useRef<ScopedThreadRef | null>(null);
+  useEffect(() => {
+    const previousActiveThread = previousActiveThreadRef.current;
+    if (
+      previousActiveThread &&
+      (!activeThreadRef ||
+        previousActiveThread.environmentId !== activeThreadRef.environmentId ||
+        previousActiveThread.threadId !== activeThreadRef.threadId)
+    ) {
+      useThreadAttentionStore
+        .getState()
+        .releaseThreadUnseenHold(previousActiveThread.environmentId, previousActiveThread.threadId);
+    }
+    previousActiveThreadRef.current = activeThreadRef;
+  }, [activeThreadRef]);
+  useEffect(
+    () => () => {
+      const previousActiveThread = previousActiveThreadRef.current;
+      if (!previousActiveThread) return;
+      useThreadAttentionStore
+        .getState()
+        .releaseThreadUnseenHold(previousActiveThread.environmentId, previousActiveThread.threadId);
+    },
+    [],
+  );
   const [attentionVisibilityEpoch, setAttentionVisibilityEpoch] = useState(0);
   useEffect(() => {
     const notifyVisibilityChanged = () => {
@@ -1299,6 +1327,7 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     if (!serverThread?.id) return;
     if (!activeThreadAttention) return;
+    if (activeThreadUnseenHeld) return;
     if (document.visibilityState !== "visible") return;
     if (!document.hasFocus()) return;
     const observedAt = new Date().toISOString();
@@ -1316,6 +1345,7 @@ export default function ChatView(props: ChatViewProps) {
       });
   }, [
     activeThreadAttention?.revision,
+    activeThreadUnseenHeld,
     attentionVisibilityEpoch,
     serverThread?.environmentId,
     serverThread?.id,
