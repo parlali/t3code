@@ -1,4 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
 import {
   EnvironmentId,
   ProjectId,
@@ -6,6 +7,7 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationShellSnapshot,
+  type ThreadAttentionState,
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -143,6 +145,18 @@ function makeThreadShellSnapshot(params: {
         hasActionableProposedPlan: params.hasActionableProposedPlan ?? false,
       },
     ],
+  };
+}
+
+function makeThreadAttentionState(threadId: ThreadId): ThreadAttentionState {
+  return {
+    threadId,
+    kind: "completed",
+    turnId: TurnId.make("turn-attention"),
+    attentionAt: "2026-04-13T00:01:00.000Z",
+    acknowledgedAt: null,
+    updatedAt: "2026-04-13T00:01:00.000Z",
+    revision: 1,
   };
 }
 
@@ -323,6 +337,43 @@ describe("retainThreadDetailSubscription", () => {
 
     await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
     expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not orphan-clean attention for environments without an applied shell snapshot", async () => {
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+    const { useThreadAttentionStore } = await import("~/threadAttentionStore");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    const localEnvironmentId = EnvironmentId.make("env-1");
+    const localThreadId = ThreadId.make("thread-local");
+    const remoteEnvironmentId = EnvironmentId.make("env-remote");
+    const remoteThreadId = ThreadId.make("thread-remote");
+    const remoteThreadKey = scopedThreadKey(scopeThreadRef(remoteEnvironmentId, remoteThreadId));
+
+    connectionInput.applyThreadAttentionEvent(
+      {
+        type: "snapshot",
+        snapshot: {
+          states: [makeThreadAttentionState(remoteThreadId)],
+          updatedAt: "2026-04-13T00:01:00.000Z",
+        },
+      },
+      remoteEnvironmentId,
+    );
+
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({ threadId: localThreadId, sessionStatus: "idle" }),
+      localEnvironmentId,
+    );
+
+    expect(useThreadAttentionStore.getState().attentionByThreadKey[remoteThreadKey]).toBeDefined();
 
     stop();
     await resetEnvironmentServiceForTests();

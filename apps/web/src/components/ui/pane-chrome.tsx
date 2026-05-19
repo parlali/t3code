@@ -1,4 +1,9 @@
-import { PanelLeftCloseIcon, PanelLeftIcon } from "lucide-react";
+import {
+  PanelLeftCloseIcon,
+  PanelLeftIcon,
+  PanelRightCloseIcon,
+  PanelRightIcon,
+} from "lucide-react";
 import { forwardRef, type ComponentPropsWithoutRef } from "react";
 
 import { cn } from "~/lib/utils";
@@ -17,14 +22,22 @@ export const PANE_RESIZE_RAIL_HORIZONTAL_CLASS =
 interface PaneSidebarToggleButtonProps extends ComponentPropsWithoutRef<typeof Button> {
   readonly expanded: boolean;
   readonly label: string;
+  readonly side?: "left" | "right";
 }
 
 export const PaneSidebarToggleButton = forwardRef<HTMLButtonElement, PaneSidebarToggleButtonProps>(
   function PaneSidebarToggleButton(
-    { expanded, label, className, title, "aria-label": ariaLabel, ...buttonProps },
+    { expanded, label, side = "left", className, title, "aria-label": ariaLabel, ...buttonProps },
     ref,
   ) {
-    const Icon = expanded ? PanelLeftCloseIcon : PanelLeftIcon;
+    const Icon =
+      side === "right"
+        ? expanded
+          ? PanelRightCloseIcon
+          : PanelRightIcon
+        : expanded
+          ? PanelLeftCloseIcon
+          : PanelLeftIcon;
 
     return (
       <Button

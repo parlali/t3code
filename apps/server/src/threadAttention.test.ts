@@ -151,6 +151,32 @@ layer("ThreadAttention", (it) => {
     }),
   );
 
+  it.effect("marks one thread seen without clearing another thread for the same viewer", () =>
+    Effect.gen(function* () {
+      const attention = yield* ThreadAttention;
+      const threadA = ThreadId.make("thread-a");
+      const threadB = ThreadId.make("thread-b");
+      const viewerId = AuthSessionId.make("viewer-1");
+
+      yield* setupSchema();
+      yield* insertCompletedThread(threadA);
+      yield* insertCompletedThread(threadB);
+      yield* attention.getSnapshot(viewerId);
+
+      const seen = yield* attention.markSeen(viewerId, {
+        threadId: threadA,
+        observedAt: "2026-05-09T10:01:00.000Z",
+      });
+      const snapshot = yield* attention.getSnapshot(viewerId);
+
+      assert.equal(seen.type, "state-cleared");
+      assert.deepEqual(
+        snapshot.states.map((state) => state.threadId),
+        [threadB],
+      );
+    }),
+  );
+
   it.effect("markUnseen restores attention for a seen terminal turn", () =>
     Effect.gen(function* () {
       const attention = yield* ThreadAttention;

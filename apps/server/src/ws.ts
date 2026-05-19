@@ -993,6 +993,10 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.serverGetProcessDiagnostics, processDiagnostics.read, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverGetMachineProcesses]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverGetMachineProcesses, processDiagnostics.readMachine, {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverGetProcessResourceHistory]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverGetProcessResourceHistory,
@@ -1005,6 +1009,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.serverSignalProcess, processDiagnostics.signal(input), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverSignalMachineProcess]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverSignalMachineProcess,
+            processDiagnostics.signalMachine(input),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
           observeRpcEffect(
             WS_METHODS.sourceControlLookupRepository,

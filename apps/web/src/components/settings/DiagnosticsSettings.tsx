@@ -16,6 +16,7 @@ import {
   useProcessDiagnostics,
   useProcessResourceHistory,
 } from "../../lib/processDiagnosticsState";
+import { formatBytes, formatCount, formatProcessName } from "../../lib/processFormatting";
 import { useTraceDiagnostics } from "../../lib/traceDiagnosticsState";
 import { useServerAvailableEditors, useServerObservability } from "../../rpc/serverState";
 import { formatRelativeTime } from "../../timestampFormat";
@@ -25,30 +26,12 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SettingsPageContainer, SettingsSection, useRelativeTimeTick } from "./settingsLayout";
 
-const NUMBER_FORMAT = new Intl.NumberFormat();
-
 const RESOURCE_HISTORY_WINDOWS = [
   { label: "5m", windowMs: 5 * 60_000, bucketMs: 30_000 },
   { label: "15m", windowMs: 15 * 60_000, bucketMs: 60_000 },
   { label: "30m", windowMs: 30 * 60_000, bucketMs: 2 * 60_000 },
   { label: "1h", windowMs: 60 * 60_000, bucketMs: 5 * 60_000 },
 ] as const;
-
-function formatCount(value: number): string {
-  return NUMBER_FORMAT.format(value);
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) return `${value} B`;
-  const units = ["KB", "MB", "GB"] as const;
-  let unitIndex = -1;
-  let next = value;
-  do {
-    next /= 1024;
-    unitIndex += 1;
-  } while (next >= 1024 && unitIndex < units.length - 1);
-  return `${next.toFixed(next >= 10 ? 1 : 2)} ${units[unitIndex]}`;
-}
 
 function formatDuration(value: number): string {
   if (value < 1_000) return `${Math.round(value)} ms`;
@@ -70,14 +53,6 @@ function formatRelative(value: DateTime.Utc | null): string {
 
 function formatRelativeNoWrap(value: DateTime.Utc | null): string {
   return formatRelative(value).replaceAll(" ", "\u00a0");
-}
-
-function formatProcessName(command: string): string {
-  const firstToken = command.trim().split(/\s+/)[0];
-  if (!firstToken) return command;
-  const normalized = firstToken.replace(/^['"]|['"]$/g, "");
-  const segments = normalized.split(/[\\/]/).filter(Boolean);
-  return segments.at(-1) ?? normalized;
 }
 
 function isStaleProcessSignalMessage(message: string | undefined): boolean {

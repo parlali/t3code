@@ -19,8 +19,10 @@ import {
   shortcutLabelForCommand,
 } from "../../keybindings";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
+import { useDelayedUnmount } from "~/hooks/useDelayedUnmount";
 import { cn } from "~/lib/utils";
 import { TooltipProvider } from "../ui/tooltip";
+import { PANEL_EXIT_ANIMATION_MS, SNAPPY_TRANSITION_EASING_CLASS } from "../ui/animation";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 
@@ -220,6 +222,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   );
   const showLockedInstanceSidebar = isLocked && lockedInstanceEntries.length > 1;
   const showSidebar = !isSearching && (!isLocked || showLockedInstanceSidebar);
+  const sidebarMounted = useDelayedUnmount(showSidebar, PANEL_EXIT_ANIMATION_MS);
   const sidebarInstanceEntries = showLockedInstanceSidebar
     ? lockedInstanceEntries
     : instanceEntries;
@@ -382,6 +385,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     props.activeInstanceId,
     instanceEntries,
   ]);
+  const lockedHeaderVisible = Boolean(
+    isLocked && !showLockedInstanceSidebar && LockedProviderIcon && lockedHeaderLabel,
+  );
+  const lockedHeaderMounted = useDelayedUnmount(lockedHeaderVisible, PANEL_EXIT_ANIMATION_MS);
   const modelJumpCommandByKey = useMemo(() => {
     const mapping = new Map<
       string,
@@ -524,22 +531,46 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         )}
       >
         {/* Locked provider header (only shown in locked mode) */}
-        {isLocked && !showLockedInstanceSidebar && LockedProviderIcon && lockedHeaderLabel && (
-          <div className="flex items-center gap-2 px-4 py-3 border-b">
-            <LockedProviderIcon className="size-5 shrink-0" />
-            <span className="font-medium text-sm">{lockedHeaderLabel}</span>
+        {lockedHeaderMounted && LockedProviderIcon && lockedHeaderLabel && (
+          <div
+            className={cn(
+              "shrink-0 overflow-hidden border-b",
+              `transition-[height,opacity,transform] duration-[140ms] ${SNAPPY_TRANSITION_EASING_CLASS} motion-reduce:transition-none`,
+              lockedHeaderVisible
+                ? "h-12 translate-y-0 opacity-100"
+                : "pointer-events-none h-0 -translate-y-1 opacity-0",
+            )}
+            aria-hidden={!lockedHeaderVisible}
+          >
+            <div className="flex h-12 items-center gap-2 px-4">
+              <LockedProviderIcon className="size-5 shrink-0" />
+              <span className="font-medium text-sm">{lockedHeaderLabel}</span>
+            </div>
           </div>
         )}
 
         {/* Sidebar (only in unlocked mode) */}
-        {showSidebar && (
-          <ModelPickerSidebar
-            selectedInstanceId={selectedInstanceId}
-            onSelectInstance={handleSelectInstance}
-            instanceEntries={sidebarInstanceEntries}
-            showFavorites={!isLocked}
-            showComingSoon={!isLocked}
-          />
+        {sidebarMounted && (
+          <div
+            className={cn(
+              "h-full shrink-0 overflow-hidden",
+              `transition-[width,opacity,transform] duration-[140ms] ${SNAPPY_TRANSITION_EASING_CLASS} motion-reduce:transition-none`,
+              showSidebar
+                ? "w-12 translate-x-0 opacity-100"
+                : "pointer-events-none w-0 -translate-x-1 opacity-0",
+            )}
+            aria-hidden={!showSidebar}
+          >
+            <div className="h-full w-12">
+              <ModelPickerSidebar
+                selectedInstanceId={selectedInstanceId}
+                onSelectInstance={handleSelectInstance}
+                instanceEntries={sidebarInstanceEntries}
+                showFavorites={!isLocked}
+                showComingSoon={!isLocked}
+              />
+            </div>
+          </div>
         )}
 
         {/* Main content area */}
@@ -564,8 +595,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         >
           <div
             className={cn(
-              "flex min-h-0 flex-1 flex-col overflow-hidden",
-              isLocked && !showLockedInstanceSidebar ? "min-w-0" : showSidebar && "border-l",
+              "flex min-h-0 flex-1 flex-col overflow-hidden transition-colors duration-[140ms]",
+              isLocked && !showLockedInstanceSidebar
+                ? "min-w-0"
+                : sidebarMounted && [
+                    "border-l",
+                    showSidebar ? "border-border" : "border-transparent",
+                  ],
             )}
           >
             {/* Search bar */}

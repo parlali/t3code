@@ -20,6 +20,7 @@ interface WorkbenchDiffEditorProps {
   readonly path: string;
   readonly readOnly: boolean;
   readonly resolvedTheme: "dark" | "light";
+  readonly visible?: boolean;
   readonly onModifiedChange: (value: string) => void;
   readonly onSave: () => void;
 }
@@ -35,10 +36,12 @@ export const WorkbenchDiffEditor = memo(function WorkbenchDiffEditor({
   path,
   readOnly,
   resolvedTheme,
+  visible = true,
   onModifiedChange,
   onSave,
 }: WorkbenchDiffEditorProps) {
   const diffContentDisposableRef = useRef<Disposable | null>(null);
+  const diffEditorRef = useRef<Monaco.editor.IStandaloneDiffEditor | null>(null);
   const latestModifiedRef = useRef(modified);
   const onSaveRef = useRef(onSave);
   const inlineDiff = isMobileLayout || diffLayout === "inline";
@@ -57,6 +60,7 @@ export const WorkbenchDiffEditor = memo(function WorkbenchDiffEditor({
 
   const onDiffMount: DiffOnMount = useCallback(
     (editor, monaco) => {
+      diffEditorRef.current = editor;
       const modifiedEditor = editor.getModifiedEditor();
       modifiedEditor.focus();
       diffContentDisposableRef.current?.dispose();
@@ -82,8 +86,17 @@ export const WorkbenchDiffEditor = memo(function WorkbenchDiffEditor({
     return () => {
       diffContentDisposableRef.current?.dispose();
       diffContentDisposableRef.current = null;
+      diffEditorRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    const frame = window.requestAnimationFrame(() => {
+      diffEditorRef.current?.layout();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [id, inlineDiff, visible]);
 
   return (
     <DiffEditor

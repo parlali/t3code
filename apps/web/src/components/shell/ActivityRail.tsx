@@ -1,5 +1,4 @@
 import {
-  Code2Icon,
   FilesIcon,
   GitBranchIcon,
   MessageSquareTextIcon,
@@ -13,7 +12,9 @@ import type { ComponentType } from "react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { ServerProcessDialog } from "../sidebar/ServerProcessDialog";
 import { Menu, MenuGroup, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { PaneSidebarToggleButton } from "../ui/pane-chrome";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { type ShellPanelMode, useShellStore } from "./shellStore";
 import { useNavigateToShellWorkspace } from "./useShellNavigation";
@@ -99,7 +100,9 @@ function RailButton({
 }
 
 export function ActivityRail() {
+  const panelOpen = useShellStore((state) => state.panelOpen);
   const setPanelOpen = useShellStore((state) => state.setPanelOpen);
+  const togglePanel = useShellStore((state) => state.togglePanel);
   const setActiveMode = useShellStore((state) => state.setActiveMode);
   const lastWorkspaceRoute = useShellStore((state) => state.lastWorkspaceRoute);
   const terminalActions = useShellStore((state) => state.terminalActions);
@@ -115,12 +118,27 @@ export function ActivityRail() {
         className="hidden h-full w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-card px-1.5 py-2 text-card-foreground md:flex"
       >
         <div className="flex h-9 w-full items-center justify-center">
-          <Code2Icon className="size-4 text-muted-foreground" />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <PaneSidebarToggleButton
+                  expanded={panelOpen}
+                  label={panelOpen ? "Collapse side panel" : "Expand side panel"}
+                  className="size-9 rounded-md"
+                  onClick={togglePanel}
+                />
+              }
+            />
+            <TooltipPopup side="right">
+              {panelOpen ? "Collapse side panel" : "Expand side panel"}
+            </TooltipPopup>
+          </Tooltip>
         </div>
         <div className="flex w-full flex-1 flex-col items-center gap-1">
           {PRIMARY_ITEMS.map((item) => (
             <RailButton key={item.mode} item={item} />
           ))}
+          <ServerProcessDialog />
         </div>
         <Tooltip>
           <TooltipTrigger
@@ -170,6 +188,7 @@ export function ActivityRail() {
         {MOBILE_VISIBLE_ITEMS.map((item) => (
           <RailButton key={item.mode} item={item} mobile />
         ))}
+        <ServerProcessDialog variant="mobile" />
         <Menu>
           <MenuTrigger
             render={

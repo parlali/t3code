@@ -925,7 +925,7 @@ function syncThreadUiFromStore() {
   );
 }
 
-function reconcileSnapshotDerivedState() {
+function reconcileSnapshotDerivedState(environmentId: EnvironmentId) {
   syncProjectUiFromStore();
   syncThreadUiFromStore();
 
@@ -939,7 +939,7 @@ function reconcileSnapshotDerivedState() {
     draftThreadKeys: useComposerDraftStore.getState().listDraftThreadKeys(),
   });
   useTerminalStateStore.getState().removeOrphanedTerminalStates(activeThreadKeys);
-  useThreadAttentionStore.getState().removeOrphanedThreads(activeThreadKeys);
+  useThreadAttentionStore.getState().removeOrphanedThreads(activeThreadKeys, environmentId);
 }
 
 export function shouldApplyTerminalEvent(input: {
@@ -1095,7 +1095,7 @@ function createEnvironmentConnectionHandlers() {
         snapshot.threads.map((thread) => thread.id),
       );
       reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
-      reconcileSnapshotDerivedState();
+      reconcileSnapshotDerivedState(environmentId);
     },
     applyTerminalEvent: (event: TerminalEvent, environmentId: EnvironmentId) => {
       const threadRef = scopeThreadRef(environmentId, ThreadId.make(event.threadId));
@@ -1153,6 +1153,7 @@ function createPrimaryEnvironmentClient(
     }),
     {
       streamTransport: new WsTransport(wsBaseUrl, passiveHandlers),
+      terminalTransport: () => new WsTransport(wsBaseUrl, passiveHandlers),
       threadDetailTransport: new WsTransport(wsBaseUrl, passiveHandlers),
     },
   );
@@ -1234,6 +1235,7 @@ function createSavedEnvironmentClient(
     }),
     {
       streamTransport: new WsTransport(resolveSocketUrl, passiveHandlers),
+      terminalTransport: () => new WsTransport(resolveSocketUrl, passiveHandlers),
       threadDetailTransport: new WsTransport(resolveSocketUrl, passiveHandlers),
     },
   );

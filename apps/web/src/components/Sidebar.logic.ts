@@ -41,10 +41,10 @@ export interface ThreadStatusPill {
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Pending Approval": 5,
   "Awaiting Input": 4,
-  Working: 3,
-  Connecting: 3,
-  "Plan Ready": 2,
-  Completed: 1,
+  "Plan Ready": 3,
+  Completed: 2.5,
+  Working: 2,
+  Connecting: 2,
 };
 
 type ThreadStatusInput = Pick<

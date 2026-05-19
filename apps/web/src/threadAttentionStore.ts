@@ -13,6 +13,7 @@ export interface ThreadAttentionEntry {
   readonly kind: ThreadAttentionState["kind"];
   readonly turnId: ThreadAttentionState["turnId"];
   readonly attentionAt: string;
+  readonly receivedSequence: number;
   readonly acknowledgedAt: string | null;
   readonly updatedAt: string;
   readonly revision: number;
@@ -34,7 +35,10 @@ interface ThreadAttentionStoreState {
     threadId: ThreadId,
     revision?: number,
   ) => void;
-  readonly removeOrphanedThreads: (activeThreadKeys: ReadonlySet<string>) => void;
+  readonly removeOrphanedThreads: (
+    activeThreadKeys: ReadonlySet<string>,
+    environmentId?: EnvironmentId,
+  ) => void;
 }
 
 function keyFor(environmentId: EnvironmentId, threadId: ThreadId): string {
@@ -45,12 +49,28 @@ function environmentKeyPrefix(environmentId: EnvironmentId): string {
   return `${environmentId}:`;
 }
 
-function entryFromState(state: ThreadAttentionState): ThreadAttentionEntry {
+let nextThreadAttentionReceivedSequence = 1;
+
+function nextReceivedSequence(): number {
+  const sequence = nextThreadAttentionReceivedSequence;
+  nextThreadAttentionReceivedSequence += 1;
+  return sequence;
+}
+
+export function readThreadAttentionReceivedSequence(): number {
+  return nextThreadAttentionReceivedSequence - 1;
+}
+
+function entryFromState(
+  state: ThreadAttentionState,
+  receivedSequence: number,
+): ThreadAttentionEntry {
   return {
     threadId: state.threadId,
     kind: state.kind,
     turnId: state.turnId,
     attentionAt: state.attentionAt,
+    receivedSequence,
     acknowledgedAt: state.acknowledgedAt,
     updatedAt: state.updatedAt,
     revision: state.revision,
@@ -70,6 +90,7 @@ export const useThreadAttentionStore = create<ThreadAttentionStoreState>()((set)
   syncSnapshot: (environmentId, snapshot) =>
     set((state) => {
       const prefix = environmentKeyPrefix(environmentId);
+      const receivedSequence = nextReceivedSequence();
       const next = Object.fromEntries(
         Object.entries(state.attentionByThreadKey).filter(([key]) => !key.startsWith(prefix)),
       ) as Record<string, ThreadAttentionEntry>;
@@ -79,7 +100,12 @@ export const useThreadAttentionStore = create<ThreadAttentionStoreState>()((set)
         next[key] =
           previous && previous.revision > attentionState.revision
             ? previous
-            : entryFromState(attentionState);
+            : entryFromState(
+                attentionState,
+                previous?.revision === attentionState.revision
+                  ? previous.receivedSequence
+                  : receivedSequence,
+              );
       }
       return { attentionByThreadKey: next };
     }),
@@ -101,10 +127,14 @@ export const useThreadAttentionStore = create<ThreadAttentionStoreState>()((set)
       if (!shouldApplyRevision(previous, attentionState.revision)) {
         return state;
       }
+      const receivedSequence =
+        previous?.revision === attentionState.revision
+          ? previous.receivedSequence
+          : nextReceivedSequence();
       return {
         attentionByThreadKey: {
           ...state.attentionByThreadKey,
-          [key]: entryFromState(attentionState),
+          [key]: entryFromState(attentionState, receivedSequence),
         },
       };
     }),
@@ -142,13 +172,18 @@ export const useThreadAttentionStore = create<ThreadAttentionStoreState>()((set)
       delete next[key];
       return { attentionByThreadKey: next };
     }),
-  removeOrphanedThreads: (activeThreadKeys) =>
+  removeOrphanedThreads: (activeThreadKeys, environmentId) =>
     set((state) => {
+      const prefix = environmentId ? environmentKeyPrefix(environmentId) : null;
+      const shouldRetainThreadKey = (key: string) =>
+        prefix !== null && !key.startsWith(prefix) ? true : activeThreadKeys.has(key);
       const next = Object.fromEntries(
-        Object.entries(state.attentionByThreadKey).filter(([key]) => activeThreadKeys.has(key)),
+        Object.entries(state.attentionByThreadKey).filter(([key]) => shouldRetainThreadKey(key)),
       ) as Record<string, ThreadAttentionEntry>;
       const nextManualHolds = Object.fromEntries(
-        Object.entries(state.manuallyUnseenThreadKeys).filter(([key]) => activeThreadKeys.has(key)),
+        Object.entries(state.manuallyUnseenThreadKeys).filter(([key]) =>
+          shouldRetainThreadKey(key),
+        ),
       ) as Record<string, true>;
       if (
         Object.keys(next).length === Object.keys(state.attentionByThreadKey).length &&

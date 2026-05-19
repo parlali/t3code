@@ -629,6 +629,25 @@ describe("resolveProjectStatusIndicator", () => {
     ).toMatchObject({ label: "Pending Approval", dotClass: "bg-amber-500" });
   });
 
+  it("does not let one working thread mask another thread's completed attention", () => {
+    expect(
+      resolveProjectStatusIndicator([
+        {
+          label: "Working",
+          colorClass: "text-sky-600",
+          dotClass: "bg-sky-500",
+          pulse: true,
+        },
+        {
+          label: "Completed",
+          colorClass: "text-emerald-600",
+          dotClass: "bg-emerald-500",
+          pulse: false,
+        },
+      ]),
+    ).toMatchObject({ label: "Completed", dotClass: "bg-emerald-500" });
+  });
+
   it("prefers plan-ready over completed when no stronger action is needed", () => {
     expect(
       resolveProjectStatusIndicator([

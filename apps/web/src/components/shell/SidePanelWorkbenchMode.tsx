@@ -23,7 +23,7 @@ import { projectListEntriesQueryOptions, projectQueryKeys } from "../../lib/proj
 import { buildTurnDiffTree } from "../../lib/turnDiffTree";
 import { cn, randomUUID } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
-import { requestWorkbenchOpen } from "../../workbenchEvents";
+import { requestWorkbenchOpen, useWorkbenchSelection } from "../../workbenchEvents";
 import { getLocalStorageItem, setLocalStorageItem } from "../../hooks/useLocalStorage";
 import { Button } from "../ui/button";
 import { Group, GroupSeparator } from "../ui/group";
@@ -99,6 +99,7 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
   const queryClient = useQueryClient();
   const { activeThread, cwd, routeThreadRef } = useActiveShellContext();
   const environmentId = activeThread?.environmentId ?? routeThreadRef?.environmentId ?? null;
+  const workbenchSelection = useWorkbenchSelection(routeThreadRef);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [collapsedChangeDirectories, setCollapsedChangeDirectories] = useState<Set<string>>(
     () => new Set(),
@@ -697,6 +698,12 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
             sections.map((section) => {
               const collapsed = collapsedChangeSections.has(section.id);
               const sectionId = section.id as "conflicts" | "staged" | "changes" | "untracked";
+              const sectionSource = sectionId === "staged" ? "staged" : "working-tree";
+              const selectedChangePath =
+                workbenchSelection?.mode === "changes" &&
+                (workbenchSelection.changeSource ?? "working-tree") === sectionSource
+                  ? workbenchSelection.path
+                  : null;
               const sectionPaths = section.files.map((file) => file.path);
               const statusByPath = new Map(
                 section.files.map((file) => [file.path, statusLabelForSection(file, sectionId)]),
@@ -770,7 +777,7 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
                     <ChangesTree
                       nodes={changeTree(section.files)}
                       collapsedDirectories={collapsedChangeDirectories}
-                      selectedPath={null}
+                      selectedPath={selectedChangePath}
                       onToggleDirectory={(path) =>
                         setCollapsedChangeDirectories((current) => {
                           const next = new Set(current);
@@ -840,7 +847,7 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
           cwd={cwd}
           tree={tree}
           expanded={expanded}
-          selectedPath={null}
+          selectedPath={workbenchSelection?.mode === "files" ? workbenchSelection.path : null}
           listError={listQuery.error ?? null}
           isRefreshing={listQuery.isFetching}
           createDraft={createDraft}

@@ -5,12 +5,17 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { useThreadAttentionStore } from "./threadAttentionStore";
 
 const environmentId = EnvironmentId.make("environment-local");
+const remoteEnvironmentId = EnvironmentId.make("environment-remote");
 const threadId = ThreadId.make("thread-1");
 const threadKey = scopedThreadKey(scopeThreadRef(environmentId, threadId));
+const otherThreadId = ThreadId.make("thread-2");
+const otherThreadKey = scopedThreadKey(scopeThreadRef(environmentId, otherThreadId));
+const remoteThreadId = ThreadId.make("thread-remote");
+const remoteThreadKey = scopedThreadKey(scopeThreadRef(remoteEnvironmentId, remoteThreadId));
 
-function attentionState(overrides: { revision?: number } = {}) {
+function attentionState(overrides: { revision?: number; threadId?: ThreadId } = {}) {
   return {
-    threadId,
+    threadId: overrides.threadId ?? threadId,
     kind: "completed" as const,
     turnId: "turn-1" as never,
     attentionAt: "2026-05-09T10:00:00.000Z",
@@ -58,6 +63,17 @@ describe("threadAttentionStore", () => {
     expect(useThreadAttentionStore.getState().attentionByThreadKey[threadKey]).toBeUndefined();
   });
 
+  it("clears only the targeted thread", () => {
+    const store = useThreadAttentionStore.getState();
+    store.applyState(environmentId, attentionState({ threadId, revision: 1 }));
+    store.applyState(environmentId, attentionState({ threadId: otherThreadId, revision: 1 }));
+
+    store.clearThread(environmentId, threadId, 2);
+
+    expect(useThreadAttentionStore.getState().attentionByThreadKey[threadKey]).toBeUndefined();
+    expect(useThreadAttentionStore.getState().attentionByThreadKey[otherThreadKey]).toBeDefined();
+  });
+
   it("applies stream update and clear events", () => {
     const store = useThreadAttentionStore.getState();
     store.applyStreamEvent(environmentId, {
@@ -95,5 +111,30 @@ describe("threadAttentionStore", () => {
     store.releaseThreadUnseenHold(environmentId, threadId);
 
     expect(useThreadAttentionStore.getState().manuallyUnseenThreadKeys[threadKey]).toBeUndefined();
+  });
+
+  it("scopes orphan cleanup to the synced environment", () => {
+    const store = useThreadAttentionStore.getState();
+    store.applyState(environmentId, attentionState({ threadId, revision: 1 }));
+    store.applyState(
+      remoteEnvironmentId,
+      attentionState({ threadId: remoteThreadId, revision: 1 }),
+    );
+    store.holdThreadUnseen(remoteEnvironmentId, remoteThreadId);
+
+    store.removeOrphanedThreads(new Set([threadKey]), environmentId);
+
+    expect(useThreadAttentionStore.getState().attentionByThreadKey[threadKey]).toBeDefined();
+    expect(useThreadAttentionStore.getState().attentionByThreadKey[remoteThreadKey]).toBeDefined();
+    expect(useThreadAttentionStore.getState().manuallyUnseenThreadKeys[remoteThreadKey]).toBe(true);
+
+    store.removeOrphanedThreads(new Set([threadKey]), remoteEnvironmentId);
+
+    expect(
+      useThreadAttentionStore.getState().attentionByThreadKey[remoteThreadKey],
+    ).toBeUndefined();
+    expect(
+      useThreadAttentionStore.getState().manuallyUnseenThreadKeys[remoteThreadKey],
+    ).toBeUndefined();
   });
 });

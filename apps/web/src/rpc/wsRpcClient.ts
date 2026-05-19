@@ -13,6 +13,7 @@ import { applyGitStatusStreamEvent } from "@t3tools/shared/git";
 import { Effect, Stream } from "effect";
 
 import { type WsRpcProtocolClient } from "./protocol";
+import { isRecoverableSubscriptionErrorMessage } from "./transportError";
 import { resetWsReconnectBackoff } from "./wsConnectionState";
 import { WsTransport } from "./wsTransport";
 
@@ -52,8 +53,11 @@ interface GitRunStackedActionOptions {
   readonly onProgress?: (event: GitActionProgressEvent) => void;
 }
 
+type WsTransportProvider = WsTransport | (() => WsTransport);
+
 interface WsRpcClientTransportOptions {
   readonly streamTransport?: WsTransport;
+  readonly terminalTransport?: WsTransportProvider;
   readonly threadDetailTransport?: WsTransport;
 }
 
@@ -169,10 +173,12 @@ export interface WsRpcClient {
     readonly getProcessDiagnostics: RpcUnaryNoArgMethod<
       typeof WS_METHODS.serverGetProcessDiagnostics
     >;
+    readonly getMachineProcesses: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetMachineProcesses>;
     readonly getProcessResourceHistory: RpcUnaryMethod<
       typeof WS_METHODS.serverGetProcessResourceHistory
     >;
     readonly signalProcess: RpcUnaryMethod<typeof WS_METHODS.serverSignalProcess>;
+    readonly signalMachineProcess: RpcUnaryMethod<typeof WS_METHODS.serverSignalMachineProcess>;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
@@ -201,19 +207,41 @@ export function createWsRpcClient(
   options?: WsRpcClientTransportOptions,
 ): WsRpcClient {
   const streamTransport = options?.streamTransport ?? transport;
+  const configuredTerminalTransport = options?.terminalTransport ?? streamTransport;
+  const initialTerminalTransport: WsTransport | null =
+    typeof configuredTerminalTransport === "function" ? null : configuredTerminalTransport;
+  const createTerminalTransport: (() => WsTransport) | null =
+    typeof configuredTerminalTransport === "function" ? configuredTerminalTransport : null;
+  let terminalTransport: WsTransport | null = initialTerminalTransport;
   const threadDetailTransport = options?.threadDetailTransport ?? streamTransport;
-  const transports = uniqueTransports([transport, streamTransport, threadDetailTransport]);
+  const getTerminalTransport = (): WsTransport => {
+    if (terminalTransport) {
+      return terminalTransport;
+    }
+    if (!createTerminalTransport) {
+      return streamTransport;
+    }
+    terminalTransport = createTerminalTransport();
+    return terminalTransport;
+  };
+  const activeTransports = () =>
+    uniqueTransports([
+      transport,
+      streamTransport,
+      ...(terminalTransport ? [terminalTransport] : []),
+      threadDetailTransport,
+    ]);
 
   return {
     dispose: async () => {
-      await Promise.all(transports.map((transport) => transport.dispose()));
+      await Promise.all(activeTransports().map((transport) => transport.dispose()));
     },
-    isConnectionOpen: () => transports.every((transport) => transport.isConnectionOpen()),
+    isConnectionOpen: () => activeTransports().every((transport) => transport.isConnectionOpen()),
     reconnect: async () => {
       resetWsReconnectBackoff();
-      await Promise.all(transports.map((transport) => transport.reconnect()));
+      await Promise.all(activeTransports().map((transport) => transport.reconnect()));
     },
-    isHeartbeatFresh: () => transports.every((transport) => transport.isHeartbeatFresh()),
+    isHeartbeatFresh: () => activeTransports().every((transport) => transport.isHeartbeatFresh()),
     terminal: {
       open: (input) => transport.request((client) => client[WS_METHODS.terminalOpen](input)),
       write: (input) => transport.request((client) => client[WS_METHODS.terminalWrite](input)),
@@ -233,7 +261,7 @@ export function createWsRpcClient(
           },
         ),
       onSessionEvent: (input, listener, options) =>
-        streamTransport.subscribe(
+        getTerminalTransport().subscribe(
           (client) => client[WS_METHODS.subscribeTerminalEvents](input),
           listener,
           {
@@ -345,15 +373,26 @@ export function createWsRpcClient(
       runStackedAction: async (input, options) => {
         let result: GitRunStackedActionResult | null = null;
 
-        await streamTransport.requestStream(
-          (client) => client[WS_METHODS.gitRunStackedAction](input),
-          (event) => {
-            options?.onProgress?.(event);
-            if (event.kind === "action_finished") {
-              result = event.result;
-            }
-          },
-        );
+        try {
+          await streamTransport.requestStream(
+            (client) => client[WS_METHODS.gitRunStackedAction](input),
+            (event) => {
+              options?.onProgress?.(event);
+              if (event.kind === "action_finished") {
+                result = event.result;
+              }
+            },
+          );
+        } catch (error) {
+          if (
+            result === null ||
+            !isRecoverableSubscriptionErrorMessage(
+              error instanceof Error ? error.message : String(error),
+            )
+          ) {
+            throw error;
+          }
+        }
 
         if (result) {
           return result;
@@ -385,10 +424,14 @@ export function createWsRpcClient(
         transport.request((client) => client[WS_METHODS.serverGetTraceDiagnostics]({})),
       getProcessDiagnostics: () =>
         transport.request((client) => client[WS_METHODS.serverGetProcessDiagnostics]({})),
+      getMachineProcesses: () =>
+        transport.request((client) => client[WS_METHODS.serverGetMachineProcesses]({})),
       getProcessResourceHistory: (input) =>
         transport.request((client) => client[WS_METHODS.serverGetProcessResourceHistory](input)),
       signalProcess: (input) =>
         transport.request((client) => client[WS_METHODS.serverSignalProcess](input)),
+      signalMachineProcess: (input) =>
+        transport.request((client) => client[WS_METHODS.serverSignalMachineProcess](input)),
       subscribeConfig: (listener, options) =>
         streamTransport.subscribe(
           (client) => client[WS_METHODS.subscribeServerConfig]({}),

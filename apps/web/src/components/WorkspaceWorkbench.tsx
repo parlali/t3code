@@ -7,6 +7,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
+import { getWorkbenchMediaTypeByPath } from "@t3tools/shared/workbenchMedia";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Columns2Icon, MessageSquareIcon, Rows3Icon, SaveIcon, WrapTextIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -23,7 +24,11 @@ import {
 } from "../lib/projectReactQuery";
 import { useStore } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
-import { subscribeWorkbenchOpen } from "../workbenchEvents";
+import {
+  publishWorkbenchSelection,
+  subscribeWorkbenchOpen,
+  type WorkbenchActiveSelection,
+} from "../workbenchEvents";
 import { Button } from "./ui/button";
 import {
   PANE_HEADER_CLASS,
@@ -34,6 +39,8 @@ import {
   WorkbenchTabBar,
   WorkbenchBreadcrumbs,
   WorkbenchDiffEditor,
+  WorkbenchDiffUnavailable,
+  WorkbenchMediaViewer,
   type WorkbenchTab,
   basename,
   tabFor,
@@ -83,15 +90,23 @@ function normalizeEditorPositionValue(value: number | undefined, fallback: numbe
   return Math.max(1, Math.floor(value));
 }
 
+function activeSelectionForTab(tab: WorkbenchTab): WorkbenchActiveSelection {
+  if (tab.kind === "file") {
+    return { mode: "files", path: tab.path };
+  }
+  return { mode: "changes", path: tab.path, changeSource: tab.source };
+}
+
 export interface WorkspaceWorkbenchProps {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly embedded?: boolean;
   readonly onSwitchToChat?: () => void;
+  readonly visible?: boolean;
 }
 
 export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
-  const { embedded = false, onSwitchToChat } = props;
+  const { embedded = false, onSwitchToChat, visible = true } = props;
   const queryClient = useQueryClient();
   const { resolvedTheme } = useTheme();
   const isMobileLayout = useMediaQuery(MOBILE_LAYOUT_MEDIA_QUERY);
@@ -145,10 +160,14 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   activeTabRef.current = activeTab;
   const activePath = activeTab?.path ?? null;
   const activeKind = activeTab?.kind ?? null;
+  const activePathMediaType = useMemo(
+    () => (activePath ? getWorkbenchMediaTypeByPath(activePath) : null),
+    [activePath],
+  );
+  const activeDiffIsMedia = activeKind === "diff" && activePathMediaType !== null;
   const activeDiffSource =
     activeTab?.kind === "diff" ? activeTab.source : ("working-tree" as const);
   const activeDiffBufferKey = activeTab?.kind === "diff" ? activeTab.id : null;
-  const activeTabReadOnly = activeTab?.kind === "diff" && activeTab.source !== "working-tree";
   const activeTabDirty = activeTab ? dirtyTabs.has(activeTab.id) : false;
   const listQuery = useQuery(
     projectListEntriesQueryOptions({
@@ -170,12 +189,19 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       cwd,
       relativePath: activeKind === "diff" ? activePath : null,
       source: activeDiffSource,
+      enabled: !activeDiffIsMedia,
     }),
   );
   const treeEntries = listQuery.data?.entries ?? EMPTY_TREE_ENTRIES;
   const fileQueryContents = fileQuery.data?.contents;
+  const activeFileMedia =
+    activeKind === "file" && fileQuery.data?.contentKind === "media" ? fileQuery.data : null;
   const diffQueryOriginal = diffQuery.data?.original;
   const diffQueryModified = diffQuery.data?.modified;
+  const activeTabReadOnly =
+    (activeTab?.kind === "file" && activePathMediaType !== null) ||
+    (activeTab?.kind === "diff" && activeDiffIsMedia) ||
+    (activeTab?.kind === "diff" && activeTab.source !== "working-tree");
   const activeFileReady =
     activeKind === "file" &&
     activePath !== null &&
@@ -198,6 +224,18 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     },
     [props.environmentId, props.threadId],
   );
+  const publishActiveSelection = useCallback(
+    (selection: WorkbenchActiveSelection | null) => {
+      publishWorkbenchSelection({
+        scope: {
+          environmentId: props.environmentId,
+          threadId: props.threadId,
+        },
+        selection,
+      });
+    },
+    [props.environmentId, props.threadId],
+  );
 
   const openTab = useCallback(
     (tab: WorkbenchTab, options?: { readonly persist?: boolean }) => {
@@ -207,9 +245,10 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
           : [...current.tabs, tab],
         activeTabId: tab.id,
       }));
+      publishActiveSelection(activeSelectionForTab(tab));
       if (options?.persist !== false) persistWorkbenchSelection(selectionForTab(tab));
     },
-    [persistWorkbenchSelection],
+    [persistWorkbenchSelection, publishActiveSelection],
   );
 
   useEffect(() => {
@@ -269,14 +308,20 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   }, [activeFileReady, activeTabId, editorMountVersion, pendingEditorReveal]);
 
   useEffect(() => {
-    if (fileQueryContents !== undefined && activeKind === "file" && activePath && !activeTabDirty) {
+    if (
+      fileQueryContents !== undefined &&
+      activeKind === "file" &&
+      activePath &&
+      fileQuery.data?.contentKind !== "media" &&
+      !activeTabDirty
+    ) {
       setFileBuffers((current) => {
         const next = setBufferValue(current, activePath, fileQueryContents);
         fileBuffersRef.current = next;
         return next;
       });
     }
-  }, [activeKind, activePath, activeTabDirty, fileQueryContents]);
+  }, [activeKind, activePath, activeTabDirty, fileQuery.data?.contentKind, fileQueryContents]);
 
   useEffect(() => {
     if (diffQueryModified !== undefined && activeDiffBufferKey !== null && !activeTabDirty) {
@@ -303,10 +348,11 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       });
       if (activeTabId === tabId) {
         const nextActiveTab = nextTabs.find((tab) => tab.id === nextActiveTabId) ?? null;
+        publishActiveSelection(nextActiveTab ? activeSelectionForTab(nextActiveTab) : null);
         persistWorkbenchSelection(nextActiveTab ? selectionForTab(nextActiveTab) : null);
       }
     },
-    [activeTabId, persistWorkbenchSelection, tabs],
+    [activeTabId, persistWorkbenchSelection, publishActiveSelection, tabs],
   );
 
   const selectTab = useCallback(
@@ -316,15 +362,17 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       setTabState((current) =>
         current.activeTabId === tabId ? current : { ...current, activeTabId: tabId },
       );
+      publishActiveSelection(activeSelectionForTab(tab));
       persistWorkbenchSelection(selectionForTab(tab));
     },
-    [persistWorkbenchSelection, tabs],
+    [persistWorkbenchSelection, publishActiveSelection, tabs],
   );
 
   useEffect(() => {
     workbenchSelectionVersionRef.current += 1;
     const restoreVersion = workbenchSelectionVersionRef.current;
     setTabState({ tabs: [], activeTabId: null });
+    publishActiveSelection(null);
     fileBuffersRef.current = {};
     diffBuffersRef.current = {};
     setFileBuffers({});
@@ -356,7 +404,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     return () => {
       cancelled = true;
     };
-  }, [cwd, openTab, props.environmentId, props.threadId]);
+  }, [cwd, openTab, props.environmentId, props.threadId, publishActiveSelection]);
 
   const refreshWorkspace = useCallback(async () => {
     await Promise.all([
@@ -381,6 +429,8 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
 
   const saveActive = useCallback(async () => {
     if (!activeTab || !cwd) return;
+    if (activeTab.kind === "file" && activePathMediaType !== null) return;
+    if (activeTab.kind === "diff" && activeDiffIsMedia) return;
     if (activeTab.kind === "diff" && activeTab.source !== "working-tree") return;
     const contents =
       activeTab.kind === "file"
@@ -411,7 +461,15 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       return next;
     });
     await refreshWorkspace();
-  }, [activeTab, cwd, props.environmentId, queryClient, refreshWorkspace]);
+  }, [
+    activeDiffIsMedia,
+    activePathMediaType,
+    activeTab,
+    cwd,
+    props.environmentId,
+    queryClient,
+    refreshWorkspace,
+  ]);
 
   useEffect(() => {
     saveActiveRef.current = () => {
@@ -434,6 +492,14 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       saveActiveRef.current();
     });
   }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    const frame = window.requestAnimationFrame(() => {
+      editorRef.current?.editor.layout();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTabId, editorMountVersion, visible]);
 
   const handleDiffModifiedChange = useCallback(
     (value: string) => {
@@ -484,9 +550,10 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
         next.delete(tabId);
         return next;
       });
+      publishActiveSelection(null);
       persistWorkbenchSelection(null);
     },
-    [persistWorkbenchSelection],
+    [persistWorkbenchSelection, publishActiveSelection],
   );
 
   useEffect(() => {
@@ -536,7 +603,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       </Button>
     ) : null;
   const diffControls =
-    activeTab?.kind === "diff" ? (
+    activeTab?.kind === "diff" && !activeDiffIsMedia ? (
       <>
         <Button
           size="icon-sm"
@@ -655,8 +722,21 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
             <WorkbenchMessage>Open a file or change from the explorer.</WorkbenchMessage>
           ) : activeTab.kind === "file" && fileQuery.isError ? (
             <WorkbenchMessage>{getErrorMessage(fileQuery.error)}</WorkbenchMessage>
-          ) : activeTab.kind === "diff" && diffQuery.isError ? (
+          ) : activeTab.kind === "diff" && !activeDiffIsMedia && diffQuery.isError ? (
             <WorkbenchMessage>{getErrorMessage(diffQuery.error)}</WorkbenchMessage>
+          ) : activeTab.kind === "file" && activeFileMedia ? (
+            activeFileMedia.dataUrl && activeFileMedia.mediaKind && activeFileMedia.mediaType ? (
+              <WorkbenchMediaViewer
+                dataUrl={activeFileMedia.dataUrl}
+                mediaKind={activeFileMedia.mediaKind}
+                mediaType={activeFileMedia.mediaType}
+                path={activeTab.path}
+              />
+            ) : (
+              <WorkbenchMessage>Preview is unavailable.</WorkbenchMessage>
+            )
+          ) : activeTab.kind === "file" && activePathMediaType !== null && fileQuery.isPending ? (
+            <WorkbenchMessage>Loading preview...</WorkbenchMessage>
           ) : activeTab.kind === "file" ? (
             <Editor
               key={activeTab.id}
@@ -680,7 +760,9 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
               onMount={onEditorMount}
               options={workbenchCodeEditorOptions(isMobileLayout)}
             />
-          ) : (
+          ) : activeTab.kind === "diff" && activeDiffIsMedia && activePathMediaType !== null ? (
+            <WorkbenchDiffUnavailable mediaType={activePathMediaType.mimeType} />
+          ) : activeTab.kind === "diff" ? (
             <WorkbenchDiffEditor
               diffLayout={diffLayout}
               id={activeTab.id}
@@ -694,7 +776,10 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
               path={activeTab.path}
               readOnly={activeTab.source !== "working-tree"}
               resolvedTheme={resolvedTheme === "dark" ? "dark" : "light"}
+              visible={visible}
             />
+          ) : (
+            <WorkbenchMessage>Diff preview is unavailable.</WorkbenchMessage>
           )}
         </div>
       </div>

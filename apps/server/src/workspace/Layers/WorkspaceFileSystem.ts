@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Layer, Path } from "effect";
 
+import { createBase64DataUrl, getWorkbenchMediaTypeByPath } from "@t3tools/shared/workbenchMedia";
 import {
   WorkspaceFileSystem,
   WorkspaceFileSystemError,
@@ -117,6 +118,34 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
         });
       }
 
+      const mediaType = getWorkbenchMediaTypeByPath(target.relativePath);
+      if (mediaType) {
+        const bytes = yield* fileSystem.readFile(target.absolutePath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new WorkspaceFileSystemError({
+                cwd: input.cwd,
+                relativePath: input.relativePath,
+                operation: "workspaceFileSystem.readFile",
+                detail: cause.message,
+                cause,
+              }),
+          ),
+        );
+        return {
+          relativePath: target.relativePath,
+          contents: "",
+          contentKind: "media",
+          mediaKind: mediaType.kind,
+          mediaType: mediaType.mimeType,
+          dataUrl: createBase64DataUrl({
+            mimeType: mediaType.mimeType,
+            base64: Buffer.from(bytes).toString("base64"),
+          }),
+          sizeBytes: bytes.byteLength,
+        };
+      }
+
       const contents = yield* fileSystem.readFileString(target.absolutePath).pipe(
         Effect.mapError(
           (cause) =>
@@ -129,7 +158,7 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
             }),
         ),
       );
-      return { relativePath: target.relativePath, contents };
+      return { relativePath: target.relativePath, contents, contentKind: "text" };
     },
   );
 

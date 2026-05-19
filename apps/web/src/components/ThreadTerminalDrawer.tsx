@@ -24,6 +24,7 @@ import {
   startResizeInteraction,
   type ResizeInteractionHandle,
 } from "~/components/ui/resize-interaction";
+import { SNAPPY_TRANSITION_EASING_CLASS } from "~/components/ui/animation";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
 import { restoreTerminalSnapshot } from "~/terminalSnapshotRestore";
@@ -58,6 +59,8 @@ import { readLocalApi } from "~/localApi";
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
 const MULTI_CLICK_SELECTION_ACTION_DELAY_MS = 260;
+const TERMINAL_INPUT_FLUSH_MAX_BYTES = 32_768;
+const TERMINAL_INPUT_CHUNK_MAX_BYTES = 60_000;
 const TERMINAL_OUTPUT_FLUSH_MAX_BYTES = 256_000;
 
 function maxDrawerHeight(): number {
@@ -417,17 +420,21 @@ export function TerminalViewport({
     };
 
     let pendingInput = "";
-    let inputFlushTimer: number | null = null;
+    let inputFlushQueued = false;
 
     const flushTerminalInput = () => {
-      inputFlushTimer = null;
+      inputFlushQueued = false;
+      if (disposed) {
+        pendingInput = "";
+        return;
+      }
       const data = pendingInput;
       pendingInput = "";
       if (data.length === 0) return;
 
       const chunks: string[] = [];
-      for (let index = 0; index < data.length; index += 60_000) {
-        chunks.push(data.slice(index, index + 60_000));
+      for (let index = 0; index < data.length; index += TERMINAL_INPUT_CHUNK_MAX_BYTES) {
+        chunks.push(data.slice(index, index + TERMINAL_INPUT_CHUNK_MAX_BYTES));
       }
 
       void (async () => {
@@ -449,16 +456,13 @@ export function TerminalViewport({
       const activeTerminal = terminalRef.current;
       if (!activeTerminal) return;
       pendingInput += data;
-      if (pendingInput.length >= 32_768) {
-        if (inputFlushTimer !== null) {
-          window.clearTimeout(inputFlushTimer);
-          inputFlushTimer = null;
-        }
+      if (pendingInput.length >= TERMINAL_INPUT_FLUSH_MAX_BYTES) {
         flushTerminalInput();
         return;
       }
-      if (inputFlushTimer !== null) return;
-      inputFlushTimer = window.setTimeout(flushTerminalInput, 8);
+      if (inputFlushQueued) return;
+      inputFlushQueued = true;
+      window.queueMicrotask(flushTerminalInput);
     };
 
     terminal.attachCustomKeyEventHandler((event) => {
@@ -875,9 +879,8 @@ export function TerminalViewport({
         window.cancelAnimationFrame(outputFlushFrame);
       }
       resizeObserver?.disconnect();
-      if (inputFlushTimer !== null) {
-        window.clearTimeout(inputFlushTimer);
-      }
+      pendingInput = "";
+      inputFlushQueued = false;
       inputDisposable.dispose();
       selectionDisposable.dispose();
       terminalLinksDisposable.dispose();
@@ -944,6 +947,7 @@ interface ThreadTerminalDrawerProps {
   worktreePath?: string | null;
   runtimeEnv?: Record<string, string>;
   visible?: boolean;
+  open?: boolean;
   height: number;
   terminalIds: string[];
   activeTerminalId: string;
@@ -1064,6 +1068,7 @@ export default function ThreadTerminalDrawer({
   worktreePath,
   runtimeEnv,
   visible = true,
+  open = visible,
   height,
   terminalIds,
   activeTerminalId,
@@ -1083,6 +1088,7 @@ export default function ThreadTerminalDrawer({
 }: ThreadTerminalDrawerProps) {
   const [drawerHeight, setDrawerHeight] = useState(() => clampDrawerHeight(height));
   const [resizeEpoch, setResizeEpoch] = useState(0);
+  const [isResizing, setIsResizing] = useState(false);
   const drawerHeightRef = useRef(drawerHeight);
   const lastSyncedHeightRef = useRef(clampDrawerHeight(height));
   const onHeightChangeRef = useRef(onHeightChange);
@@ -1243,6 +1249,7 @@ export default function ThreadTerminalDrawer({
     resizeStateRef.current?.interaction.release();
     const interaction = startResizeInteraction(event, { cursor: "row-resize" });
     didResizeDuringDragRef.current = false;
+    setIsResizing(true);
     resizeStateRef.current = {
       interaction,
       pointerId: event.pointerId,
@@ -1272,6 +1279,7 @@ export default function ThreadTerminalDrawer({
       if (!resizeState || resizeState.pointerId !== event.pointerId) return;
       resizeStateRef.current = null;
       resizeState.interaction.release();
+      setIsResizing(false);
       if (!didResizeDuringDragRef.current) {
         return;
       }
@@ -1321,8 +1329,14 @@ export default function ThreadTerminalDrawer({
 
   return (
     <aside
-      className="thread-terminal-drawer relative flex min-w-0 shrink-0 flex-col overflow-hidden border-t border-border/80 bg-background"
-      style={{ height: `${drawerHeight}px` }}
+      className={cn(
+        "thread-terminal-drawer relative flex min-w-0 shrink-0 flex-col overflow-hidden border-t border-border/80 bg-background",
+        !isResizing &&
+          `transition-[height,opacity,transform] duration-[150ms] ${SNAPPY_TRANSITION_EASING_CLASS} motion-reduce:transition-none`,
+        open ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-2 opacity-0",
+      )}
+      style={{ height: `${open ? drawerHeight : 0}px` }}
+      aria-hidden={!open}
     >
       <div
         className="absolute inset-x-0 top-0 z-20 h-1.5 touch-none select-none cursor-row-resize"

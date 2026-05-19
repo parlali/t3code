@@ -65,6 +65,7 @@ const DEFAULT_PERSIST_DEBOUNCE_MS = 40;
 const DEFAULT_SUBPROCESS_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PROCESS_KILL_GRACE_MS = 1_000;
 const DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS = 128;
+const DEFAULT_OUTPUT_EVENT_BATCH_MAX_BYTES = 64 * 1024;
 const DEFAULT_OPEN_COLS = 120;
 const DEFAULT_OPEN_ROWS = 30;
 const TERMINAL_ENV_BLOCKLIST = new Set(["PORT", "ELECTRON_RENDERER_PORT", "ELECTRON_RUN_AS_NODE"]);
@@ -152,7 +153,6 @@ type DrainProcessEventAction =
       type: "output";
       threadId: string;
       terminalId: string;
-      history: string;
       data: string;
       sequence: number;
     }
@@ -1064,6 +1064,33 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           }
 
           if (nextEvent.type === "output") {
+            const outputChunks = [nextEvent.data];
+            let outputByteLength = Buffer.byteLength(nextEvent.data);
+
+            while (session.pendingProcessEventIndex < session.pendingProcessEvents.length) {
+              const pendingEvent = session.pendingProcessEvents[session.pendingProcessEventIndex];
+              if (!pendingEvent || pendingEvent.type !== "output") {
+                break;
+              }
+
+              const pendingByteLength = Buffer.byteLength(pendingEvent.data);
+              if (
+                outputChunks.length > 0 &&
+                outputByteLength + pendingByteLength > DEFAULT_OUTPUT_EVENT_BATCH_MAX_BYTES
+              ) {
+                break;
+              }
+
+              outputChunks.push(pendingEvent.data);
+              outputByteLength += pendingByteLength;
+              session.pendingProcessEventIndex += 1;
+            }
+
+            if (session.pendingProcessEventIndex >= session.pendingProcessEvents.length) {
+              session.pendingProcessEvents = [];
+              session.pendingProcessEventIndex = 0;
+            }
+
             const sequence = nextSequence(session);
             session.updatedAt = new Date().toISOString();
 
@@ -1071,8 +1098,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               type: "output",
               threadId: session.threadId,
               terminalId: session.terminalId,
-              history: session.history,
-              data: nextEvent.data,
+              data: outputChunks.join(""),
               sequence,
             } as const;
           }

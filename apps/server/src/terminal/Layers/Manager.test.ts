@@ -1219,11 +1219,16 @@ it.layer(
       const relevant = (yield* getEvents).filter(
         (event) => event.type === "output" || event.type === "exited",
       );
-      expect(relevant).toEqual([
-        expect.objectContaining({ type: "output", data: "first\n" }),
-        expect.objectContaining({ type: "output", data: "second\n" }),
+      expect(relevant.at(-1)).toEqual(
         expect.objectContaining({ type: "exited", exitCode: 0, exitSignal: 0 }),
-      ]);
+      );
+      expect(
+        relevant
+          .slice(0, -1)
+          .filter((event) => event.type === "output")
+          .map((event) => event.data)
+          .join(""),
+      ).toBe("first\nsecond\n");
     }),
   );
 

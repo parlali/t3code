@@ -115,6 +115,7 @@ import {
 import {
   ServerConfigStreamEvent,
   ServerConfig,
+  ServerMachineProcessSnapshot,
   ServerProcessDiagnosticsResult,
   ServerProcessResourceHistoryInput,
   ServerProcessResourceHistoryResult,
@@ -214,8 +215,10 @@ export const WS_METHODS = {
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverGetTraceDiagnostics: "server.getTraceDiagnostics",
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
+  serverGetMachineProcesses: "server.getMachineProcesses",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverSignalProcess: "server.signalProcess",
+  serverSignalMachineProcess: "server.signalMachineProcess",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -295,6 +298,11 @@ export const WsServerGetProcessDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetPro
   success: ServerProcessDiagnosticsResult,
 });
 
+export const WsServerGetMachineProcessesRpc = Rpc.make(WS_METHODS.serverGetMachineProcesses, {
+  payload: Schema.Struct({}),
+  success: ServerMachineProcessSnapshot,
+});
+
 export const WsServerGetProcessResourceHistoryRpc = Rpc.make(
   WS_METHODS.serverGetProcessResourceHistory,
   {
@@ -304,6 +312,11 @@ export const WsServerGetProcessResourceHistoryRpc = Rpc.make(
 );
 
 export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
+  payload: ServerSignalProcessInput,
+  success: ServerSignalProcessResult,
+});
+
+export const WsServerSignalMachineProcessRpc = Rpc.make(WS_METHODS.serverSignalMachineProcess, {
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
 });
@@ -687,8 +700,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,
+  WsServerGetMachineProcessesRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
+  WsServerSignalMachineProcessRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,

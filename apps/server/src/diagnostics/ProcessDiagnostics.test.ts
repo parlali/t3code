@@ -10,7 +10,7 @@ describe("ProcessDiagnostics", () => {
     Effect.sync(() => {
       const rows = ProcessDiagnostics.parsePosixProcessRows(
         [
-          "  10     1    10 Ss      0.0   1024   01:02.03 /usr/bin/node server.js",
+          "  10     1    10 Ss      0.0   1024   01:02.03 /usr/bin/node server.js   ",
           "  11    10    10 S+     12.5  20480      00:04 codex app-server --config /tmp/one two",
         ].join("\n"),
       );
@@ -151,6 +151,112 @@ describe("ProcessDiagnostics", () => {
       });
 
       expect(diagnostics.processes.map((process) => process.pid)).toEqual([101, 102, 103]);
+    }),
+  );
+
+  it.effect("parses lsof listening port rows", () =>
+    Effect.sync(() => {
+      const ports = ProcessDiagnostics.parseLsofListeningPortRows(
+        [
+          "p101",
+          "cnode",
+          "f21",
+          "PTCP",
+          "n127.0.0.1:3000",
+          "TST=LISTEN",
+          "p102",
+          "cvite",
+          "f9",
+          "PUDP",
+          "n*:5173",
+          "f10",
+          "PUDP",
+          "n*:*",
+        ].join("\n"),
+      );
+
+      expect(ports).toEqual([
+        {
+          protocol: "TCP",
+          localAddress: "127.0.0.1",
+          localPort: 3000,
+          pid: 101,
+          command: "node",
+        },
+        {
+          protocol: "UDP",
+          localAddress: "*",
+          localPort: 5173,
+          pid: 102,
+          command: "vite",
+        },
+      ]);
+    }),
+  );
+
+  it.effect("aggregates machine processes with protected T3 server row", () =>
+    Effect.sync(() => {
+      const snapshot = ProcessDiagnostics.aggregateMachineProcessSnapshot({
+        serverPid: 100,
+        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
+        rows: [
+          {
+            pid: 100,
+            ppid: 1,
+            pgid: 100,
+            status: "S",
+            cpuPercent: 1,
+            rssBytes: 1_000,
+            elapsed: "01:00",
+            command: "t3 server",
+          },
+          {
+            pid: 101,
+            ppid: 1,
+            pgid: 101,
+            status: "R",
+            cpuPercent: 9,
+            rssBytes: 2_000,
+            elapsed: "00:10",
+            command: "vite --host 0.0.0.0",
+          },
+        ],
+        ports: [
+          {
+            protocol: "TCP",
+            localAddress: "127.0.0.1",
+            localPort: 3000,
+            pid: 100,
+            command: "t3",
+          },
+          {
+            protocol: "TCP",
+            localAddress: "*",
+            localPort: 5173,
+            pid: 101,
+            command: "vite",
+          },
+          {
+            protocol: "TCP",
+            localAddress: "*",
+            localPort: 5173,
+            pid: 101,
+            command: "vite",
+          },
+        ],
+      });
+
+      expect(snapshot.processCount).toBe(2);
+      expect(snapshot.serviceCount).toBe(2);
+      expect(snapshot.ports.map((port) => `${port.pid}:${port.localPort}`)).toEqual([
+        "100:3000",
+        "101:5173",
+      ]);
+      expect(snapshot.processes.find((process) => process.pid === 100)?.canSignal).toBe(false);
+      expect(snapshot.processes.find((process) => process.pid === 101)?.canSignal).toBe(true);
+      expect(snapshot.ports.find((port) => port.pid === 100)?.protectedReason).toBe(
+        "T3 server process",
+      );
     }),
   );
 });

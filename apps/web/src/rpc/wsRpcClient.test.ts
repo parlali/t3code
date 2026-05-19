@@ -136,15 +136,18 @@ describe("wsRpcClient", () => {
   it("routes long-lived subscriptions away from unary requests", async () => {
     const requestTransport = makeTransportMock();
     const streamTransport = makeTransportMock();
+    const terminalTransport = makeTransportMock();
     const threadDetailTransport = makeTransportMock();
     const client = createWsRpcClient(requestTransport as unknown as WsTransport, {
       streamTransport: streamTransport as unknown as WsTransport,
+      terminalTransport: terminalTransport as unknown as WsTransport,
       threadDetailTransport: threadDetailTransport as unknown as WsTransport,
     });
 
     client.projects.subscribeEntries({ cwd: "/repo" }, vi.fn());
     client.orchestration.subscribeShell(vi.fn());
     client.orchestration.subscribeThread({ threadId: ThreadId.make("thread-1") }, vi.fn());
+    client.terminal.onSessionEvent({ threadId: "thread-1", terminalId: "default" }, vi.fn());
     await client.terminal.open({
       threadId: "thread-1",
       terminalId: "default",
@@ -156,15 +159,93 @@ describe("wsRpcClient", () => {
     expect(requestTransport.request).toHaveBeenCalledOnce();
     expect(requestTransport.subscribe).not.toHaveBeenCalled();
     expect(streamTransport.subscribe).toHaveBeenCalledTimes(2);
+    expect(terminalTransport.subscribe).toHaveBeenCalledOnce();
     expect(threadDetailTransport.subscribe).toHaveBeenCalledOnce();
+  });
+
+  it("creates the dedicated terminal transport lazily", async () => {
+    const requestTransport = makeTransportMock();
+    const terminalTransport = makeTransportMock();
+    const createTerminalTransport = vi.fn(() => terminalTransport as unknown as WsTransport);
+    const client = createWsRpcClient(requestTransport as unknown as WsTransport, {
+      terminalTransport: createTerminalTransport,
+    });
+
+    expect(createTerminalTransport).not.toHaveBeenCalled();
+
+    client.terminal.onSessionEvent({ threadId: "thread-1", terminalId: "default" }, vi.fn());
+    await client.dispose();
+
+    expect(createTerminalTransport).toHaveBeenCalledOnce();
+    expect(terminalTransport.subscribe).toHaveBeenCalledOnce();
+    expect(terminalTransport.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("returns completed stacked git action results after recoverable stream interruptions", async () => {
+    const requestTransport = makeTransportMock();
+    const streamTransport = makeTransportMock();
+    const terminalTransport = makeTransportMock();
+    const threadDetailTransport = makeTransportMock();
+    const client = createWsRpcClient(requestTransport as unknown as WsTransport, {
+      streamTransport: streamTransport as unknown as WsTransport,
+      terminalTransport: terminalTransport as unknown as WsTransport,
+      threadDetailTransport: threadDetailTransport as unknown as WsTransport,
+    });
+    const actionResult = {
+      action: "push",
+      branch: { status: "skipped_not_requested" },
+      commit: { status: "skipped_not_requested" },
+      push: { status: "pushed", refName: "feature/demo", upstreamRef: "origin/feature/demo" },
+      pr: { status: "skipped_not_requested" },
+      toast: null,
+    } as const;
+
+    streamTransport.requestStream.mockImplementationOnce(async (_connect, listener) => {
+      listener({ kind: "action_finished", actionId: "action-1", result: actionResult });
+      throw new Error("All fibers interrupted without error");
+    });
+
+    await expect(
+      client.git.runStackedAction({
+        actionId: "action-1",
+        cwd: "/repo",
+        action: "push",
+      }),
+    ).resolves.toBe(actionResult);
+  });
+
+  it("throws recoverable stacked git action interruptions before a final result", async () => {
+    const requestTransport = makeTransportMock();
+    const streamTransport = makeTransportMock();
+    const terminalTransport = makeTransportMock();
+    const threadDetailTransport = makeTransportMock();
+    const client = createWsRpcClient(requestTransport as unknown as WsTransport, {
+      streamTransport: streamTransport as unknown as WsTransport,
+      terminalTransport: terminalTransport as unknown as WsTransport,
+      threadDetailTransport: threadDetailTransport as unknown as WsTransport,
+    });
+
+    streamTransport.requestStream.mockRejectedValueOnce(
+      new Error("All fibers interrupted without error"),
+    );
+
+    await expect(
+      client.git.runStackedAction({
+        actionId: "action-1",
+        cwd: "/repo",
+        action: "push",
+      }),
+    ).rejects.toThrow("All fibers interrupted without error");
   });
 
   it("reconnects and disposes all distinct transports", async () => {
     const requestTransport = makeTransportMock();
     const streamTransport = makeTransportMock();
+    const terminalTransport = makeTransportMock();
     const threadDetailTransport = makeTransportMock();
     const client = createWsRpcClient(requestTransport as unknown as WsTransport, {
       streamTransport: streamTransport as unknown as WsTransport,
+      terminalTransport: terminalTransport as unknown as WsTransport,
       threadDetailTransport: threadDetailTransport as unknown as WsTransport,
     });
 
@@ -173,18 +254,22 @@ describe("wsRpcClient", () => {
 
     expect(requestTransport.reconnect).toHaveBeenCalledOnce();
     expect(streamTransport.reconnect).toHaveBeenCalledOnce();
+    expect(terminalTransport.reconnect).toHaveBeenCalledOnce();
     expect(threadDetailTransport.reconnect).toHaveBeenCalledOnce();
     expect(requestTransport.dispose).toHaveBeenCalledOnce();
     expect(streamTransport.dispose).toHaveBeenCalledOnce();
+    expect(terminalTransport.dispose).toHaveBeenCalledOnce();
     expect(threadDetailTransport.dispose).toHaveBeenCalledOnce();
   });
 
   it("reports stale when any transport is closed or heartbeat stale", () => {
     const requestTransport = makeTransportMock();
     const streamTransport = makeTransportMock();
+    const terminalTransport = makeTransportMock();
     const threadDetailTransport = makeTransportMock();
     const client = createWsRpcClient(requestTransport as unknown as WsTransport, {
       streamTransport: streamTransport as unknown as WsTransport,
+      terminalTransport: terminalTransport as unknown as WsTransport,
       threadDetailTransport: threadDetailTransport as unknown as WsTransport,
     });
 
@@ -195,7 +280,7 @@ describe("wsRpcClient", () => {
     expect(client.isConnectionOpen()).toBe(false);
 
     streamTransport.isConnectionOpen.mockReturnValue(true);
-    threadDetailTransport.isHeartbeatFresh.mockReturnValue(false);
+    terminalTransport.isHeartbeatFresh.mockReturnValue(false);
     expect(client.isHeartbeatFresh()).toBe(false);
   });
 });

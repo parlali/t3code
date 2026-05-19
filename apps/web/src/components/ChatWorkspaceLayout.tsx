@@ -35,6 +35,7 @@ const LazyChatView = (props: ComponentProps<typeof ChatView>) => (
 type MobileWorkbenchPane = "chat" | "workbench";
 
 const INLINE_SPLIT_STORAGE_KEY = "t3code:chat-workbench-split-width";
+const INLINE_WORKBENCH_OPEN_STORAGE_KEY = "t3code:chat-workbench-open:v1";
 const INLINE_CHAT_PANE_DEFAULT_WIDTH = 46 * 16;
 const INLINE_PANE_MIN_WIDTH = 28 * 16;
 
@@ -48,6 +49,11 @@ function readInitialInlineChatPaneWidth(): number {
   if (typeof window === "undefined") return INLINE_CHAT_PANE_DEFAULT_WIDTH;
   const stored = Number.parseFloat(window.localStorage.getItem(INLINE_SPLIT_STORAGE_KEY) ?? "");
   return Number.isFinite(stored) ? stored : INLINE_CHAT_PANE_DEFAULT_WIDTH;
+}
+
+function readInitialInlineWorkbenchOpen(): boolean {
+  if (typeof window === "undefined") return true;
+  return window.localStorage.getItem(INLINE_WORKBENCH_OPEN_STORAGE_KEY) !== "0";
 }
 
 type ChatWorkspaceLayoutProps =
@@ -69,6 +75,9 @@ export function ChatWorkspaceLayout(props: ChatWorkspaceLayoutProps) {
   const [mobilePane, setMobilePane] = useState<MobileWorkbenchPane>("chat");
   const inlineLayoutRef = useRef<HTMLDivElement | null>(null);
   const [inlineChatPaneWidth, setInlineChatPaneWidth] = useState(readInitialInlineChatPaneWidth);
+  const [inlineWorkbenchOpen, setInlineWorkbenchOpenState] = useState(
+    readInitialInlineWorkbenchOpen,
+  );
   const splitResizeRef = useRef<{
     readonly containerWidth: number;
     readonly interaction: ResizeInteractionHandle;
@@ -77,16 +86,25 @@ export function ChatWorkspaceLayout(props: ChatWorkspaceLayoutProps) {
     readonly startX: number;
   } | null>(null);
 
+  const setInlineWorkbenchOpen = useCallback((open: boolean) => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(INLINE_WORKBENCH_OPEN_STORAGE_KEY, open ? "1" : "0");
+    }
+    setInlineWorkbenchOpenState(open);
+  }, []);
+
   useEffect(() => {
     if (!shouldUseWorkbenchSheet) {
       setMobilePane("chat");
-      return;
+      return subscribeWorkbenchOpen(() => {
+        setInlineWorkbenchOpen(true);
+      });
     }
 
     return subscribeWorkbenchOpen(() => {
       setMobilePane("workbench");
     });
-  }, [shouldUseWorkbenchSheet]);
+  }, [setInlineWorkbenchOpen, shouldUseWorkbenchSheet]);
 
   useEffect(() => {
     if (shouldUseWorkbenchSheet) return;
@@ -175,11 +193,15 @@ export function ChatWorkspaceLayout(props: ChatWorkspaceLayoutProps) {
   const chatViewProps = {
     environmentId: props.environmentId,
     threadId: props.threadId,
+    inlineWorkbenchAvailable: !shouldUseWorkbenchSheet,
+    inlineWorkbenchOpen,
+    onInlineWorkbenchOpenChange: setInlineWorkbenchOpen,
     mobileWorkbenchAvailable: shouldUseWorkbenchSheet,
     mobileWorkbenchPane: mobilePane,
     onMobileWorkbenchPaneChange: setMobilePane,
     ...(mobileWorkbenchContent ? { mobileWorkbenchContent } : {}),
   };
+  const inlineSplitActive = !shouldUseWorkbenchSheet && inlineWorkbenchOpen;
 
   return (
     <SidebarInset className="h-full min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -188,9 +210,9 @@ export function ChatWorkspaceLayout(props: ChatWorkspaceLayoutProps) {
           data-thread-message-pane="true"
           className={cn(
             "flex min-h-0 min-w-0 flex-1 flex-col",
-            shouldUseWorkbenchSheet ? null : "shrink-0 grow-0",
+            inlineSplitActive ? "shrink-0 grow-0" : null,
           )}
-          style={shouldUseWorkbenchSheet ? undefined : { flexBasis: inlineChatPaneWidth }}
+          style={inlineSplitActive ? { flexBasis: inlineChatPaneWidth } : undefined}
         >
           {props.routeKind === "draft" ? (
             <LazyChatView {...chatViewProps} routeKind="draft" draftId={props.draftId} />
@@ -200,16 +222,22 @@ export function ChatWorkspaceLayout(props: ChatWorkspaceLayoutProps) {
         </div>
         {!shouldUseWorkbenchSheet ? (
           <>
-            <div
-              aria-label="Resize chat and workbench panes"
-              aria-orientation="vertical"
-              className={PANE_RESIZE_RAIL_CLASS}
-              role="separator"
-              tabIndex={0}
-              onPointerDown={startInlineSplitResize}
-            />
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <WorkspaceWorkbench environmentId={props.environmentId} threadId={props.threadId} />
+            {inlineWorkbenchOpen ? (
+              <div
+                aria-label="Resize chat and workbench panes"
+                aria-orientation="vertical"
+                className={PANE_RESIZE_RAIL_CLASS}
+                role="separator"
+                tabIndex={0}
+                onPointerDown={startInlineSplitResize}
+              />
+            ) : null}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col" hidden={!inlineWorkbenchOpen}>
+              <WorkspaceWorkbench
+                environmentId={props.environmentId}
+                threadId={props.threadId}
+                visible={inlineWorkbenchOpen}
+              />
             </div>
           </>
         ) : null}

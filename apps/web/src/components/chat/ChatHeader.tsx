@@ -4,9 +4,13 @@ import { memo } from "react";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Group, GroupSeparator } from "../ui/group";
+import { PaneSidebarToggleButton } from "../ui/pane-chrome";
 
 interface ChatHeaderProps {
   readonly activeThreadTitle: string;
+  readonly inlineWorkbenchAvailable?: boolean;
+  readonly inlineWorkbenchOpen?: boolean;
+  readonly onInlineWorkbenchOpenChange?: (open: boolean) => void;
   readonly mobileWorkbenchAvailable?: boolean;
   readonly mobileWorkbenchPane?: "chat" | "workbench";
   readonly onMobileWorkbenchPaneChange?: (pane: "chat" | "workbench") => void;
@@ -50,6 +54,9 @@ const MobileViewToggle = memo(function MobileViewToggle({
 
 export const ChatHeader = memo(function ChatHeader({
   activeThreadTitle,
+  inlineWorkbenchAvailable = false,
+  inlineWorkbenchOpen = true,
+  onInlineWorkbenchOpenChange,
   mobileWorkbenchAvailable = false,
   mobileWorkbenchPane = "chat",
   onMobileWorkbenchPaneChange,
@@ -61,6 +68,14 @@ export const ChatHeader = memo(function ChatHeader({
           {activeThreadTitle.trim().length > 0 ? activeThreadTitle : "Untitled thread"}
         </h1>
       </div>
+      {inlineWorkbenchAvailable && onInlineWorkbenchOpenChange ? (
+        <PaneSidebarToggleButton
+          side="right"
+          expanded={inlineWorkbenchOpen}
+          label={inlineWorkbenchOpen ? "Collapse workbench" : "Expand workbench"}
+          onClick={() => onInlineWorkbenchOpenChange(!inlineWorkbenchOpen)}
+        />
+      ) : null}
       {mobileWorkbenchAvailable && onMobileWorkbenchPaneChange ? (
         <MobileViewToggle pane={mobileWorkbenchPane} onPaneChange={onMobileWorkbenchPaneChange} />
       ) : null}

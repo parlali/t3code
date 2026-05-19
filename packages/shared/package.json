@@ -82,6 +82,10 @@
     "./keybindings": {
       "types": "./src/keybindings.ts",
       "import": "./src/keybindings.ts"
+    },
+    "./workbenchMedia": {
+      "types": "./src/workbenchMedia.ts",
+      "import": "./src/workbenchMedia.ts"
     }
   },
   "scripts": {

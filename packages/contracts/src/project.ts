@@ -113,9 +113,20 @@ export const ProjectReadFileInput = Schema.Struct({
 });
 export type ProjectReadFileInput = typeof ProjectReadFileInput.Type;
 
+export const ProjectReadFileContentKind = Schema.Literals(["text", "media"]);
+export type ProjectReadFileContentKind = typeof ProjectReadFileContentKind.Type;
+
+export const ProjectReadFileMediaKind = Schema.Literals(["image", "pdf"]);
+export type ProjectReadFileMediaKind = typeof ProjectReadFileMediaKind.Type;
+
 export const ProjectReadFileResult = Schema.Struct({
   relativePath: TrimmedNonEmptyString,
   contents: Schema.String,
+  contentKind: Schema.optionalKey(ProjectReadFileContentKind),
+  mediaKind: Schema.optionalKey(ProjectReadFileMediaKind),
+  mediaType: Schema.optionalKey(TrimmedNonEmptyString),
+  dataUrl: Schema.optionalKey(TrimmedNonEmptyString),
+  sizeBytes: Schema.optionalKey(Schema.Number),
 });
 export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
 

@@ -105,6 +105,7 @@ import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useDelayedUnmount } from "../hooks/useDelayedUnmount";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
@@ -141,8 +142,13 @@ import {
   type TerminalContextSelection,
 } from "../lib/terminalContext";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
-import { useThreadAttentionStore } from "../threadAttentionStore";
+import {
+  readThreadAttentionReceivedSequence,
+  useThreadAttentionStore,
+} from "../threadAttentionStore";
+import { shouldMarkThreadAttentionSeen } from "../threadAttentionSeenPolicy";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { PANEL_EXIT_ANIMATION_MS, SNAPPY_TRANSITION_EASING_CLASS } from "./ui/animation";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
@@ -469,6 +475,9 @@ type ChatViewProps =
       threadId: ThreadId;
       reserveTitleBarControlInset?: boolean;
       routeKind: "server";
+      inlineWorkbenchAvailable?: boolean;
+      inlineWorkbenchOpen?: boolean;
+      onInlineWorkbenchOpenChange?: (open: boolean) => void;
       mobileWorkbenchAvailable?: boolean;
       mobileWorkbenchPane?: "chat" | "workbench";
       mobileWorkbenchContent?: ReactNode;
@@ -481,6 +490,9 @@ type ChatViewProps =
       reserveTitleBarControlInset?: boolean;
       routeKind: "draft";
       draftId: DraftId;
+      inlineWorkbenchAvailable?: boolean;
+      inlineWorkbenchOpen?: boolean;
+      onInlineWorkbenchOpenChange?: (open: boolean) => void;
       mobileWorkbenchAvailable?: boolean;
       mobileWorkbenchPane?: "chat" | "workbench";
       mobileWorkbenchContent?: ReactNode;
@@ -632,6 +644,8 @@ const PersistentBottomPanel = memo(function PersistentBottomPanel({
         : {},
     [effectiveWorktreePath, project],
   );
+  const terminalPanelOpen = Boolean(project && cwd && visible && terminalState.terminalOpen);
+  const terminalPanelMounted = useDelayedUnmount(terminalPanelOpen, PANEL_EXIT_ANIMATION_MS);
 
   const bumpFocusRequestId = useCallback(() => {
     if (!visible) {
@@ -704,18 +718,25 @@ const PersistentBottomPanel = memo(function PersistentBottomPanel({
     [onAddTerminalContext, visible],
   );
 
-  if (!project || !terminalState.terminalOpen || !cwd) {
+  if (!project || !cwd || !terminalPanelMounted) {
     return null;
   }
 
   return (
-    <div className={visible ? undefined : "hidden"}>
+    <div
+      className={terminalPanelOpen ? undefined : "pointer-events-none"}
+      aria-hidden={!terminalPanelOpen}
+    >
       <Suspense
         fallback={
-          visible ? (
+          terminalPanelMounted ? (
             <div
-              className="border-t border-border bg-background"
-              style={{ height: terminalState.terminalHeight }}
+              className={cn(
+                "overflow-hidden border-t border-border bg-background",
+                `transition-[height,opacity,transform] duration-[150ms] ${SNAPPY_TRANSITION_EASING_CLASS} motion-reduce:transition-none`,
+                terminalPanelOpen ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0",
+              )}
+              style={{ height: terminalPanelOpen ? terminalState.terminalHeight : 0 }}
             />
           ) : null
         }
@@ -726,7 +747,8 @@ const PersistentBottomPanel = memo(function PersistentBottomPanel({
           cwd={cwd}
           worktreePath={effectiveWorktreePath}
           runtimeEnv={runtimeEnv}
-          visible={visible}
+          visible={terminalPanelOpen}
+          open={terminalPanelOpen}
           height={terminalState.terminalHeight}
           terminalIds={terminalState.terminalIds}
           activeTerminalId={terminalState.activeTerminalId}
@@ -735,9 +757,9 @@ const PersistentBottomPanel = memo(function PersistentBottomPanel({
           focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
           onSplitTerminal={splitTerminal}
           onNewTerminal={createNewTerminal}
-          splitShortcutLabel={visible ? splitShortcutLabel : undefined}
-          newShortcutLabel={visible ? newShortcutLabel : undefined}
-          closeShortcutLabel={visible ? closeShortcutLabel : undefined}
+          splitShortcutLabel={terminalPanelOpen ? splitShortcutLabel : undefined}
+          newShortcutLabel={terminalPanelOpen ? newShortcutLabel : undefined}
+          closeShortcutLabel={terminalPanelOpen ? closeShortcutLabel : undefined}
           keybindings={keybindings}
           onActiveTerminalChange={activateTerminal}
           onCloseTerminal={closeTerminal}
@@ -755,6 +777,9 @@ export default function ChatView(props: ChatViewProps) {
     threadId,
     routeKind,
     reserveTitleBarControlInset = true,
+    inlineWorkbenchAvailable = false,
+    inlineWorkbenchOpen = true,
+    onInlineWorkbenchOpenChange,
     mobileWorkbenchAvailable = false,
     mobileWorkbenchPane = "chat",
     mobileWorkbenchContent,
@@ -825,6 +850,7 @@ export default function ChatView(props: ChatViewProps) {
   const composerRef = useComposerHandleContext() ?? localComposerRef;
   const getComposer = useCallback(() => composerRef.current, [composerRef]);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const scrollToBottomMounted = useDelayedUnmount(showScrollToBottom, 120);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
@@ -861,6 +887,11 @@ export default function ChatView(props: ChatViewProps) {
     useState<Record<string, number>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const inlinePlanSidebarOpen = planSidebarOpen && !shouldUsePlanSidebarSheet;
+  const inlinePlanSidebarMounted = useDelayedUnmount(
+    inlinePlanSidebarOpen,
+    shouldUsePlanSidebarSheet ? 0 : PANEL_EXIT_ANIMATION_MS,
+  );
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
@@ -979,6 +1010,7 @@ export default function ChatView(props: ChatViewProps) {
   const activeThreadAttention = useThreadAttentionStore((state) =>
     activeThreadKey ? state.attentionByThreadKey[activeThreadKey] : undefined,
   );
+  const activeThreadAttentionReceivedSequence = activeThreadAttention?.receivedSequence;
   const activeThreadUnseenHeld = useThreadAttentionStore((state) =>
     activeThreadKey ? state.manuallyUnseenThreadKeys[activeThreadKey] === true : false,
   );
@@ -1007,15 +1039,31 @@ export default function ChatView(props: ChatViewProps) {
     },
     [],
   );
-  const [attentionVisibilityEpoch, setAttentionVisibilityEpoch] = useState(0);
+  const attentionSeenGateRef = useRef<{
+    readonly threadKey: string | null;
+    readonly sequence: number;
+  }>({
+    threadKey: activeThreadKey,
+    sequence: readThreadAttentionReceivedSequence(),
+  });
+  if (attentionSeenGateRef.current.threadKey !== activeThreadKey) {
+    attentionSeenGateRef.current = {
+      threadKey: activeThreadKey,
+      sequence: readThreadAttentionReceivedSequence(),
+    };
+  }
+  const attentionSeenGateSequence = attentionSeenGateRef.current.sequence;
+  const [attentionVisibilityVersion, setAttentionVisibilityVersion] = useState(0);
   useEffect(() => {
     const notifyVisibilityChanged = () => {
-      setAttentionVisibilityEpoch((epoch) => epoch + 1);
+      setAttentionVisibilityVersion((version) => version + 1);
     };
     window.addEventListener("focus", notifyVisibilityChanged);
+    window.addEventListener("blur", notifyVisibilityChanged);
     document.addEventListener("visibilitychange", notifyVisibilityChanged);
     return () => {
       window.removeEventListener("focus", notifyVisibilityChanged);
+      window.removeEventListener("blur", notifyVisibilityChanged);
       document.removeEventListener("visibilitychange", notifyVisibilityChanged);
     };
   }, []);
@@ -1326,10 +1374,18 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     if (!serverThread?.id) return;
-    if (!activeThreadAttention) return;
-    if (activeThreadUnseenHeld) return;
-    if (document.visibilityState !== "visible") return;
-    if (!document.hasFocus()) return;
+    if (activeThreadAttentionReceivedSequence === undefined) return;
+    if (
+      !shouldMarkThreadAttentionSeen({
+        receivedSequence: activeThreadAttentionReceivedSequence,
+        seenGateSequence: attentionSeenGateSequence,
+        hasFocus: document.hasFocus(),
+        isHeld: activeThreadUnseenHeld,
+        visibilityState: document.visibilityState,
+      })
+    ) {
+      return;
+    }
     const observedAt = new Date().toISOString();
 
     void readEnvironmentApi(serverThread.environmentId)
@@ -1344,9 +1400,10 @@ export default function ChatView(props: ChatViewProps) {
         console.warn("Failed to mark thread attention seen", error);
       });
   }, [
-    activeThreadAttention?.revision,
+    activeThreadAttentionReceivedSequence,
     activeThreadUnseenHeld,
-    attentionVisibilityEpoch,
+    attentionSeenGateSequence,
+    attentionVisibilityVersion,
     serverThread?.environmentId,
     serverThread?.id,
   ]);
@@ -3780,6 +3837,9 @@ export default function ChatView(props: ChatViewProps) {
       >
         <ChatHeader
           activeThreadTitle={activeThread.title}
+          inlineWorkbenchAvailable={inlineWorkbenchAvailable}
+          inlineWorkbenchOpen={inlineWorkbenchOpen}
+          {...(onInlineWorkbenchOpenChange ? { onInlineWorkbenchOpenChange } : {})}
           mobileWorkbenchAvailable={mobileWorkbenchAvailable}
           mobileWorkbenchPane={mobileWorkbenchPane}
           {...(onMobileWorkbenchPaneChange ? { onMobileWorkbenchPaneChange } : {})}
@@ -3826,8 +3886,15 @@ export default function ChatView(props: ChatViewProps) {
                 />
 
                 {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
-                {showScrollToBottom && (
-                  <div className="pointer-events-none absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5">
+                {scrollToBottomMounted && (
+                  <div
+                    className={cn(
+                      "pointer-events-none absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5",
+                      `transition-[opacity,transform] duration-[120ms] ${SNAPPY_TRANSITION_EASING_CLASS} motion-reduce:transition-none`,
+                      showScrollToBottom ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0",
+                    )}
+                    aria-hidden={!showScrollToBottom}
+                  >
                     <button
                       type="button"
                       onClick={() => scrollToEnd(true)}
@@ -3973,20 +4040,38 @@ export default function ChatView(props: ChatViewProps) {
             {/* end chat column */}
 
             {/* Plan sidebar */}
-            {planSidebarOpen && !shouldUsePlanSidebarSheet ? (
-              <Suspense fallback={null}>
-                <LazyPlanSidebar
-                  activePlan={activePlan}
-                  activeProposedPlan={sidebarProposedPlan}
-                  label={planSidebarLabel}
-                  environmentId={environmentId}
-                  markdownCwd={gitCwd ?? undefined}
-                  workspaceRoot={activeWorkspaceRoot}
-                  timestampFormat={timestampFormat}
-                  mode="sidebar"
-                  onClose={closePlanSidebar}
-                />
-              </Suspense>
+            {inlinePlanSidebarMounted ? (
+              <div
+                className={cn(
+                  "min-h-0 shrink-0 overflow-hidden",
+                  `transition-[width,opacity] duration-[150ms] ${SNAPPY_TRANSITION_EASING_CLASS} motion-reduce:transition-none`,
+                  inlinePlanSidebarOpen ? "opacity-100" : "pointer-events-none opacity-0",
+                )}
+                style={{ width: inlinePlanSidebarOpen ? 340 : 0 }}
+                aria-hidden={!inlinePlanSidebarOpen}
+              >
+                <div
+                  className={cn(
+                    "h-full w-[340px]",
+                    `transition-[opacity,transform] duration-[120ms] ${SNAPPY_TRANSITION_EASING_CLASS} motion-reduce:transition-none`,
+                    inlinePlanSidebarOpen ? "translate-x-0 opacity-100" : "translate-x-2 opacity-0",
+                  )}
+                >
+                  <Suspense fallback={null}>
+                    <LazyPlanSidebar
+                      activePlan={activePlan}
+                      activeProposedPlan={sidebarProposedPlan}
+                      label={planSidebarLabel}
+                      environmentId={environmentId}
+                      markdownCwd={gitCwd ?? undefined}
+                      workspaceRoot={activeWorkspaceRoot}
+                      timestampFormat={timestampFormat}
+                      mode="sidebar"
+                      onClose={closePlanSidebar}
+                    />
+                  </Suspense>
+                </div>
+              </div>
             ) : null}
           </div>
           {/* end horizontal flex container */}

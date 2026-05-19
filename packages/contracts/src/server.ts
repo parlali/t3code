@@ -290,8 +290,54 @@ export const ServerTraceDiagnosticsResult = Schema.Struct({
 });
 export type ServerTraceDiagnosticsResult = typeof ServerTraceDiagnosticsResult.Type;
 
-export const ServerProcessSignal = Schema.Literals(["SIGINT", "SIGKILL"]);
+export const ServerProcessSignal = Schema.Literals(["SIGINT", "SIGTERM", "SIGKILL"]);
 export type ServerProcessSignal = typeof ServerProcessSignal.Type;
+
+export const ServerMachineProcessProtocol = Schema.Literals(["TCP", "UDP"]);
+export type ServerMachineProcessProtocol = typeof ServerMachineProcessProtocol.Type;
+
+export const ServerMachineProcessPort = Schema.Struct({
+  protocol: ServerMachineProcessProtocol,
+  localAddress: TrimmedNonEmptyString,
+  localPort: PositiveInt,
+  pid: PositiveInt,
+  command: TrimmedNonEmptyString,
+  canSignal: Schema.Boolean,
+  protectedReason: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ServerMachineProcessPort = typeof ServerMachineProcessPort.Type;
+
+export const ServerMachineProcessEntry = Schema.Struct({
+  pid: PositiveInt,
+  ppid: NonNegativeInt,
+  pgid: Schema.Option(Schema.Int),
+  status: TrimmedNonEmptyString,
+  cpuPercent: Schema.Number,
+  rssBytes: NonNegativeInt,
+  elapsed: TrimmedNonEmptyString,
+  command: TrimmedNonEmptyString,
+  ports: Schema.Array(ServerMachineProcessPort),
+  canSignal: Schema.Boolean,
+  protectedReason: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ServerMachineProcessEntry = typeof ServerMachineProcessEntry.Type;
+
+export const ServerMachineProcessSnapshot = Schema.Struct({
+  serverPid: PositiveInt,
+  readAt: Schema.DateTimeUtc,
+  processCount: NonNegativeInt,
+  serviceCount: NonNegativeInt,
+  totalRssBytes: NonNegativeInt,
+  totalCpuPercent: Schema.Number,
+  processes: Schema.Array(ServerMachineProcessEntry),
+  ports: Schema.Array(ServerMachineProcessPort),
+  error: Schema.Option(
+    Schema.Struct({
+      message: TrimmedNonEmptyString,
+    }),
+  ),
+});
+export type ServerMachineProcessSnapshot = typeof ServerMachineProcessSnapshot.Type;
 
 export const ServerProcessDiagnosticsEntry = Schema.Struct({
   pid: PositiveInt,

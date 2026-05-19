@@ -10,6 +10,8 @@ export { WorkbenchCommitGraph } from "./WorkbenchCommitGraph";
 export { WorkbenchTabBar, type WorkbenchTab } from "./WorkbenchTabBar";
 export { WorkbenchBreadcrumbs } from "./WorkbenchBreadcrumbs";
 export { WorkbenchDiffEditor } from "./WorkbenchDiffEditor";
+export { WorkbenchDiffUnavailable } from "./WorkbenchDiffUnavailable";
+export { WorkbenchMediaViewer } from "./WorkbenchMediaViewer";
 export { WorkbenchTreeIcon } from "./WorkbenchTreeIcon";
 export {
   selectionForTab,

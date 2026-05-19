@@ -129,6 +129,79 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
     );
   });
 
+  describe("readFile", () => {
+    it.effect("reads text files with text content metadata", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+
+        yield* writeTextFile(cwd, "README.md", "# Notes\n");
+
+        const result = yield* workspaceFileSystem.readFile({
+          cwd,
+          relativePath: "README.md",
+        });
+
+        expect(result).toEqual({
+          relativePath: "README.md",
+          contents: "# Notes\n",
+          contentKind: "text",
+        });
+      }),
+    );
+
+    it.effect("reads SVG files as image media", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+
+        yield* writeTextFile(cwd, "assets/logo.svg", "<svg></svg>");
+
+        const result = yield* workspaceFileSystem.readFile({
+          cwd,
+          relativePath: "assets/logo.svg",
+        });
+
+        expect(result).toEqual({
+          relativePath: "assets/logo.svg",
+          contents: "",
+          contentKind: "media",
+          mediaKind: "image",
+          mediaType: "image/svg+xml",
+          dataUrl: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+          sizeBytes: 11,
+        });
+      }),
+    );
+
+    it.effect("reads binary image files as media data URLs", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        yield* fileSystem.makeDirectory(path.join(cwd, "assets"), { recursive: true });
+        yield* fileSystem.writeFile(path.join(cwd, "assets", "pixel.png"), Uint8Array.from([0, 1]));
+
+        const result = yield* workspaceFileSystem.readFile({
+          cwd,
+          relativePath: "assets/pixel.png",
+        });
+
+        expect(result).toEqual({
+          relativePath: "assets/pixel.png",
+          contents: "",
+          contentKind: "media",
+          mediaKind: "image",
+          mediaType: "image/png",
+          dataUrl: "data:image/png;base64,AAE=",
+          sizeBytes: 2,
+        });
+      }),
+    );
+  });
+
   describe("writeFile", () => {
     it.effect("writes files relative to the workspace root", () =>
       Effect.gen(function* () {
