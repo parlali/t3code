@@ -2,7 +2,7 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { useThreadAttentionStore } from "./threadAttentionStore";
+import { resetThreadAttentionStoreForTests, useThreadAttentionStore } from "./threadAttentionStore";
 
 const environmentId = EnvironmentId.make("environment-local");
 const remoteEnvironmentId = EnvironmentId.make("environment-remote");
@@ -13,20 +13,23 @@ const otherThreadKey = scopedThreadKey(scopeThreadRef(environmentId, otherThread
 const remoteThreadId = ThreadId.make("thread-remote");
 const remoteThreadKey = scopedThreadKey(scopeThreadRef(remoteEnvironmentId, remoteThreadId));
 
-function attentionState(overrides: { revision?: number; threadId?: ThreadId } = {}) {
+function attentionState(
+  overrides: { revision?: number; threadId?: ThreadId; updatedAt?: string } = {},
+) {
   return {
     threadId: overrides.threadId ?? threadId,
     kind: "completed" as const,
     turnId: "turn-1" as never,
     attentionAt: "2026-05-09T10:00:00.000Z",
     acknowledgedAt: null,
-    updatedAt: "2026-05-09T10:00:00.000Z",
+    updatedAt: overrides.updatedAt ?? "2026-05-09T10:00:00.000Z",
     revision: overrides.revision ?? 1,
   };
 }
 
 describe("threadAttentionStore", () => {
   beforeEach(() => {
+    resetThreadAttentionStoreForTests();
     useThreadAttentionStore.setState({ attentionByThreadKey: {}, manuallyUnseenThreadKeys: {} });
   });
 
@@ -41,6 +44,55 @@ describe("threadAttentionStore", () => {
       turnId: "turn-1",
       revision: 1,
     });
+  });
+
+  it("preserves streamed attention omitted from a stale reconnect snapshot", () => {
+    const store = useThreadAttentionStore.getState();
+    store.syncSnapshot(environmentId, {
+      states: [],
+      updatedAt: "2026-05-09T10:00:00.000Z",
+    });
+    store.applyState(
+      environmentId,
+      attentionState({ revision: 1, updatedAt: "2026-05-09T10:02:00.000Z" }),
+    );
+
+    store.syncSnapshot(environmentId, {
+      states: [],
+      updatedAt: "2026-05-09T10:01:00.000Z",
+    });
+
+    expect(useThreadAttentionStore.getState().attentionByThreadKey[threadKey]).toBeDefined();
+  });
+
+  it("preserves newer local attention when an older snapshot omits it", () => {
+    const store = useThreadAttentionStore.getState();
+    store.applyState(
+      environmentId,
+      attentionState({ revision: 1, updatedAt: "2026-05-09T10:02:00.000Z" }),
+    );
+
+    store.syncSnapshot(environmentId, {
+      states: [],
+      updatedAt: "2026-05-09T10:01:00.000Z",
+    });
+
+    expect(useThreadAttentionStore.getState().attentionByThreadKey[threadKey]).toBeDefined();
+  });
+
+  it("clears omitted local attention when the snapshot is current", () => {
+    const store = useThreadAttentionStore.getState();
+    store.applyState(
+      environmentId,
+      attentionState({ revision: 1, updatedAt: "2026-05-09T10:00:00.000Z" }),
+    );
+
+    store.syncSnapshot(environmentId, {
+      states: [],
+      updatedAt: "2026-05-09T10:01:00.000Z",
+    });
+
+    expect(useThreadAttentionStore.getState().attentionByThreadKey[threadKey]).toBeUndefined();
   });
 
   it("ignores stale state updates", () => {

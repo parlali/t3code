@@ -258,6 +258,12 @@ write_plist() {
     plist_string "T3_REDIRECT_PORT" "$redirect_port"
     plist_string "T3CODE_NO_BROWSER" "1"
     plist_string "T3CODE_UNSAFE_NO_AUTH" "${T3CODE_UNSAFE_NO_AUTH:-false}"
+    if [[ -n "${T3CODE_WEB_ALLOWED_HOSTS:-}" ]]; then
+      plist_string "T3CODE_WEB_ALLOWED_HOSTS" "$T3CODE_WEB_ALLOWED_HOSTS"
+    fi
+    if [[ -n "${T3_TERMINAL_PERF_TRACE:-}" ]]; then
+      plist_string "T3_TERMINAL_PERF_TRACE" "$T3_TERMINAL_PERF_TRACE"
+    fi
     if [[ -n "${T3_TAILSCALE_HTTPS_HOST:-}" ]]; then
       plist_string "T3_TAILSCALE_HTTPS_HOST" "$T3_TAILSCALE_HTTPS_HOST"
     fi

@@ -48,6 +48,8 @@ export type TerminalOpenInput = Schema.Codec.Encoded<typeof TerminalOpenInput>;
 export const TerminalWriteInput = Schema.Struct({
   ...TerminalSessionInput.fields,
   data: Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(65_536)),
+  perfInputId: Schema.optional(Schema.Number),
+  perfClientSentAtMs: Schema.optional(Schema.Number),
 });
 export type TerminalWriteInput = Schema.Codec.Encoded<typeof TerminalWriteInput>;
 
@@ -146,10 +148,20 @@ const TerminalStartedEvent = Schema.Struct({
   snapshot: TerminalSessionSnapshot,
 });
 
+export const TerminalOutputPerfTimings = Schema.Struct({
+  drainedAtMs: Schema.Number,
+  publishedAtMs: Schema.Number,
+  replayWriteMs: Schema.Number,
+  historyAppendMs: Schema.Number,
+  bytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type TerminalOutputPerfTimings = typeof TerminalOutputPerfTimings.Type;
+
 const TerminalOutputEvent = Schema.Struct({
   ...TerminalEventBaseSchema.fields,
   type: Schema.Literal("output"),
   data: Schema.String,
+  perfTimings: Schema.optional(TerminalOutputPerfTimings),
 });
 
 const TerminalExitedEvent = Schema.Struct({

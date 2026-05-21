@@ -421,6 +421,11 @@ export function TerminalViewport({
 
     let pendingInput = "";
     let inputFlushQueued = false;
+    let nextPerfInputId = 0;
+    const isInputPerfTraceEnabled =
+      typeof window !== "undefined" &&
+      (window as unknown as { __T3_TERMINAL_PERF_TRACE__?: boolean })
+        .__T3_TERMINAL_PERF_TRACE__ === true;
 
     const flushTerminalInput = () => {
       inputFlushQueued = false;
@@ -432,24 +437,50 @@ export function TerminalViewport({
       pendingInput = "";
       if (data.length === 0) return;
 
-      const chunks: string[] = [];
       for (let index = 0; index < data.length; index += TERMINAL_INPUT_CHUNK_MAX_BYTES) {
-        chunks.push(data.slice(index, index + TERMINAL_INPUT_CHUNK_MAX_BYTES));
-      }
-
-      void (async () => {
-        try {
-          for (const chunk of chunks) {
-            await terminalApi.write({ threadId, terminalId, data: chunk });
-          }
-        } catch (err) {
-          if (disposed) return;
-          writeSystemMessage(
-            terminal,
-            err instanceof Error ? err.message : "Terminal write failed",
+        const chunk = data.slice(index, index + TERMINAL_INPUT_CHUNK_MAX_BYTES);
+        const perfFields = isInputPerfTraceEnabled
+          ? { perfInputId: ++nextPerfInputId, perfClientSentAtMs: Date.now() }
+          : null;
+        const writePromise = terminalApi.write({
+          threadId,
+          terminalId,
+          data: chunk,
+          ...(perfFields ?? {}),
+        });
+        if (perfFields !== null) {
+          const { perfInputId, perfClientSentAtMs } = perfFields;
+          const bytes = chunk.length;
+          writePromise.then(
+            () => {
+              recordClientPerfEvent("terminal.perf.write.ack", {
+                threadId,
+                terminalId,
+                perfInputId,
+                bytes,
+                clientSentAtMs: perfClientSentAtMs,
+                clientAckAtMs: Date.now(),
+                clientWriteAckMs: Date.now() - perfClientSentAtMs,
+              });
+            },
+            (err) => {
+              if (disposed) return;
+              writeSystemMessage(
+                terminal,
+                err instanceof Error ? err.message : "Terminal write failed",
+              );
+            },
           );
+        } else {
+          writePromise.catch((err) => {
+            if (disposed) return;
+            writeSystemMessage(
+              terminal,
+              err instanceof Error ? err.message : "Terminal write failed",
+            );
+          });
         }
-      })();
+      }
     };
 
     const queueTerminalInput = (data: string) => {
@@ -609,6 +640,16 @@ export function TerminalViewport({
 
     let pendingOutput = "";
     let outputFlushFrame: number | null = null;
+    interface PendingPerfEntry {
+      sequence: number;
+      bytes: number;
+      receivedAtMs: number;
+      serverDrainedAtMs: number;
+      serverPublishedAtMs: number;
+      replayWriteMs: number;
+      historyAppendMs: number;
+    }
+    let pendingPerfEntries: PendingPerfEntry[] = [];
 
     const flushTerminalOutput = () => {
       outputFlushFrame = null;
@@ -618,11 +659,46 @@ export function TerminalViewport({
       const activeTerminal = terminalRef.current;
       if (!activeTerminal) {
         pendingOutput = "";
+        pendingPerfEntries = [];
         return;
       }
       const data = pendingOutput;
       pendingOutput = "";
-      activeTerminal.write(data);
+      const flushedPerfEntries = pendingPerfEntries;
+      pendingPerfEntries = [];
+      const writeStartedAtMs = flushedPerfEntries.length > 0 ? Date.now() : 0;
+      const handleWritten = () => {
+        if (flushedPerfEntries.length === 0) {
+          return;
+        }
+        const wroteAtMs = Date.now();
+        for (const entry of flushedPerfEntries) {
+          recordClientPerfEvent("terminal.perf.client", {
+            threadId,
+            terminalId,
+            sequence: entry.sequence,
+            bytes: entry.bytes,
+            serverDrainedAtMs: entry.serverDrainedAtMs,
+            serverPublishedAtMs: entry.serverPublishedAtMs,
+            replayWriteMs: entry.replayWriteMs,
+            historyAppendMs: entry.historyAppendMs,
+            receivedAtMs: entry.receivedAtMs,
+            writeStartedAtMs,
+            wroteAtMs,
+            transportLatencyMs: entry.receivedAtMs - entry.serverPublishedAtMs,
+            clientQueueMs: writeStartedAtMs - entry.receivedAtMs,
+            xtermWriteMs: wroteAtMs - writeStartedAtMs,
+            endToEndMs: wroteAtMs - entry.serverDrainedAtMs,
+            batchSize: flushedPerfEntries.length,
+            batchBytes: data.length,
+          });
+        }
+      };
+      if (flushedPerfEntries.length > 0) {
+        activeTerminal.write(data, handleWritten);
+      } else {
+        activeTerminal.write(data);
+      }
       clearSelectionAction();
     };
 
@@ -633,8 +709,11 @@ export function TerminalViewport({
       outputFlushFrame = window.requestAnimationFrame(flushTerminalOutput);
     };
 
-    const queueTerminalOutput = (data: string) => {
+    const queueTerminalOutput = (data: string, perf?: PendingPerfEntry) => {
       pendingOutput += data;
+      if (perf) {
+        pendingPerfEntries.push(perf);
+      }
       if (pendingOutput.length >= TERMINAL_OUTPUT_FLUSH_MAX_BYTES) {
         if (outputFlushFrame !== null) {
           window.cancelAnimationFrame(outputFlushFrame);
@@ -675,7 +754,21 @@ export function TerminalViewport({
             bytes: event.data.length,
           });
         }
-        queueTerminalOutput(event.data);
+        const perfTimings = event.perfTimings;
+        const sequence = event.sequence;
+        if (perfTimings !== undefined && typeof sequence === "number") {
+          queueTerminalOutput(event.data, {
+            sequence,
+            bytes: perfTimings.bytes,
+            receivedAtMs: Date.now(),
+            serverDrainedAtMs: perfTimings.drainedAtMs,
+            serverPublishedAtMs: perfTimings.publishedAtMs,
+            replayWriteMs: perfTimings.replayWriteMs,
+            historyAppendMs: perfTimings.historyAppendMs,
+          });
+        } else {
+          queueTerminalOutput(event.data);
+        }
         return;
       }
 

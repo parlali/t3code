@@ -201,4 +201,35 @@ layer("ThreadAttention", (it) => {
       assert.equal(snapshot.states[0]?.threadId, threadId);
     }),
   );
+
+  it.effect(
+    "makes same-turn completion unseen again when the terminal attention time changes",
+    () =>
+      Effect.gen(function* () {
+        const attention = yield* ThreadAttention;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.make("thread-1");
+        const viewerId = AuthSessionId.make("viewer-1");
+
+        yield* setupSchema();
+        yield* insertCompletedThread(threadId);
+        yield* attention.markSeen(viewerId, {
+          threadId,
+          observedAt: "2026-05-09T10:01:00.000Z",
+        });
+
+        yield* sql`
+        UPDATE projection_turns
+        SET completed_at = '2026-05-09T10:02:00.000Z'
+        WHERE thread_id = ${threadId}
+          AND turn_id = 'turn-1'
+      `;
+        const snapshot = yield* attention.getSnapshot(viewerId);
+
+        assert.equal(snapshot.states.length, 1);
+        assert.equal(snapshot.states[0]?.threadId, threadId);
+        assert.equal(snapshot.states[0]?.turnId, "turn-1");
+        assert.equal(snapshot.states[0]?.attentionAt, "2026-05-09T10:02:00.000Z");
+      }),
+  );
 });

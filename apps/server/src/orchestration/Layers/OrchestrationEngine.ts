@@ -49,7 +49,68 @@ interface CommandEnvelope {
   command: OrchestrationCommand;
   result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>;
   startedAtMs: number;
+  receivedAt: string;
+  clientCreatedAtMs: number | null;
 }
+
+const parseIsoMs = (value: string | undefined): number | null => {
+  if (value === undefined) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const commandCreatedAt = (command: OrchestrationCommand): string | undefined =>
+  "createdAt" in command ? command.createdAt : undefined;
+
+const commandThreadId = (command: OrchestrationCommand): ThreadId | undefined =>
+  "threadId" in command ? command.threadId : undefined;
+
+const commandTimingAttributes = (input: {
+  readonly command: OrchestrationCommand;
+  readonly receivedAtMs: number;
+  readonly receivedAt: string;
+  readonly clientCreatedAtMs: number | null;
+}) => {
+  const clientCreatedAt = commandCreatedAt(input.command);
+  return {
+    "orchestration.command_id": input.command.commandId,
+    "orchestration.command_type": input.command.type,
+    ...(commandThreadId(input.command) !== undefined
+      ? { "orchestration.thread_id": commandThreadId(input.command) }
+      : {}),
+    "orchestration.server_received_at": input.receivedAt,
+    ...(clientCreatedAt !== undefined
+      ? { "orchestration.client_created_at": clientCreatedAt }
+      : {}),
+    ...(input.clientCreatedAtMs !== null
+      ? {
+          "orchestration.client_to_server_delay_ms": Math.max(
+            0,
+            input.receivedAtMs - input.clientCreatedAtMs,
+          ),
+        }
+      : {}),
+  };
+};
+
+const turnStartPayloadAttributes = (command: OrchestrationCommand) => {
+  if (command.type !== "thread.turn.start") {
+    return {};
+  }
+
+  const attachmentBytes = command.message.attachments.reduce(
+    (total, attachment) => total + ("sizeBytes" in attachment ? attachment.sizeBytes : 0),
+    0,
+  );
+  return {
+    "orchestration.message_id": command.message.messageId,
+    "orchestration.message_text_length": command.message.text.length,
+    "orchestration.attachment_count": command.message.attachments.length,
+    "orchestration.attachment_bytes": attachmentBytes,
+  };
+};
 
 function commandToAggregateRef(command: OrchestrationCommand): {
   readonly aggregateKind: "project" | "thread";
@@ -98,6 +159,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
     const dispatchStartSequence = commandReadModel.snapshotSequence;
     const processingStartedAtMs = Date.now();
+    const queueDelayMs = Math.max(0, processingStartedAtMs - envelope.startedAtMs);
     const aggregateRef = commandToAggregateRef(envelope.command);
     const baseMetricAttributes = {
       commandType: envelope.command.type,
@@ -125,6 +187,41 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           "orchestration.command_type": envelope.command.type,
           "orchestration.aggregate_kind": aggregateRef.aggregateKind,
           "orchestration.aggregate_id": aggregateRef.aggregateId,
+          "orchestration.server_received_at": envelope.receivedAt,
+          "orchestration.queue_delay_ms": queueDelayMs,
+          ...(commandCreatedAt(envelope.command) !== undefined
+            ? { "orchestration.client_created_at": commandCreatedAt(envelope.command) }
+            : {}),
+          ...(envelope.clientCreatedAtMs !== null
+            ? {
+                "orchestration.client_to_process_delay_ms": Math.max(
+                  0,
+                  processingStartedAtMs - envelope.clientCreatedAtMs,
+                ),
+              }
+            : {}),
+          ...turnStartPayloadAttributes(envelope.command),
+        });
+        yield* Effect.logInfo("orchestration.command.process.start", {
+          commandId: envelope.command.commandId,
+          commandType: envelope.command.type,
+          aggregateKind: aggregateRef.aggregateKind,
+          aggregateId: aggregateRef.aggregateId,
+          serverReceivedAt: envelope.receivedAt,
+          processingStartedAt: new Date(processingStartedAtMs).toISOString(),
+          queueDelayMs,
+          ...(commandCreatedAt(envelope.command) !== undefined
+            ? { clientCreatedAt: commandCreatedAt(envelope.command) }
+            : {}),
+          ...(envelope.clientCreatedAtMs !== null
+            ? {
+                clientToProcessDelayMs: Math.max(
+                  0,
+                  processingStartedAtMs - envelope.clientCreatedAtMs,
+                ),
+              }
+            : {}),
+          ...turnStartPayloadAttributes(envelope.command),
         });
 
         const existingReceipt = yield* commandReceiptRepository.getByCommandId({
@@ -219,6 +316,24 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             : Cause.hasInterruptsOnly(exit.cause)
               ? "interrupt"
               : "failure";
+          const finishedAtMs = Date.now();
+          yield* Effect.logInfo("orchestration.command.process.finish", {
+            commandId: envelope.command.commandId,
+            commandType: envelope.command.type,
+            aggregateKind: aggregateRef.aggregateKind,
+            aggregateId: aggregateRef.aggregateId,
+            outcome,
+            serverReceivedAt: envelope.receivedAt,
+            finishedAt: new Date(finishedAtMs).toISOString(),
+            queueDelayMs,
+            processDurationMs: Math.max(0, finishedAtMs - processingStartedAtMs),
+            totalServerDurationMs: Math.max(0, finishedAtMs - envelope.startedAtMs),
+            ...(envelope.clientCreatedAtMs !== null
+              ? {
+                  clientToFinishDelayMs: Math.max(0, finishedAtMs - envelope.clientCreatedAtMs),
+                }
+              : {}),
+          });
           yield* Metric.update(
             Metric.withAttributes(
               orchestrationCommandDuration,
@@ -292,8 +407,42 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Effect.gen(function* () {
+      const receivedAtMs = Date.now();
+      const receivedAt = new Date(receivedAtMs).toISOString();
+      const clientCreatedAtMs = parseIsoMs(commandCreatedAt(command));
+      const receivedAttributes = {
+        ...commandTimingAttributes({
+          command,
+          receivedAtMs,
+          receivedAt,
+          clientCreatedAtMs,
+        }),
+        ...turnStartPayloadAttributes(command),
+      };
+      yield* Effect.annotateCurrentSpan(receivedAttributes);
+      yield* Effect.logInfo("orchestration.command.received", {
+        commandId: command.commandId,
+        commandType: command.type,
+        serverReceivedAt: receivedAt,
+        ...(commandThreadId(command) !== undefined ? { threadId: commandThreadId(command) } : {}),
+        ...(commandCreatedAt(command) !== undefined
+          ? { clientCreatedAt: commandCreatedAt(command) }
+          : {}),
+        ...(clientCreatedAtMs !== null
+          ? {
+              clientToServerDelayMs: Math.max(0, receivedAtMs - clientCreatedAtMs),
+            }
+          : {}),
+        ...turnStartPayloadAttributes(command),
+      });
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
-      yield* Queue.offer(commandQueue, { command, result, startedAtMs: Date.now() });
+      yield* Queue.offer(commandQueue, {
+        command,
+        result,
+        startedAtMs: receivedAtMs,
+        receivedAt,
+        clientCreatedAtMs,
+      });
       return yield* Deferred.await(result);
     });
 

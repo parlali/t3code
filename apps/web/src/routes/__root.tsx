@@ -314,6 +314,12 @@ function EventRouter() {
       if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
         return;
       }
+      if (readPathname() !== "/") {
+        return;
+      }
+      if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
+        return;
+      }
       const bootstrapEnvironmentState =
         useStore.getState().environmentStateById[payload.environment.environmentId];
       const bootstrapProject =
@@ -329,13 +335,6 @@ function EventRouter() {
           scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
         );
       useUiStateStore.getState().setProjectExpanded(bootstrapProjectKey, true);
-
-      if (readPathname() !== "/") {
-        return;
-      }
-      if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
-        return;
-      }
       await navigate({
         to: "/$environmentId/$threadId",
         params: {

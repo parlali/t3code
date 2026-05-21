@@ -6,6 +6,8 @@ describe("shouldMarkThreadAttentionSeen", () => {
   it("marks attention seen when the user opens a thread after the attention was received", () => {
     expect(
       shouldMarkThreadAttentionSeen({
+        attentionAt: "2026-05-09T10:00:00.000Z",
+        lastFocusGainedAt: "2026-05-09T10:01:00.000Z",
         receivedSequence: 1,
         seenGateSequence: 2,
         hasFocus: true,
@@ -15,21 +17,25 @@ describe("shouldMarkThreadAttentionSeen", () => {
     ).toBe(true);
   });
 
-  it("does not clear a completion received after the user was already viewing the thread", () => {
+  it("marks attention seen when completion arrives while the user is viewing the thread", () => {
     expect(
       shouldMarkThreadAttentionSeen({
+        attentionAt: "2026-05-09T10:02:00.000Z",
+        lastFocusGainedAt: "2026-05-09T10:01:00.000Z",
         receivedSequence: 2,
         seenGateSequence: 1,
         hasFocus: true,
         isHeld: false,
         visibilityState: "visible",
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("does not clear when focus returned after completion but before the event arrived", () => {
     expect(
       shouldMarkThreadAttentionSeen({
+        attentionAt: "2026-05-09T10:02:00.000Z",
+        lastFocusGainedAt: "2026-05-09T10:03:00.000Z",
         receivedSequence: 3,
         seenGateSequence: 2,
         hasFocus: true,
@@ -41,6 +47,8 @@ describe("shouldMarkThreadAttentionSeen", () => {
 
   it("does not mark seen while hidden, unfocused, or manually held unread", () => {
     const base = {
+      attentionAt: "2026-05-09T10:00:00.000Z",
+      lastFocusGainedAt: "2026-05-09T10:01:00.000Z",
       receivedSequence: 1,
       seenGateSequence: 2,
     };

@@ -36,30 +36,76 @@ export function isLoopbackHostname(hostname: string): boolean {
   return LOOPBACK_HOSTNAMES.has(normalizeHostname(hostname));
 }
 
-function resolveHttpRequestBaseUrl(httpBaseUrl: string): string {
+function getCurrentHttpUrl(): URL {
+  return new URL(window.location.href);
+}
+
+function getConfiguredDevServerUrl(currentUrl: URL): URL | null {
   const configuredDevServerUrl = import.meta.env.VITE_DEV_SERVER_URL?.trim();
   if (!configuredDevServerUrl) {
+    return null;
+  }
+
+  return new URL(configuredDevServerUrl, currentUrl.origin);
+}
+
+function isHttpBrowserOrigin(url: URL): boolean {
+  return url.protocol === "http:" || url.protocol === "https:";
+}
+
+function shouldUseDevServerProxy(targetBaseUrl: string): boolean {
+  const currentUrl = getCurrentHttpUrl();
+  const configuredDevServerUrl = getConfiguredDevServerUrl(currentUrl);
+  if (!configuredDevServerUrl || !isHttpBrowserOrigin(currentUrl)) {
+    return false;
+  }
+
+  const targetUrl = new URL(normalizeBaseUrl(targetBaseUrl));
+  if (currentUrl.origin === targetUrl.origin) {
+    return false;
+  }
+
+  const currentOriginIsConfiguredDevServer = currentUrl.origin === configuredDevServerUrl.origin;
+  const currentOriginIsRemoteDevServer =
+    import.meta.env.DEV && currentUrl.origin !== configuredDevServerUrl.origin;
+  if (!currentOriginIsConfiguredDevServer && !currentOriginIsRemoteDevServer) {
+    return false;
+  }
+
+  return (
+    isLoopbackHostname(targetUrl.hostname) ||
+    normalizeHostname(currentUrl.hostname) === normalizeHostname(targetUrl.hostname)
+  );
+}
+
+function currentOriginAsWsBaseUrl(): string {
+  const url = new URL(getCurrentHttpUrl().origin);
+  if (url.protocol === "http:") {
+    url.protocol = "ws:";
+  } else if (url.protocol === "https:") {
+    url.protocol = "wss:";
+  }
+  return url.toString();
+}
+
+function currentOriginAsHttpBaseUrl(): string {
+  return new URL(getCurrentHttpUrl().origin).toString();
+}
+
+function resolveHttpRequestBaseUrl(httpBaseUrl: string): string {
+  if (!shouldUseDevServerProxy(httpBaseUrl)) {
     return httpBaseUrl;
   }
 
-  const currentUrl = new URL(window.location.href);
-  const targetUrl = new URL(httpBaseUrl);
-  const devServerUrl = new URL(configuredDevServerUrl, currentUrl.origin);
+  return currentOriginAsHttpBaseUrl();
+}
 
-  const isCurrentOriginDevServer =
-    (currentUrl.protocol === "http:" || currentUrl.protocol === "https:") &&
-    currentUrl.origin === devServerUrl.origin;
-
-  if (
-    !isCurrentOriginDevServer ||
-    currentUrl.origin === targetUrl.origin ||
-    !isLoopbackHostname(currentUrl.hostname) ||
-    !isLoopbackHostname(targetUrl.hostname)
-  ) {
-    return httpBaseUrl;
+function resolveWsRequestBaseUrl(wsBaseUrl: string): string {
+  if (!shouldUseDevServerProxy(wsBaseUrl)) {
+    return wsBaseUrl;
   }
 
-  return currentUrl.origin;
+  return currentOriginAsWsBaseUrl();
 }
 
 function resolveConfiguredPrimaryTarget(): PrimaryEnvironmentTarget | null {
@@ -84,8 +130,8 @@ function resolveConfiguredPrimaryTarget(): PrimaryEnvironmentTarget | null {
   return {
     source: "configured",
     target: {
-      httpBaseUrl: normalizeBaseUrl(resolvedHttpBaseUrl),
-      wsBaseUrl: normalizeBaseUrl(resolvedWsBaseUrl),
+      httpBaseUrl: resolveHttpRequestBaseUrl(normalizeBaseUrl(resolvedHttpBaseUrl)),
+      wsBaseUrl: resolveWsRequestBaseUrl(normalizeBaseUrl(resolvedWsBaseUrl)),
     },
   };
 }
@@ -126,8 +172,8 @@ function resolveDesktopPrimaryTarget(): PrimaryEnvironmentTarget | null {
   return {
     source: "desktop-managed",
     target: {
-      httpBaseUrl: normalizeBaseUrl(desktopBootstrap.httpBaseUrl),
-      wsBaseUrl: normalizeBaseUrl(desktopBootstrap.wsBaseUrl),
+      httpBaseUrl: resolveHttpRequestBaseUrl(normalizeBaseUrl(desktopBootstrap.httpBaseUrl)),
+      wsBaseUrl: resolveWsRequestBaseUrl(normalizeBaseUrl(desktopBootstrap.wsBaseUrl)),
     },
   };
 }

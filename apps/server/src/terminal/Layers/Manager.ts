@@ -57,15 +57,28 @@ import {
   type TerminalReplayState,
   writeTerminalReplayState,
 } from "../terminalReplayState.ts";
-import { appendTerminalHistory, normalizeTerminalHistory } from "../terminalTranscript.ts";
+import {
+  appendTerminalHistoryChunk,
+  clearTerminalHistoryBuffer,
+  createTerminalHistoryBuffer,
+  DEFAULT_TERMINAL_HISTORY_CHUNK_TARGET_BYTES,
+  DEFAULT_TERMINAL_HISTORY_PRUNE_TARGET_BYTES,
+  DEFAULT_TERMINAL_HISTORY_PRUNE_THRESHOLD_BYTES,
+  materializeTerminalHistory,
+  normalizeTerminalHistory,
+  type TerminalHistoryBuffer,
+} from "../terminalTranscript.ts";
 
 const DEFAULT_HISTORY_LINE_LIMIT = 5_000;
 const DEFAULT_REPLAY_EVENT_LIMIT = 10_000;
 const DEFAULT_PERSIST_DEBOUNCE_MS = 40;
+const TERMINAL_PERF_TRACE_ENABLED = process.env.T3_TERMINAL_PERF_TRACE === "1";
 const DEFAULT_SUBPROCESS_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PROCESS_KILL_GRACE_MS = 1_000;
 const DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS = 128;
 const DEFAULT_OUTPUT_EVENT_BATCH_MAX_BYTES = 64 * 1024;
+const DEFAULT_REPLAY_FLUSH_DEBOUNCE_MS = 250;
+const DEFAULT_REPLAY_PENDING_FLUSH_MAX_BYTES = 256 * 1024;
 const DEFAULT_OPEN_COLS = 120;
 const DEFAULT_OPEN_ROWS = 30;
 const TERMINAL_ENV_BLOCKLIST = new Set(["PORT", "ELECTRON_RENDERER_PORT", "ELECTRON_RUN_AS_NODE"]);
@@ -118,7 +131,7 @@ interface TerminalSessionState {
   worktreePath: string | null;
   status: TerminalSessionStatus;
   pid: number | null;
-  history: string;
+  historyBuffer: TerminalHistoryBuffer;
   pendingProcessEvents: Array<PendingProcessEvent>;
   pendingProcessEventIndex: number;
   processEventDrainRunning: boolean;
@@ -129,6 +142,9 @@ interface TerminalSessionState {
   rows: number;
   sequence: number;
   replay: TerminalReplayState;
+  replayPendingChunks: string[];
+  replayPendingByteEstimate: number;
+  replayFlushTimer: ReturnType<typeof setTimeout> | null;
   replayEvents: TerminalEvent[];
   process: PtyProcess | null;
   unsubscribeData: (() => void) | null;
@@ -141,8 +157,10 @@ interface TerminalSessionState {
 }
 
 interface PersistHistoryRequest {
-  history: string;
   immediate: boolean;
+  history?: string;
+  historyBuffer?: TerminalHistoryBuffer;
+  historyLineLimit?: number;
 }
 
 type PendingProcessEvent = { type: "output"; data: string } | { type: "exit"; event: PtyExitEvent };
@@ -171,8 +189,87 @@ interface TerminalManagerState {
   killFibers: Map<PtyProcess, Fiber.Fiber<void, never>>;
 }
 
+function materializeSessionHistory(session: TerminalSessionState): string {
+  return materializeTerminalHistory(session.historyBuffer, session.historyLineLimit, {
+    maxBytes: DEFAULT_TERMINAL_HISTORY_PRUNE_THRESHOLD_BYTES,
+  });
+}
+
+function cancelReplayFlush(session: TerminalSessionState): void {
+  if (session.replayFlushTimer === null) {
+    return;
+  }
+  clearTimeout(session.replayFlushTimer);
+  session.replayFlushTimer = null;
+}
+
+function clearPendingReplayChunks(session: TerminalSessionState): void {
+  session.replayPendingChunks = [];
+  session.replayPendingByteEstimate = 0;
+}
+
+function flushReplayState(session: TerminalSessionState): void {
+  cancelReplayFlush(session);
+  if (session.replayPendingChunks.length === 0) {
+    return;
+  }
+
+  const data =
+    session.replayPendingChunks.length === 1
+      ? session.replayPendingChunks[0]!
+      : session.replayPendingChunks.join("");
+  clearPendingReplayChunks(session);
+  writeTerminalReplayState(session.replay, data);
+}
+
+function scheduleReplayFlush(session: TerminalSessionState): void {
+  if (session.replayFlushTimer !== null) {
+    return;
+  }
+
+  const timer = setTimeout(() => {
+    session.replayFlushTimer = null;
+    flushReplayState(session);
+  }, DEFAULT_REPLAY_FLUSH_DEBOUNCE_MS);
+  if (typeof (timer as { unref?: () => void }).unref === "function") {
+    (timer as { unref: () => void }).unref();
+  }
+  session.replayFlushTimer = timer;
+}
+
+function deferReplayStateWrite(session: TerminalSessionState, data: string): boolean {
+  if (data.length === 0) {
+    return true;
+  }
+
+  const pendingBytes = Buffer.byteLength(data);
+  session.replayPendingChunks.push(data);
+  session.replayPendingByteEstimate += pendingBytes;
+
+  if (session.replayPendingByteEstimate >= DEFAULT_REPLAY_PENDING_FLUSH_MAX_BYTES) {
+    flushReplayState(session);
+    return false;
+  }
+
+  scheduleReplayFlush(session);
+  return true;
+}
+
+function resetSessionReplayState(session: TerminalSessionState): void {
+  cancelReplayFlush(session);
+  clearPendingReplayChunks(session);
+  resetTerminalReplayState(session.replay);
+}
+
+function disposeSessionReplayState(session: TerminalSessionState): void {
+  cancelReplayFlush(session);
+  clearPendingReplayChunks(session);
+  disposeTerminalReplayState(session.replay);
+}
+
 function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
-  session.history = normalizeTerminalHistory(session.history, session.historyLineLimit);
+  flushReplayState(session);
+  const history = materializeSessionHistory(session);
   return {
     threadId: session.threadId,
     terminalId: session.terminalId,
@@ -181,7 +278,7 @@ function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
     status: session.status,
     pid: session.pid,
     screen: serializeTerminalReplayState(session.replay, session.historyLineLimit),
-    history: session.history,
+    history,
     sequence: session.sequence,
     exitCode: session.exitCode,
     exitSignal: session.exitSignal,
@@ -798,8 +895,12 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       never
     >({
       merge: (current, next) => ({
-        history: next.history,
         immediate: current.immediate || next.immediate,
+        ...(next.history !== undefined ? { history: next.history } : {}),
+        ...(next.historyBuffer !== undefined ? { historyBuffer: next.historyBuffer } : {}),
+        ...(next.historyLineLimit !== undefined
+          ? { historyLineLimit: next.historyLineLimit }
+          : {}),
       }),
       process: Effect.fn("terminal.persistHistoryWorker")(function* (sessionKey, request) {
         if (!request.immediate) {
@@ -811,7 +912,15 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           return;
         }
 
-        yield* fileSystem.writeFileString(historyPath(threadId, terminalId), request.history).pipe(
+        const history =
+          request.history ??
+          (request.historyBuffer && request.historyLineLimit !== undefined
+            ? materializeTerminalHistory(request.historyBuffer, request.historyLineLimit, {
+                maxBytes: DEFAULT_TERMINAL_HISTORY_PRUNE_THRESHOLD_BYTES,
+              })
+            : "");
+
+        yield* fileSystem.writeFileString(historyPath(threadId, terminalId), history).pipe(
           Effect.catch((error) =>
             Effect.logWarning("failed to persist terminal history", {
               threadId,
@@ -824,13 +933,12 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     });
 
     const queuePersist = Effect.fn("terminal.queuePersist")(function* (
-      threadId: string,
-      terminalId: string,
-      history: string,
+      session: TerminalSessionState,
     ) {
-      yield* persistWorker.enqueue(toSessionKey(threadId, terminalId), {
-        history,
+      yield* persistWorker.enqueue(toSessionKey(session.threadId, session.terminalId), {
         immediate: false,
+        historyBuffer: session.historyBuffer,
+        historyLineLimit: session.historyLineLimit,
       });
     });
 
@@ -1008,12 +1116,12 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
     const evictInactiveSessionsIfNeeded = Effect.fn("terminal.evictInactiveSessionsIfNeeded")(
       function* () {
-        yield* modifyManagerState((state) => {
+        const evictedSessions = yield* modifyManagerState((state) => {
           const inactiveSessions = [...state.sessions.values()].filter(
             (session) => session.status !== "running",
           );
           if (inactiveSessions.length <= maxRetainedInactiveSessions) {
-            return [undefined, state] as const;
+            return [[] as TerminalSessionState[], state] as const;
           }
 
           inactiveSessions.sort(
@@ -1026,13 +1134,19 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           const sessions = new Map(state.sessions);
 
           const toEvict = inactiveSessions.length - maxRetainedInactiveSessions;
-          for (const session of inactiveSessions.slice(0, toEvict)) {
+          const evicted = inactiveSessions.slice(0, toEvict);
+          for (const session of evicted) {
             const key = toSessionKey(session.threadId, session.terminalId);
             sessions.delete(key);
           }
 
-          return [undefined, { ...state, sessions }] as const;
+          return [evicted, { ...state, sessions }] as const;
         });
+        yield* Effect.forEach(
+          evictedSessions,
+          (session) => Effect.sync(() => cancelReplayFlush(session)),
+          { discard: true },
+        );
       },
     );
 
@@ -1137,6 +1251,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         }
 
         if (action.type === "output") {
+          const drainedAtMs = TERMINAL_PERF_TRACE_ENABLED ? Date.now() : 0;
           const liveSession = yield* requireSession(action.threadId, action.terminalId);
           if (liveSession.firstOutputAtMs === null) {
             const firstOutputAtMs = Date.now();
@@ -1152,14 +1267,28 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
                   : firstOutputAtMs - liveSession.lastStartedAtMs,
             });
           }
-          yield* writeReplayState(liveSession.replay, action.data);
-          liveSession.history = appendTerminalHistory(
-            liveSession.history,
-            action.data,
-            liveSession.historyLineLimit,
-          );
-          yield* queuePersist(action.threadId, action.terminalId, liveSession.history);
+          const replayWriteStartMs = TERMINAL_PERF_TRACE_ENABLED ? Date.now() : 0;
+          const replayWriteDeferred = deferReplayStateWrite(liveSession, action.data);
+          const replayWriteMs = TERMINAL_PERF_TRACE_ENABLED ? Date.now() - replayWriteStartMs : 0;
 
+          const historyAppendStartMs = TERMINAL_PERF_TRACE_ENABLED ? Date.now() : 0;
+          const historyAppendResult = appendTerminalHistoryChunk(
+            liveSession.historyBuffer,
+            action.data,
+            {
+              lineLimit: liveSession.historyLineLimit,
+              pruneThresholdBytes: DEFAULT_TERMINAL_HISTORY_PRUNE_THRESHOLD_BYTES,
+              pruneTargetBytes: DEFAULT_TERMINAL_HISTORY_PRUNE_TARGET_BYTES,
+              chunkTargetBytes: DEFAULT_TERMINAL_HISTORY_CHUNK_TARGET_BYTES,
+            },
+          );
+          const historyAppendDeferred = !historyAppendResult.materialized;
+          const historyAppendMs = TERMINAL_PERF_TRACE_ENABLED
+            ? Date.now() - historyAppendStartMs
+            : 0;
+          yield* queuePersist(liveSession);
+
+          const publishedAtMs = TERMINAL_PERF_TRACE_ENABLED ? Date.now() : 0;
           const event = {
             type: "output",
             threadId: action.threadId,
@@ -1167,9 +1296,35 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             sequence: action.sequence,
             createdAt: new Date().toISOString(),
             data: action.data,
+            ...(TERMINAL_PERF_TRACE_ENABLED
+              ? {
+                  perfTimings: {
+                    drainedAtMs,
+                    publishedAtMs,
+                    replayWriteMs,
+                    historyAppendMs,
+                    bytes: action.data.length,
+                  },
+                }
+              : {}),
           } as const satisfies TerminalEvent;
           rememberReplayEvent(liveSession, event, replayEventLimit);
           yield* publishEvent(event);
+          if (TERMINAL_PERF_TRACE_ENABLED) {
+            yield* Effect.logInfo("terminal.perf.server", {
+              threadId: action.threadId,
+              terminalId: action.terminalId,
+              sequence: action.sequence,
+              bytes: action.data.length,
+              drainedAtMs,
+              publishedAtMs,
+              replayWriteMs,
+              historyAppendMs,
+              replayWriteDeferred,
+              historyAppendDeferred,
+              serverTotalMs: publishedAtMs - drainedAtMs,
+            });
+          }
           continue;
         }
 
@@ -1292,6 +1447,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         session.worktreePath = input.worktreePath ?? null;
         session.cols = input.cols;
         session.rows = input.rows;
+        flushReplayState(session);
         resizeTerminalReplayState(session.replay, input.cols, input.rows);
         session.exitCode = null;
         session.exitSignal = null;
@@ -1446,12 +1602,8 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
       if (Option.isSome(session)) {
         yield* stopProcess(session.value);
-        session.value.history = normalizeTerminalHistory(
-          session.value.history,
-          session.value.historyLineLimit,
-        );
-        yield* persistHistory(threadId, terminalId, session.value.history);
-        yield* Effect.sync(() => disposeTerminalReplayState(session.value.replay));
+        yield* persistHistory(threadId, terminalId, materializeSessionHistory(session.value));
+        yield* Effect.sync(() => disposeSessionReplayState(session.value));
       }
 
       yield* flushPersist(threadId, terminalId);
@@ -1577,7 +1729,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           session: TerminalSessionState,
         ) {
           cleanupProcessHandles(session);
-          yield* Effect.sync(() => disposeTerminalReplayState(session.replay));
+          yield* Effect.sync(() => disposeSessionReplayState(session));
           if (!session.process) return;
           yield* clearKillFiber(session.process);
           yield* runKillEscalation(session.process, session.threadId, session.terminalId);
@@ -1631,7 +1783,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               worktreePath: input.worktreePath ?? null,
               status: "starting",
               pid: null,
-              history: restoredHistory,
+              historyBuffer: createTerminalHistoryBuffer(restoredHistory),
               pendingProcessEvents: [],
               pendingProcessEventIndex: 0,
               processEventDrainRunning: false,
@@ -1642,6 +1794,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               rows,
               sequence: 0,
               replay,
+              replayPendingChunks: [],
+              replayPendingByteEstimate: 0,
+              replayFlushTimer: null,
               replayEvents: [],
               process: null,
               unsubscribeData: null,
@@ -1681,7 +1836,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               durationMs: Date.now() - openStartedAtMs,
               status: session.status,
               pid: session.pid,
-              historyBytes: session.history.length,
+              historyBytes: session.historyBuffer.byteEstimate,
             });
             return snapshot(session);
           }
@@ -1709,31 +1864,23 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             liveSession.cwd = input.cwd;
             liveSession.worktreePath = input.worktreePath ?? null;
             liveSession.runtimeEnv = nextRuntimeEnv;
-            liveSession.history = "";
-            resetTerminalReplayState(liveSession.replay);
+            clearTerminalHistoryBuffer(liveSession.historyBuffer);
+            resetSessionReplayState(liveSession);
             liveSession.replayEvents = [];
             liveSession.pendingProcessEvents = [];
             liveSession.pendingProcessEventIndex = 0;
             liveSession.processEventDrainRunning = false;
-            yield* persistHistory(
-              liveSession.threadId,
-              liveSession.terminalId,
-              liveSession.history,
-            );
+            yield* persistHistory(liveSession.threadId, liveSession.terminalId, "");
           } else if (liveSession.status === "exited" || liveSession.status === "error") {
             liveSession.runtimeEnv = nextRuntimeEnv;
             liveSession.worktreePath = input.worktreePath ?? null;
-            liveSession.history = "";
-            resetTerminalReplayState(liveSession.replay);
+            clearTerminalHistoryBuffer(liveSession.historyBuffer);
+            resetSessionReplayState(liveSession);
             liveSession.replayEvents = [];
             liveSession.pendingProcessEvents = [];
             liveSession.pendingProcessEventIndex = 0;
             liveSession.processEventDrainRunning = false;
-            yield* persistHistory(
-              liveSession.threadId,
-              liveSession.terminalId,
-              liveSession.history,
-            );
+            yield* persistHistory(liveSession.threadId, liveSession.terminalId, "");
           }
 
           if (!liveSession.process) {
@@ -1757,7 +1904,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               durationMs: Date.now() - openStartedAtMs,
               status: liveSession.status,
               pid: liveSession.pid,
-              historyBytes: liveSession.history.length,
+              historyBytes: liveSession.historyBuffer.byteEstimate,
             });
             return snapshot(liveSession);
           }
@@ -1766,6 +1913,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             liveSession.cols = targetCols;
             liveSession.rows = targetRows;
             liveSession.updatedAt = new Date().toISOString();
+            flushReplayState(liveSession);
             resizeTerminalReplayState(liveSession.replay, targetCols, targetRows);
             liveSession.process.resize(targetCols, targetRows);
           }
@@ -1777,31 +1925,56 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             durationMs: Date.now() - openStartedAtMs,
             status: liveSession.status,
             pid: liveSession.pid,
-            historyBytes: liveSession.history.length,
+            historyBytes: liveSession.historyBuffer.byteEstimate,
             sequence: liveSession.sequence,
           });
           return snapshot(liveSession);
         }),
       );
 
-    const write: TerminalManagerShape["write"] = Effect.fn("terminal.write")((input) =>
-      withThreadLock(
-        input.threadId,
-        Effect.gen(function* () {
-          const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
-          const session = yield* requireSession(input.threadId, terminalId);
-          const process = session.process;
-          if (!process || session.status !== "running") {
-            if (session.status === "exited") return;
-            return yield* new TerminalNotRunningError({
-              threadId: input.threadId,
-              terminalId,
-            });
-          }
-          yield* Effect.sync(() => process.write(input.data));
-        }),
-      ),
-    );
+    const write: TerminalManagerShape["write"] = Effect.fn("terminal.write")(function* (input) {
+      const serverReceivedAtMs = TERMINAL_PERF_TRACE_ENABLED ? Date.now() : 0;
+      const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
+      const session = yield* requireSession(input.threadId, terminalId);
+      const process = session.process;
+      if (!process || session.status !== "running") {
+        if (session.status === "exited") return;
+        return yield* new TerminalNotRunningError({
+          threadId: input.threadId,
+          terminalId,
+        });
+      }
+      yield* Effect.try({
+        try: () => process.write(input.data),
+        catch: (cause) => cause,
+      }).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("failed to write to terminal pty", {
+            threadId: input.threadId,
+            terminalId,
+            cause,
+          }),
+        ),
+      );
+      if (
+        TERMINAL_PERF_TRACE_ENABLED &&
+        typeof input.perfInputId === "number" &&
+        typeof input.perfClientSentAtMs === "number"
+      ) {
+        const ptyWrittenAtMs = Date.now();
+        yield* Effect.logInfo("terminal.perf.write", {
+          threadId: input.threadId,
+          terminalId,
+          perfInputId: input.perfInputId,
+          bytes: input.data.length,
+          clientSentAtMs: input.perfClientSentAtMs,
+          serverReceivedAtMs,
+          ptyWrittenAtMs,
+          transportLatencyMs: serverReceivedAtMs - input.perfClientSentAtMs,
+          serverWriteMs: ptyWrittenAtMs - serverReceivedAtMs,
+        });
+      }
+    });
 
     const resize: TerminalManagerShape["resize"] = Effect.fn("terminal.resize")(function* (input) {
       const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
@@ -1816,6 +1989,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       session.cols = input.cols;
       session.rows = input.rows;
       session.updatedAt = new Date().toISOString();
+      flushReplayState(session);
       resizeTerminalReplayState(session.replay, input.cols, input.rows);
       yield* Effect.sync(() => process.resize(input.cols, input.rows));
     });
@@ -1827,15 +2001,15 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
           const session = yield* requireSession(input.threadId, terminalId);
           const updatedAt = yield* nowIso;
-          session.history = "";
-          resetTerminalReplayState(session.replay);
+          clearTerminalHistoryBuffer(session.historyBuffer);
+          resetSessionReplayState(session);
           session.replayEvents = [];
           session.pendingProcessEvents = [];
           session.pendingProcessEventIndex = 0;
           session.processEventDrainRunning = false;
           const sequence = nextSequence(session);
           session.updatedAt = updatedAt;
-          yield* persistHistory(input.threadId, terminalId, session.history);
+          yield* persistHistory(input.threadId, terminalId, "");
           const createdAt = yield* nowIso;
           const event = {
             type: "cleared",
@@ -1871,7 +2045,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               worktreePath: input.worktreePath ?? null,
               status: "starting",
               pid: null,
-              history: "",
+              historyBuffer: createTerminalHistoryBuffer(),
               pendingProcessEvents: [],
               pendingProcessEventIndex: 0,
               processEventDrainRunning: false,
@@ -1882,6 +2056,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               rows,
               sequence: 0,
               replay,
+              replayPendingChunks: [],
+              replayPendingByteEstimate: 0,
+              replayFlushTimer: null,
               replayEvents: [],
               process: null,
               unsubscribeData: null,
@@ -1910,13 +2087,13 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           const cols = input.cols ?? session.cols;
           const rows = input.rows ?? session.rows;
 
-          session.history = "";
-          resetTerminalReplayState(session.replay);
+          clearTerminalHistoryBuffer(session.historyBuffer);
+          resetSessionReplayState(session);
           session.replayEvents = [];
           session.pendingProcessEvents = [];
           session.pendingProcessEventIndex = 0;
           session.processEventDrainRunning = false;
-          yield* persistHistory(input.threadId, terminalId, session.history);
+          yield* persistHistory(input.threadId, terminalId, "");
           yield* startSession(
             session,
             {

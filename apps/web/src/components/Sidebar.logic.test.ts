@@ -560,6 +560,19 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Completed", pulse: false });
   });
 
+  it("shows working instead of completed when unseen attention exists during a running session", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+          hasUnseenAttention: true,
+        },
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
   it("does not infer completed from latest-turn metadata without attention state", () => {
     expect(
       resolveThreadStatusPill({

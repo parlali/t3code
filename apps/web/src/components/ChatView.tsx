@@ -142,6 +142,8 @@ import {
   type TerminalContextSelection,
 } from "../lib/terminalContext";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import { logThreadAttention } from "../threadAttentionDebugLog";
+import { markThreadAttentionSeenWithRetry } from "../threadAttentionMarkSeen";
 import {
   readThreadAttentionReceivedSequence,
   useThreadAttentionStore,
@@ -579,6 +581,7 @@ interface PersistentBottomPanelProps {
   threadId: ThreadId;
   visible: boolean;
   launchContext: PersistentTerminalLaunchContext | null;
+  fallbackCwd: string | null;
   focusRequestId: number;
   splitShortcutLabel: string | undefined;
   newShortcutLabel: string | undefined;
@@ -592,6 +595,7 @@ const PersistentBottomPanel = memo(function PersistentBottomPanel({
   threadId,
   visible,
   launchContext,
+  fallbackCwd,
   focusRequestId,
   splitShortcutLabel,
   newShortcutLabel,
@@ -631,8 +635,8 @@ const PersistentBottomPanel = memo(function PersistentBottomPanel({
             project: { cwd: project.cwd },
             worktreePath: effectiveWorktreePath,
           })
-        : null),
-    [effectiveWorktreePath, launchContext?.cwd, project],
+        : fallbackCwd),
+    [effectiveWorktreePath, fallbackCwd, launchContext?.cwd, project],
   );
   const runtimeEnv = useMemo(
     () =>
@@ -644,7 +648,7 @@ const PersistentBottomPanel = memo(function PersistentBottomPanel({
         : {},
     [effectiveWorktreePath, project],
   );
-  const terminalPanelOpen = Boolean(project && cwd && visible && terminalState.terminalOpen);
+  const terminalPanelOpen = Boolean(cwd && visible && terminalState.terminalOpen);
   const terminalPanelMounted = useDelayedUnmount(terminalPanelOpen, PANEL_EXIT_ANIMATION_MS);
 
   const bumpFocusRequestId = useCallback(() => {
@@ -718,7 +722,7 @@ const PersistentBottomPanel = memo(function PersistentBottomPanel({
     [onAddTerminalContext, visible],
   );
 
-  if (!project || !cwd || !terminalPanelMounted) {
+  if (!cwd || !terminalPanelMounted) {
     return null;
   }
 
@@ -1010,7 +1014,6 @@ export default function ChatView(props: ChatViewProps) {
   const activeThreadAttention = useThreadAttentionStore((state) =>
     activeThreadKey ? state.attentionByThreadKey[activeThreadKey] : undefined,
   );
-  const activeThreadAttentionReceivedSequence = activeThreadAttention?.receivedSequence;
   const activeThreadUnseenHeld = useThreadAttentionStore((state) =>
     activeThreadKey ? state.manuallyUnseenThreadKeys[activeThreadKey] === true : false,
   );
@@ -1039,6 +1042,25 @@ export default function ChatView(props: ChatViewProps) {
     },
     [],
   );
+  const threadFocusGainedAtRef = useRef<{
+    readonly threadKey: string | null;
+    readonly at: string | null;
+  }>({
+    threadKey: activeThreadKey,
+    at:
+      activeThreadKey && document.hasFocus() && document.visibilityState === "visible"
+        ? new Date().toISOString()
+        : null,
+  });
+  if (threadFocusGainedAtRef.current.threadKey !== activeThreadKey) {
+    threadFocusGainedAtRef.current = {
+      threadKey: activeThreadKey,
+      at:
+        activeThreadKey && document.hasFocus() && document.visibilityState === "visible"
+          ? new Date().toISOString()
+          : null,
+    };
+  }
   const attentionSeenGateRef = useRef<{
     readonly threadKey: string | null;
     readonly sequence: number;
@@ -1053,10 +1075,24 @@ export default function ChatView(props: ChatViewProps) {
     };
   }
   const attentionSeenGateSequence = attentionSeenGateRef.current.sequence;
+  const threadFocusGainedAt =
+    threadFocusGainedAtRef.current.threadKey === activeThreadKey
+      ? threadFocusGainedAtRef.current.at
+      : null;
   const [attentionVisibilityVersion, setAttentionVisibilityVersion] = useState(0);
   useEffect(() => {
     const notifyVisibilityChanged = () => {
       setAttentionVisibilityVersion((version) => version + 1);
+      if (!activeThreadKey) {
+        return;
+      }
+      if (!document.hasFocus() || document.visibilityState !== "visible") {
+        return;
+      }
+      threadFocusGainedAtRef.current = {
+        threadKey: activeThreadKey,
+        at: new Date().toISOString(),
+      };
     };
     window.addEventListener("focus", notifyVisibilityChanged);
     window.addEventListener("blur", notifyVisibilityChanged);
@@ -1066,7 +1102,7 @@ export default function ChatView(props: ChatViewProps) {
       window.removeEventListener("blur", notifyVisibilityChanged);
       document.removeEventListener("visibilitychange", notifyVisibilityChanged);
     };
-  }, []);
+  }, [activeThreadKey]);
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
@@ -1374,25 +1410,46 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     if (!serverThread?.id) return;
-    if (activeThreadAttentionReceivedSequence === undefined) return;
-    if (
-      !shouldMarkThreadAttentionSeen({
-        receivedSequence: activeThreadAttentionReceivedSequence,
-        seenGateSequence: attentionSeenGateSequence,
-        hasFocus: document.hasFocus(),
-        isHeld: activeThreadUnseenHeld,
-        visibilityState: document.visibilityState,
-      })
-    ) {
+    if (!activeThreadAttention) return;
+    const shouldMark = shouldMarkThreadAttentionSeen({
+      attentionAt: activeThreadAttention.attentionAt,
+      lastFocusGainedAt: threadFocusGainedAt,
+      receivedSequence: activeThreadAttention.receivedSequence,
+      seenGateSequence: attentionSeenGateSequence,
+      hasFocus: document.hasFocus(),
+      isHeld: activeThreadUnseenHeld,
+      visibilityState: document.visibilityState,
+    });
+    logThreadAttention({
+      source: "chat-view",
+      action: "evaluate-mark-seen",
+      environmentId: serverThread.environmentId,
+      threadId: serverThread.id,
+      threadKey: activeThreadKey ?? undefined,
+      attentionAt: activeThreadAttention.attentionAt,
+      receivedSequence: activeThreadAttention.receivedSequence,
+      seenGateSequence: attentionSeenGateSequence,
+      lastFocusGainedAt: threadFocusGainedAt ?? undefined,
+      hasFocus: document.hasFocus(),
+      isHeld: activeThreadUnseenHeld,
+      visibilityState: document.visibilityState,
+      shouldMarkSeen: shouldMark,
+    });
+    if (!shouldMark) {
       return;
     }
     const observedAt = new Date().toISOString();
+    const api = readEnvironmentApi(serverThread.environmentId)?.threadAttention;
+    if (!api) {
+      return;
+    }
 
-    void readEnvironmentApi(serverThread.environmentId)
-      ?.threadAttention.markSeen({
-        threadId: serverThread.id,
-        observedAt,
-      })
+    void markThreadAttentionSeenWithRetry({
+      environmentId: serverThread.environmentId,
+      threadId: serverThread.id,
+      observedAt,
+      markSeen: (request) => api.markSeen(request),
+    })
       .then((event) => {
         useThreadAttentionStore.getState().applyStreamEvent(serverThread.environmentId, event);
       })
@@ -1400,12 +1457,14 @@ export default function ChatView(props: ChatViewProps) {
         console.warn("Failed to mark thread attention seen", error);
       });
   }, [
-    activeThreadAttentionReceivedSequence,
+    activeThreadAttention,
+    activeThreadKey,
     activeThreadUnseenHeld,
     attentionSeenGateSequence,
     attentionVisibilityVersion,
     serverThread?.environmentId,
     serverThread?.id,
+    threadFocusGainedAt,
   ]);
 
   const selectedProviderByThreadId = composerActiveProvider ?? null;
@@ -4087,6 +4146,7 @@ export default function ChatView(props: ChatViewProps) {
           launchContext={
             mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
           }
+          fallbackCwd={mountedThreadKey === activeThreadKey ? (serverConfig?.cwd ?? null) : null}
           focusRequestId={mountedThreadKey === activeThreadKey ? terminalFocusRequestId : 0}
           splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
           newShortcutLabel={newTerminalShortcutLabel ?? undefined}

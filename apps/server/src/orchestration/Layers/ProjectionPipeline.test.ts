@@ -2180,6 +2180,108 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       ]);
     }),
   );
+
+  it.effect("does not complete a turn from assistant message finalization alone", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread-assistant-final");
+      const turnId = TurnId.make("turn-assistant-final");
+      const messageId = MessageId.make("message-assistant-final");
+      const startedAt = "2026-05-20T09:00:00.000Z";
+      const runningAt = "2026-05-20T09:00:01.000Z";
+      const messageAt = "2026-05-20T09:00:02.000Z";
+
+      yield* eventStore.append({
+        type: "thread.turn-start-requested",
+        eventId: EventId.make("evt-assistant-final-1"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: startedAt,
+        commandId: CommandId.make("cmd-assistant-final-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-assistant-final-1"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdAt: startedAt,
+        },
+      });
+
+      yield* eventStore.append({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-assistant-final-2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: runningAt,
+        commandId: CommandId.make("cmd-assistant-final-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-assistant-final-2"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: runningAt,
+          },
+        },
+      });
+
+      yield* eventStore.append({
+        type: "thread.message-sent",
+        eventId: EventId.make("evt-assistant-final-3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: messageAt,
+        commandId: CommandId.make("cmd-assistant-final-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-assistant-final-3"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: MessageId.make("assistant-final"),
+          role: "assistant",
+          text: "",
+          turnId,
+          streaming: false,
+          createdAt: messageAt,
+          updatedAt: messageAt,
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      const turnRows = yield* sql<{
+        readonly state: string;
+        readonly completedAt: string | null;
+        readonly assistantMessageId: string | null;
+      }>`
+        SELECT
+          state,
+          completed_at AS "completedAt",
+          assistant_message_id AS "assistantMessageId"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(turnRows, [
+        {
+          state: "running",
+          completedAt: null,
+          assistantMessageId: "assistant-final",
+        },
+      ]);
+    }),
+  );
 });
 
 it.effect("restores pending turn-start metadata across projection pipeline restart", () =>

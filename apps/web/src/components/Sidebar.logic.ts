@@ -349,6 +349,15 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
+  if (thread.hasUnseenAttention) {
+    return {
+      label: "Completed",
+      colorClass: "text-emerald-600 dark:text-emerald-300/90",
+      dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
+      pulse: false,
+    };
+  }
+
   if (thread.session?.status === "connecting") {
     return {
       label: "Connecting",
@@ -368,15 +377,6 @@ export function resolveThreadStatusPill(input: {
       label: "Plan Ready",
       colorClass: "text-violet-600 dark:text-violet-300/90",
       dotClass: "bg-violet-500 dark:bg-violet-300/90",
-      pulse: false,
-    };
-  }
-
-  if (thread.hasUnseenAttention) {
-    return {
-      label: "Completed",
-      colorClass: "text-emerald-600 dark:text-emerald-300/90",
-      dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
       pulse: false,
     };
   }

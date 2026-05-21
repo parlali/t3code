@@ -119,10 +119,7 @@ function shouldRefreshForRelevantEvent(
     }
   >,
 ): boolean {
-  if (event.type !== "thread.message-sent") {
-    return true;
-  }
-  return event.payload.role === "assistant" && !event.payload.streaming;
+  return event.type !== "thread.message-sent";
 }
 
 const makeThreadAttention = Effect.gen(function* () {
@@ -182,8 +179,10 @@ const makeThreadAttention = Effect.gen(function* () {
     viewerId: AuthSessionId,
     latestTurn: LatestTerminalTurnRow,
     observedAt: string,
-  ) =>
-    sql`
+    options?: { readonly resetAcknowledgement?: boolean },
+  ) => {
+    const resetAcknowledgement = options?.resetAcknowledgement === true ? 1 : 0;
+    return sql`
       INSERT INTO thread_attention_states (
         thread_id,
         viewer_id,
@@ -212,22 +211,30 @@ const makeThreadAttention = Effect.gen(function* () {
         attention_kind = excluded.attention_kind,
         attention_at = excluded.attention_at,
         acknowledged_turn_id = CASE
-          WHEN thread_attention_states.latest_turn_id = excluded.latest_turn_id
+          WHEN ${resetAcknowledgement} = 0
+            AND thread_attention_states.latest_turn_id = excluded.latest_turn_id
+            AND thread_attention_states.attention_at = excluded.attention_at
           THEN thread_attention_states.acknowledged_turn_id
           ELSE NULL
         END,
         acknowledged_at = CASE
-          WHEN thread_attention_states.latest_turn_id = excluded.latest_turn_id
+          WHEN ${resetAcknowledgement} = 0
+            AND thread_attention_states.latest_turn_id = excluded.latest_turn_id
+            AND thread_attention_states.attention_at = excluded.attention_at
           THEN thread_attention_states.acknowledged_at
           ELSE NULL
         END,
         updated_at = CASE
-          WHEN thread_attention_states.latest_turn_id = excluded.latest_turn_id
+          WHEN ${resetAcknowledgement} = 0
+            AND thread_attention_states.latest_turn_id = excluded.latest_turn_id
+            AND thread_attention_states.attention_at = excluded.attention_at
           THEN thread_attention_states.updated_at
           ELSE excluded.updated_at
         END,
         revision = CASE
-          WHEN thread_attention_states.latest_turn_id = excluded.latest_turn_id
+          WHEN ${resetAcknowledgement} = 0
+            AND thread_attention_states.latest_turn_id = excluded.latest_turn_id
+            AND thread_attention_states.attention_at = excluded.attention_at
           THEN thread_attention_states.revision
           ELSE thread_attention_states.revision + 1
         END
@@ -236,6 +243,7 @@ const makeThreadAttention = Effect.gen(function* () {
         attentionError("ThreadAttention.upsertLatestTerminalAttention", cause),
       ),
     );
+  };
 
   const syncAllLatestTerminalAttention = (viewerId: AuthSessionId, observedAt: string) =>
     sql`
@@ -282,21 +290,25 @@ const makeThreadAttention = Effect.gen(function* () {
         attention_at = excluded.attention_at,
         acknowledged_turn_id = CASE
           WHEN thread_attention_states.latest_turn_id = excluded.latest_turn_id
+            AND thread_attention_states.attention_at = excluded.attention_at
           THEN thread_attention_states.acknowledged_turn_id
           ELSE NULL
         END,
         acknowledged_at = CASE
           WHEN thread_attention_states.latest_turn_id = excluded.latest_turn_id
+            AND thread_attention_states.attention_at = excluded.attention_at
           THEN thread_attention_states.acknowledged_at
           ELSE NULL
         END,
         updated_at = CASE
           WHEN thread_attention_states.latest_turn_id = excluded.latest_turn_id
+            AND thread_attention_states.attention_at = excluded.attention_at
           THEN thread_attention_states.updated_at
           ELSE excluded.updated_at
         END,
         revision = CASE
           WHEN thread_attention_states.latest_turn_id = excluded.latest_turn_id
+            AND thread_attention_states.attention_at = excluded.attention_at
           THEN thread_attention_states.revision
           ELSE thread_attention_states.revision + 1
         END
@@ -349,6 +361,7 @@ const makeThreadAttention = Effect.gen(function* () {
     viewerId: AuthSessionId,
     threadId: ThreadId,
     observedAt: string,
+    options?: { readonly resetAcknowledgement?: boolean },
   ): Effect.Effect<ThreadAttentionMutationEvent, ThreadAttentionError> =>
     sql
       .withTransaction(
@@ -358,7 +371,7 @@ const makeThreadAttention = Effect.gen(function* () {
             return yield* clearAttention(viewerId, threadId, observedAt);
           }
 
-          yield* upsertLatestTerminalAttention(viewerId, latestTurn, observedAt);
+          yield* upsertLatestTerminalAttention(viewerId, latestTurn, observedAt, options);
           const row = yield* readAttentionRow(viewerId, threadId);
           if (!row) {
             return yield* clearAttention(viewerId, threadId, observedAt);
@@ -494,9 +507,9 @@ const makeThreadAttention = Effect.gen(function* () {
       return Effect.succeed(Option.none());
     }
     const observedAt = event.occurredAt;
-    return refreshThreadAttention(viewerId, event.payload.threadId, observedAt).pipe(
-      Effect.map(Option.some),
-    );
+    return refreshThreadAttention(viewerId, event.payload.threadId, observedAt, {
+      resetAcknowledgement: event.type === "thread.turn-diff-completed",
+    }).pipe(Effect.map(Option.some));
   };
 
   return {

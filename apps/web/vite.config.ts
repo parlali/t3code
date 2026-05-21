@@ -9,6 +9,10 @@ const port = Number(process.env.PORT ?? 5733);
 const host = process.env.HOST?.trim() || "localhost";
 const configuredHttpUrl = process.env.VITE_HTTP_URL?.trim();
 const configuredWsUrl = process.env.VITE_WS_URL?.trim();
+const configuredAllowedHosts = (process.env.T3CODE_WEB_ALLOWED_HOSTS ?? "")
+  .split(",")
+  .map((host) => host.trim())
+  .filter((host) => host.length > 0);
 const configuredHostedAppUrl = (() => {
   if (process.env.VERCEL_ENV === "production" && process.env.VERCEL_PROJECT_PRODUCTION_URL) {
     return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
@@ -87,6 +91,7 @@ export default defineConfig({
     host,
     port,
     strictPort: true,
+    ...(configuredAllowedHosts.length > 0 ? { allowedHosts: configuredAllowedHosts } : {}),
     ...(devProxyTarget
       ? {
           proxy: {

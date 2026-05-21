@@ -141,7 +141,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   const [fileBuffers, setFileBuffers] = useState<Record<string, string>>({});
   const [diffBuffers, setDiffBuffers] = useState<Record<string, string>>({});
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(() => new Set());
-  const [diffLineWrap, setDiffLineWrap] = useState(false);
+  const [lineWrap, setLineWrap] = useState(false);
   const [diffLayout, setDiffLayout] = useState<"side-by-side" | "inline">("side-by-side");
   const workbenchRef = useRef<HTMLElement | null>(null);
   const editorRef = useRef<{ readonly tabId: string; readonly editor: WorkbenchEditor } | null>(
@@ -602,44 +602,43 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
         <SaveIcon className="size-3.5" />
       </Button>
     ) : null;
-  const diffControls =
+  const showLineWrapControl =
+    (activeTab?.kind === "file" && activePathMediaType === null) ||
+    (activeTab?.kind === "diff" && !activeDiffIsMedia);
+  const lineWrapControl = showLineWrapControl ? (
+    <Button
+      size="icon-sm"
+      variant={lineWrap ? "secondary" : "ghost"}
+      className="size-7 cursor-pointer"
+      aria-label={lineWrap ? "Disable line wrap" : "Enable line wrap"}
+      title={lineWrap ? "Disable line wrap" : "Enable line wrap"}
+      onClick={() => setLineWrap((value) => !value)}
+    >
+      <WrapTextIcon className="size-3.5" />
+    </Button>
+  ) : null;
+  const diffLayoutControl =
     activeTab?.kind === "diff" && !activeDiffIsMedia ? (
-      <>
-        <Button
-          size="icon-sm"
-          variant={diffLineWrap ? "secondary" : "ghost"}
-          className="size-7 cursor-pointer"
-          aria-label={diffLineWrap ? "Disable line wrap" : "Enable line wrap"}
-          title={diffLineWrap ? "Disable line wrap" : "Enable line wrap"}
-          onClick={() => setDiffLineWrap((value) => !value)}
-        >
-          <WrapTextIcon className="size-3.5" />
-        </Button>
-        <Button
-          size="icon-sm"
-          variant={diffLayout === "inline" ? "secondary" : "ghost"}
-          className="size-7 cursor-pointer"
-          aria-label={
-            diffLayout === "side-by-side"
-              ? "Use inline diff layout"
-              : "Use side-by-side diff layout"
-          }
-          title={
-            diffLayout === "side-by-side"
-              ? "Use inline diff layout"
-              : "Use side-by-side diff layout"
-          }
-          onClick={() =>
-            setDiffLayout((value) => (value === "side-by-side" ? "inline" : "side-by-side"))
-          }
-        >
-          {diffLayout === "side-by-side" ? (
-            <Rows3Icon className="size-3.5" />
-          ) : (
-            <Columns2Icon className="size-3.5" />
-          )}
-        </Button>
-      </>
+      <Button
+        size="icon-sm"
+        variant={diffLayout === "inline" ? "secondary" : "ghost"}
+        className="size-7 cursor-pointer"
+        aria-label={
+          diffLayout === "side-by-side" ? "Use inline diff layout" : "Use side-by-side diff layout"
+        }
+        title={
+          diffLayout === "side-by-side" ? "Use inline diff layout" : "Use side-by-side diff layout"
+        }
+        onClick={() =>
+          setDiffLayout((value) => (value === "side-by-side" ? "inline" : "side-by-side"))
+        }
+      >
+        {diffLayout === "side-by-side" ? (
+          <Rows3Icon className="size-3.5" />
+        ) : (
+          <Columns2Icon className="size-3.5" />
+        )}
+      </Button>
     ) : null;
 
   const mobileToolbar = (
@@ -668,7 +667,8 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
         )}
       </div>
 
-      {diffControls}
+      {lineWrapControl}
+      {diffLayoutControl}
       {saveButton}
     </div>
   );
@@ -686,7 +686,8 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       </div>
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
         <WorkbenchBreadcrumbs cwd={cwd} path={activeTab?.path ?? null} />
-        {diffControls}
+        {lineWrapControl}
+        {diffLayoutControl}
         {saveButton}
       </div>
     </>
@@ -701,7 +702,8 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
         {activeTabDirty && <span className="ml-1 text-xs text-muted-foreground">*</span>}
       </div>
 
-      {diffControls}
+      {lineWrapControl}
+      {diffLayoutControl}
       {saveButton}
     </div>
   );
@@ -758,7 +760,10 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
                 setDirtyTabs((current) => markDirty(current, activeTab.id));
               }}
               onMount={onEditorMount}
-              options={workbenchCodeEditorOptions(isMobileLayout)}
+              options={{
+                ...workbenchCodeEditorOptions(isMobileLayout),
+                wordWrap: lineWrap ? "on" : "off",
+              }}
             />
           ) : activeTab.kind === "diff" && activeDiffIsMedia && activePathMediaType !== null ? (
             <WorkbenchDiffUnavailable mediaType={activePathMediaType.mimeType} />
@@ -768,7 +773,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
               id={activeTab.id}
               isMobileLayout={isMobileLayout}
               language={languageFor(activeTab.path) ?? "plaintext"}
-              lineWrap={diffLineWrap}
+              lineWrap={lineWrap}
               original={diffQueryOriginal ?? ""}
               modified={diffBuffers[activeTab.id] ?? diffQueryModified ?? ""}
               onModifiedChange={handleDiffModifiedChange}

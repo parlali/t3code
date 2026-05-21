@@ -1834,7 +1834,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("re-expands the bootstrap project using its logical key", async () => {
+  it("does not re-expand the bootstrap project while already on a thread route", async () => {
     useUiStateStore.setState({
       projectExpandedById: {
         [PROJECT_LOGICAL_KEY]: false,
@@ -1851,12 +1851,37 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      await vi.waitFor(
-        () => {
-          expect(useUiStateStore.getState().projectExpandedById[PROJECT_LOGICAL_KEY]).toBe(true);
-        },
-        { timeout: 8_000, interval: 16 },
+      expect(mounted.router.state.location.pathname).toBe(serverThreadPath(THREAD_ID));
+      expect(useUiStateStore.getState().projectExpandedById[PROJECT_LOGICAL_KEY]).toBe(false);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("expands the bootstrap project when auto-navigating from the root route", async () => {
+    useUiStateStore.setState({
+      projectExpandedById: {
+        [PROJECT_LOGICAL_KEY]: false,
+      },
+      projectOrder: [PROJECT_LOGICAL_KEY],
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      initialPath: "/",
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-bootstrap-project-expand-from-root" as MessageId,
+        targetText: "bootstrap project expand from root",
+      }),
+    });
+
+    try {
+      await waitForURL(
+        mounted.router,
+        (path) => path === serverThreadPath(THREAD_ID),
+        "Root route should auto-navigate to the bootstrap thread.",
       );
+      expect(useUiStateStore.getState().projectExpandedById[PROJECT_LOGICAL_KEY]).toBe(true);
     } finally {
       await mounted.cleanup();
     }
@@ -1870,6 +1895,57 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await expect.element(page.getByText("No threads yet")).toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens a terminal at the server cwd when the active thread has no project", async () => {
+    useTerminalStateStore.setState({
+      terminalStateByThreadKey: {
+        [THREAD_KEY]: {
+          terminalOpen: true,
+          terminalHeight: 280,
+          terminalIds: ["default"],
+          runningTerminalIds: [],
+          activeTerminalId: "default",
+          terminalGroups: [{ id: "group-default", terminalIds: ["default"] }],
+          activeTerminalGroupId: "group-default",
+        },
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: {
+        ...createSnapshotForTargetUser({
+          targetMessageId: "msg-user-projectless-terminal" as MessageId,
+          targetText: "projectless terminal",
+        }),
+        projects: [],
+      },
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          cwd: "/repo/root",
+        };
+      },
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          const openRequest = wsRequests.find(
+            (request) => request._tag === WS_METHODS.terminalOpen,
+          );
+          expect(openRequest).toMatchObject({
+            _tag: WS_METHODS.terminalOpen,
+            threadId: THREAD_ID,
+            cwd: "/repo/root",
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
     }
