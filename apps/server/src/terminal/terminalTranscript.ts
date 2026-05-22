@@ -136,8 +136,7 @@ export function appendTerminalHistoryChunk(
   }
 
   const dataBytes = Buffer.byteLength(data);
-  const chunkTargetBytes =
-    options.chunkTargetBytes ?? DEFAULT_TERMINAL_HISTORY_CHUNK_TARGET_BYTES;
+  const chunkTargetBytes = options.chunkTargetBytes ?? DEFAULT_TERMINAL_HISTORY_CHUNK_TARGET_BYTES;
   const lastChunkIndex = buffer.chunks.length - 1;
   const tailChunk = buffer.chunks[lastChunkIndex];
   if (tailChunk !== undefined && buffer.tailChunkByteEstimate + dataBytes <= chunkTargetBytes) {

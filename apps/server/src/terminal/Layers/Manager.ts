@@ -898,9 +898,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         immediate: current.immediate || next.immediate,
         ...(next.history !== undefined ? { history: next.history } : {}),
         ...(next.historyBuffer !== undefined ? { historyBuffer: next.historyBuffer } : {}),
-        ...(next.historyLineLimit !== undefined
-          ? { historyLineLimit: next.historyLineLimit }
-          : {}),
+        ...(next.historyLineLimit !== undefined ? { historyLineLimit: next.historyLineLimit } : {}),
       }),
       process: Effect.fn("terminal.persistHistoryWorker")(function* (sessionKey, request) {
         if (!request.immediate) {
@@ -1946,7 +1944,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       }
       yield* Effect.try({
         try: () => process.write(input.data),
-        catch: (cause) => cause,
+        catch: (cause) => (cause instanceof Error ? cause.message : String(cause)),
       }).pipe(
         Effect.catch((cause) =>
           Effect.logWarning("failed to write to terminal pty", {

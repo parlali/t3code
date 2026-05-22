@@ -49,7 +49,7 @@ import {
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
-import { formatTimestamp } from "../../timestampFormat";
+import { formatMessageTimestamp } from "../../timestampFormat";
 
 import {
   buildInlineTerminalContextText,
@@ -372,7 +372,10 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                     )}
                   </div>
                   <p className="text-right text-xs text-muted-foreground/50">
-                    {formatTimestamp(row.message.createdAt, ctx.timestampFormat)}
+                    <MessageTimestamp
+                      createdAt={row.message.createdAt}
+                      timestampFormat={ctx.timestampFormat}
+                    />
                   </p>
                 </div>
               </div>
@@ -417,11 +420,11 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                         timestampFormat={ctx.timestampFormat}
                       />
                     ) : (
-                      formatMessageMeta(
-                        row.message.createdAt,
-                        formatElapsed(row.durationStart, row.message.completedAt),
-                        ctx.timestampFormat,
-                      )
+                      <MessageTimestamp
+                        createdAt={row.message.createdAt}
+                        timestampFormat={ctx.timestampFormat}
+                        duration={formatElapsed(row.durationStart, row.message.completedAt)}
+                      />
                     )}
                   </p>
                   {assistantCopyState.visible ? (
@@ -509,7 +512,23 @@ function LiveMessageMeta({
   const elapsed = durationStart
     ? formatElapsed(durationStart, new Date(nowMs).toISOString())
     : null;
-  return <>{formatMessageMeta(createdAt, elapsed, timestampFormat)}</>;
+  return (
+    <MessageTimestamp createdAt={createdAt} timestampFormat={timestampFormat} duration={elapsed} />
+  );
+}
+
+function MessageTimestamp({
+  createdAt,
+  timestampFormat,
+  duration,
+}: {
+  createdAt: string;
+  timestampFormat: TimestampFormat;
+  duration?: string | null;
+}) {
+  const timestamp = formatMessageTimestamp(createdAt, timestampFormat);
+  const label = duration ? `${timestamp} • ${duration}` : timestamp;
+  return <span title={createdAt}>{label}</span>;
 }
 
 // ---------------------------------------------------------------------------
@@ -720,15 +739,6 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
   }
 
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-}
-
-function formatMessageMeta(
-  createdAt: string,
-  duration: string | null,
-  timestampFormat: TimestampFormat,
-): string {
-  if (!duration) return formatTimestamp(createdAt, timestampFormat);
-  return `${formatTimestamp(createdAt, timestampFormat)} • ${duration}`;
 }
 
 function workToneIcon(tone: TimelineWorkEntry["tone"]): {

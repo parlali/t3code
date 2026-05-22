@@ -53,6 +53,7 @@ export const makeWorkspaceWatcher = Effect.gen(function* () {
   const workspaceEntries = yield* WorkspaceEntries;
   const workspacePaths = yield* WorkspacePaths;
   const activeWatchersRef = yield* SynchronizedRef.make(new Map<string, ActiveWorkspaceWatcher>());
+  const runFork = Effect.runForkWith(yield* Effect.context<never>());
 
   const createActiveWatcher = Effect.fn("WorkspaceWatcher.createActiveWatcher")(function* (
     cwd: string,
@@ -71,7 +72,7 @@ export const makeWorkspaceWatcher = Effect.gen(function* () {
             if (closed) return;
 
             const event: ProjectEntriesStreamEvent = { type: "entries-changed", cwd };
-            void Effect.runPromise(
+            runFork(
               workspaceEntries
                 .invalidate(cwd)
                 .pipe(Effect.andThen(PubSub.publish(pubsub, event)), Effect.asVoid),
@@ -135,7 +136,7 @@ export const makeWorkspaceWatcher = Effect.gen(function* () {
               return;
             }
 
-            void Effect.runPromise(
+            runFork(
               Effect.logWarning("Workspace file watcher reported an error", {
                 cwd,
                 cause,

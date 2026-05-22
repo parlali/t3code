@@ -4,11 +4,11 @@ This fork may manually port upstream work without creating merge ancestry. GitHu
 
 ## Current Baseline
 
-- Last reviewed upstream: `d1e85c4e` (`upstream/main`, tag `v0.0.25-nightly.20260515.295`)
-- Review date: 2026-05-16
-- Local branch at review: `main` at `f9b03383` with clean worktree
+- Last reviewed upstream: `4f0f24f0` (`upstream/main`, no release tag)
+- Review date: 2026-05-22
+- Local branch at review: `main` at `d27cc22e` with pre-existing uncommitted timestamp/timeline edits and manual sync edits pending
 - Merge strategy: manual integration, no synthetic merge marker
-- Next comparison should start at: `d1e85c4e..upstream/main`
+- Next comparison should start at: `4f0f24f0..upstream/main`
 
 ## Manual Alignment Policy
 
@@ -25,7 +25,7 @@ This fork has enough feature drift that a normal upstream merge is usually not v
 
 1. Run `git fetch upstream --prune`.
 2. Read this file before comparing code.
-3. List new upstream work with `git log --oneline d1e85c4e..upstream/main`.
+3. List new upstream work with `git log --oneline 4f0f24f0..upstream/main`.
 4. Inspect all new commits enough to classify them, then use targeted `git show` and `git diff` commands for likely ports.
 5. After porting or intentionally skipping new upstream work, rewrite this file with the new last reviewed upstream SHA and a fresh summary.
 
@@ -38,6 +38,8 @@ The upstream range `447236d5..7e20b23e` was reviewed on 2026-05-13. Useful sourc
 The upstream range `7e20b23e..ea20e800` was reviewed on 2026-05-14. Relevant technical work from that range was manually ported and adapted to this fork's current architecture.
 
 The upstream range `ea20e800..d1e85c4e` was reviewed on 2026-05-16. It contained only release version bookkeeping; package versions were mirrored to `0.0.24` so this fork exposes the latest reviewed upstream release line.
+
+The upstream range `d1e85c4e..4f0f24f0` was reviewed on 2026-05-22. It contained one composer state bug fix for multi-instance provider option persistence; the relevant work was manually ported.
 
 Manually ported or aligned:
 
@@ -69,10 +71,11 @@ Manually ported or aligned:
 - Diagnostics prerequisite and resource-history work from upstream commits `a2ff50db` and `9e632f5c`: added process diagnostics, trace diagnostics, in-memory process resource sampling, diagnostics RPC/contracts, a Diagnostics settings route, and adapted tests. `a2ff50db` was not listed in the previous pending range, but `9e632f5c` depended on it and this pass corrected that prerequisite gap.
 - Desktop runtime dependency staging fix from upstream commit `ea20e800`: bundled workspace packages and Electron are omitted from staged desktop runtime dependencies.
 - Release version tracking from upstream commit `d1e85c4e`: mirrored `apps/desktop`, `apps/server`, `apps/web`, and `packages/contracts` package versions to `0.0.24` as upstream tracking metadata.
+- Composer provider option persistence from upstream commit `4f0f24f0`: composer traits state now reads and writes options by `ProviderInstanceId`, passes the selected instance into traits controls, and regression coverage asserts custom provider instances preserve reasoning selections.
 
 Pending alignment work:
 
-- No technical alignment work is pending through upstream `d1e85c4e`.
+- No technical alignment work is pending through upstream `4f0f24f0`.
 
 Intentionally skipped or not relevant:
 
@@ -90,6 +93,16 @@ Intentionally skipped or not relevant:
 - GitHub may report the branch as behind upstream even when the useful upstream work in the reviewed range has been manually handled.
 
 ## Verification History
+
+Latest upstream review completed on 2026-05-22 after upstream fetch:
+
+- Inspected `git log --oneline d1e85c4e..upstream/main`.
+- New upstream commit reviewed: `4f0f24f0`.
+- Inspected `git show --stat --patch 4f0f24f0`.
+- Manually ported `4f0f24f0` so composer provider traits use provider instance IDs instead of provider driver kinds for option lookup and persistence.
+- Focused verification: `bun run test src/composerDraftStore.test.ts` in `apps/web`.
+- `bun typecheck` initially surfaced unrelated server Effect diagnostics; cleaned the narrow diagnostics and verified with `bun run test src/provider/Layers/CursorAdapter.test.ts src/provider/Layers/OpenCodeAdapter.test.ts src/sourceControl/SourceControlRepositoryService.test.ts src/terminal/Layers/Manager.test.ts src/workspace/Layers/WorkspaceWatcher.test.ts` in `apps/server`.
+- Full repo gate: `bun fmt`, `bun lint`, and `bun typecheck`.
 
 Latest upstream review completed on 2026-05-16 after upstream fetch:
 

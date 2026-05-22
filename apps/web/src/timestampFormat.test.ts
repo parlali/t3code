@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   formatElapsedDurationLabel,
   formatExpiresInLabel,
+  formatMessageTimestamp,
   formatRelativeTimeUntilLabel,
   getTimestampFormatOptions,
+  isSameLocalCalendarDay,
 } from "./timestampFormat";
 
 describe("getTimestampFormatOptions", () => {
@@ -31,6 +33,45 @@ describe("getTimestampFormatOptions", () => {
       minute: "2-digit",
       hour12: false,
     });
+  });
+});
+
+describe("isSameLocalCalendarDay", () => {
+  it("returns true for the same local calendar day", () => {
+    const now = new Date();
+    const sameDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
+    expect(isSameLocalCalendarDay(sameDay.toISOString(), now.getTime())).toBe(true);
+  });
+
+  it("returns false for a different local calendar day", () => {
+    const now = new Date();
+    const previousDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12, 0, 0);
+    expect(isSameLocalCalendarDay(previousDay.toISOString(), now.getTime())).toBe(false);
+  });
+});
+
+describe("formatMessageTimestamp", () => {
+  it("shows time only for messages from today", () => {
+    const now = new Date();
+    const sameDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8, 30, 0);
+    const formatted = formatMessageTimestamp(sameDay.toISOString(), "24-hour", now.getTime());
+    expect(formatted).toMatch(/\d{1,2}:\d{2}:\d{2}/);
+    expect(formatted).not.toContain(String(now.getFullYear()));
+  });
+
+  it("includes the date for messages from another day in the same year", () => {
+    const now = new Date();
+    const previousDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 8, 30, 0);
+    const formatted = formatMessageTimestamp(previousDay.toISOString(), "24-hour", now.getTime());
+    expect(formatted).toContain(String(previousDay.getDate()));
+    expect(formatted).toMatch(/,/);
+  });
+
+  it("includes the year for messages from another year", () => {
+    const now = new Date();
+    const previousYear = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate(), 8, 30, 0);
+    const formatted = formatMessageTimestamp(previousYear.toISOString(), "24-hour", now.getTime());
+    expect(formatted).toContain(String(previousYear.getFullYear()));
   });
 });
 

@@ -44,6 +44,37 @@ export function formatTimestamp(isoDate: string, timestampFormat: TimestampForma
   return getTimestampFormatter(timestampFormat, true).format(new Date(isoDate));
 }
 
+export function isSameLocalCalendarDay(isoDate: string, referenceMs = Date.now()): boolean {
+  const date = new Date(isoDate);
+  const reference = new Date(referenceMs);
+  return (
+    date.getFullYear() === reference.getFullYear() &&
+    date.getMonth() === reference.getMonth() &&
+    date.getDate() === reference.getDate()
+  );
+}
+
+export function formatMessageTimestamp(
+  isoDate: string,
+  timestampFormat: TimestampFormat,
+  nowMs = Date.now(),
+): string {
+  if (isSameLocalCalendarDay(isoDate, nowMs)) {
+    return formatTimestamp(isoDate, timestampFormat);
+  }
+
+  const date = new Date(isoDate);
+  const reference = new Date(nowMs);
+  const includeYear = date.getFullYear() !== reference.getFullYear();
+  const dateLabel = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(includeYear ? { year: "numeric" } : {}),
+  }).format(date);
+
+  return `${dateLabel}, ${formatTimestamp(isoDate, timestampFormat)}`;
+}
+
 export function formatShortTimestamp(isoDate: string, timestampFormat: TimestampFormat): string {
   return getTimestampFormatter(timestampFormat, false).format(new Date(isoDate));
 }

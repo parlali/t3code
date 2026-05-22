@@ -424,8 +424,8 @@ export function TerminalViewport({
     let nextPerfInputId = 0;
     const isInputPerfTraceEnabled =
       typeof window !== "undefined" &&
-      (window as unknown as { __T3_TERMINAL_PERF_TRACE__?: boolean })
-        .__T3_TERMINAL_PERF_TRACE__ === true;
+      (window as unknown as { __T3_TERMINAL_PERF_TRACE__?: boolean }).__T3_TERMINAL_PERF_TRACE__ ===
+        true;
 
     const flushTerminalInput = () => {
       inputFlushQueued = false;
