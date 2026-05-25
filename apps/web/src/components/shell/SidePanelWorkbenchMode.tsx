@@ -17,11 +17,12 @@ import {
 } from "lucide-react";
 
 import { ensureEnvironmentApi } from "../../environmentApi";
-import { gitCommitGraphQueryOptions, gitQueryKeys } from "../../lib/gitReactQuery";
-import { refreshGitStatus, useGitStatus } from "../../lib/gitStatusState";
-import { projectListEntriesQueryOptions, projectQueryKeys } from "../../lib/projectReactQuery";
+import { gitCommitGraphQueryOptions } from "../../lib/gitReactQuery";
+import { useGitStatus } from "../../lib/gitStatusState";
+import { projectListEntriesQueryOptions } from "../../lib/projectReactQuery";
 import { buildTurnDiffTree } from "../../lib/turnDiffTree";
 import { cn, randomUUID } from "../../lib/utils";
+import { refreshWorkspaceTarget, useProjectEntriesSubscription } from "../../lib/workspaceRefresh";
 import { readLocalApi } from "../../localApi";
 import { requestWorkbenchOpen, useWorkbenchSelection } from "../../workbenchEvents";
 import { getLocalStorageItem, setLocalStorageItem } from "../../hooks/useLocalStorage";
@@ -151,13 +152,15 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
     rafId: number | null;
   } | null>(null);
 
-  const refreshWorkspace = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: projectQueryKeys.all }),
-      queryClient.invalidateQueries({ queryKey: gitQueryKeys.all }),
-      refreshGitStatus({ environmentId, cwd }, { force: true }),
-    ]);
-  }, [cwd, environmentId, queryClient]);
+  const refreshWorkspace = useCallback(
+    () =>
+      refreshWorkspaceTarget({
+        environmentId,
+        cwd,
+        queryClient,
+      }),
+    [cwd, environmentId, queryClient],
+  );
 
   const beginGraphResize = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
@@ -242,18 +245,23 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
     };
   }, []);
 
-  useEffect(() => {
-    if (!cwd || !environmentId) return;
-    const api = ensureEnvironmentApi(environmentId);
-    const handleEntriesChanged = (event: ProjectEntriesStreamEvent) => {
+  const handleEntriesChanged = useCallback(
+    (event: ProjectEntriesStreamEvent) => {
       if (event.type === "entries-changed") {
         void refreshWorkspace();
       }
-    };
-    return api.projects.subscribeEntries({ cwd }, handleEntriesChanged, {
-      onResubscribe: () => void refreshWorkspace(),
-    });
-  }, [cwd, environmentId, refreshWorkspace]);
+    },
+    [refreshWorkspace],
+  );
+  const handleEntriesResubscribe = useCallback(
+    () => void refreshWorkspace(),
+    [refreshWorkspace],
+  );
+  useProjectEntriesSubscription(
+    { environmentId, cwd },
+    handleEntriesChanged,
+    handleEntriesResubscribe,
+  );
 
   const expandCreateParent = useCallback((entryParentPath: string | null) => {
     if (!entryParentPath) return;

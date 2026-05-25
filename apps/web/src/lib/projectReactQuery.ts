@@ -3,19 +3,25 @@ import type {
   ProjectListEntriesResult,
   ProjectSearchEntriesResult,
 } from "@t3tools/contracts";
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import { ensureEnvironmentApi } from "~/environmentApi";
 
 export const projectQueryKeys = {
   all: ["projects"] as const,
+  searchEntriesScope: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["projects", "search-entries", environmentId ?? null, cwd] as const,
   searchEntries: (
     environmentId: EnvironmentId | null,
     cwd: string | null,
     query: string,
     limit: number,
   ) => ["projects", "search-entries", environmentId ?? null, cwd, query, limit] as const,
+  listEntriesScope: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["projects", "list-entries", environmentId ?? null, cwd] as const,
   listEntries: (environmentId: EnvironmentId | null, cwd: string | null, limit: number) =>
     ["projects", "list-entries", environmentId ?? null, cwd, limit] as const,
+  readFileScope: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["projects", "read-file", environmentId ?? null, cwd] as const,
   readFile: (
     environmentId: EnvironmentId | null,
     cwd: string | null,
@@ -33,6 +39,30 @@ const EMPTY_LIST_ENTRIES_RESULT: ProjectListEntriesResult = {
   entries: [],
   truncated: false,
 };
+
+export function invalidateProjectQueries(
+  queryClient: QueryClient,
+  input?: { readonly environmentId?: EnvironmentId | null; readonly cwd?: string | null },
+) {
+  const environmentId = input?.environmentId ?? null;
+  const cwd = input?.cwd ?? null;
+  if (cwd !== null) {
+    return Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: projectQueryKeys.searchEntriesScope(environmentId, cwd),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: projectQueryKeys.listEntriesScope(environmentId, cwd),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: projectQueryKeys.readFileScope(environmentId, cwd),
+      }),
+    ]).then(() => undefined);
+  }
+
+  return queryClient.invalidateQueries({ queryKey: projectQueryKeys.all });
+}
+
 export function projectListEntriesQueryOptions(input: {
   environmentId: EnvironmentId | null;
   cwd: string | null;

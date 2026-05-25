@@ -138,12 +138,13 @@ export function languageFor(path: string): string | undefined {
     case "cts":
       return "typescript";
     case "tsx":
-      return "typescript";
+      return "typescriptreact";
     case "js":
     case "mjs":
     case "cjs":
-    case "jsx":
       return "javascript";
+    case "jsx":
+      return "javascriptreact";
     case "json":
       return "json";
     case "css":

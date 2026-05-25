@@ -150,7 +150,7 @@ export function refreshGitStatus(
   }
 
   const currentInFlight = gitStatusRefreshInFlight.get(targetKey);
-  if (currentInFlight && !force) {
+  if (currentInFlight) {
     return currentInFlight;
   }
 

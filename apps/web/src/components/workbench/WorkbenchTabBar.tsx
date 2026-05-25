@@ -52,7 +52,7 @@ export const WorkbenchTabBar = memo(function WorkbenchTabBar({
         >
           <button
             type="button"
-            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
             onClick={() => onSelectTab(tab.id)}
           >
             {tab.kind === "diff" ? (
@@ -67,7 +67,7 @@ export const WorkbenchTabBar = memo(function WorkbenchTabBar({
           </button>
           <button
             type="button"
-            className="rounded-sm p-0.5 hover:bg-accent"
+            className="cursor-pointer rounded-sm p-0.5 hover:bg-accent"
             aria-label={`Close ${basename(tab.path)}`}
             onClick={() => onCloseTab(tab.id)}
           >

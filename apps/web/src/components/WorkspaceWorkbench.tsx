@@ -16,12 +16,13 @@ import { ensureEnvironmentApi } from "../environmentApi";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useTheme } from "../hooks/useTheme";
 import { gitFileDiffQueryOptions, gitQueryKeys } from "../lib/gitReactQuery";
-import { refreshGitStatus, useGitStatus } from "../lib/gitStatusState";
+import { useGitStatus } from "../lib/gitStatusState";
 import {
   projectListEntriesQueryOptions,
   projectQueryKeys,
   projectReadFileQueryOptions,
 } from "../lib/projectReactQuery";
+import { refreshWorkspaceTarget, useProjectEntriesSubscription } from "../lib/workspaceRefresh";
 import { useStore } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
 import {
@@ -406,26 +407,33 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     };
   }, [cwd, openTab, props.environmentId, props.threadId, publishActiveSelection]);
 
-  const refreshWorkspace = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: projectQueryKeys.all }),
-      queryClient.invalidateQueries({ queryKey: gitQueryKeys.all }),
-      refreshGitStatus({ environmentId: props.environmentId, cwd }, { force: true }),
-    ]);
-  }, [cwd, props.environmentId, queryClient]);
+  const refreshWorkspace = useCallback(
+    () =>
+      refreshWorkspaceTarget({
+        environmentId: props.environmentId,
+        cwd,
+        queryClient,
+      }),
+    [cwd, props.environmentId, queryClient],
+  );
 
-  useEffect(() => {
-    if (!cwd) return;
-    const api = ensureEnvironmentApi(props.environmentId);
-    const handleEntriesChanged = (event: ProjectEntriesStreamEvent) => {
+  const handleEntriesChanged = useCallback(
+    (event: ProjectEntriesStreamEvent) => {
       if (event.type === "entries-changed") {
         void refreshWorkspace();
       }
-    };
-    return api.projects.subscribeEntries({ cwd }, handleEntriesChanged, {
-      onResubscribe: () => void refreshWorkspace(),
-    });
-  }, [cwd, props.environmentId, refreshWorkspace]);
+    },
+    [refreshWorkspace],
+  );
+  const handleEntriesResubscribe = useCallback(
+    () => void refreshWorkspace(),
+    [refreshWorkspace],
+  );
+  useProjectEntriesSubscription(
+    { environmentId: props.environmentId, cwd },
+    handleEntriesChanged,
+    handleEntriesResubscribe,
+  );
 
   const saveActive = useCallback(async () => {
     if (!activeTab || !cwd) return;
