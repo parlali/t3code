@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - CLI integration exercises Node HTTP and filesystem boundaries.
 import * as NodeHttp from "node:http";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -71,9 +72,9 @@ const makeCliTestServerConfig = (baseDir: string) =>
       staticDir: undefined,
       devUrl: undefined,
       noBrowser: true,
-      unsafeNoAuth: false,
       startupPresentation: "browser",
       desktopBootstrapToken: undefined,
+      unsafeNoAuth: false,
       autoBootstrapProjectFromCwd: false,
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
@@ -149,7 +150,7 @@ const withLiveProjectCliServer = <A, E, R>(baseDir: string, run: () => Effect.Ef
     );
   });
 
-it.layer(NodeServices.layer)("cli log-level parsing", (it) => {
+it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("accepts the built-in lowercase log-level flag values", () =>
     runCliWithRuntime(["--log-level", "debug", "--version"]),
   );

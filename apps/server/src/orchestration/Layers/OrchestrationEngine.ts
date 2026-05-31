@@ -5,20 +5,21 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { OrchestrationCommand } from "@t3tools/contracts";
-import {
-  Cause,
-  Deferred,
-  Duration,
-  Effect,
-  Exit,
-  Layer,
-  Metric,
-  Option,
-  PubSub,
-  Queue,
-  Schema,
-  Stream,
-} from "effect";
+import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
+import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Metric from "effect/Metric";
+import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
+import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
@@ -138,6 +139,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository;
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const crypto = yield* Crypto.Crypto;
 
   let commandReadModel = createEmptyReadModel(new Date().toISOString());
 
@@ -242,7 +244,18 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
           readModel: commandReadModel,
-        });
+        }).pipe(
+          Effect.provideService(Crypto.Crypto, crypto),
+          Effect.mapError((cause) =>
+            Schema.is(OrchestrationCommandInvariantError)(cause)
+              ? cause
+              : new OrchestrationCommandInvariantError({
+                  commandType: envelope.command.type,
+                  detail: "Failed to generate an event identifier.",
+                  cause,
+                }),
+          ),
+        );
         const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase];
         const committedCommand = yield* sql
           .withTransaction(

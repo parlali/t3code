@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics globalDate:off
 import * as FS from "node:fs";
 import * as Path from "node:path";
 import type { DesktopServerExposureMode, DesktopUpdateChannel } from "@t3tools/contracts";

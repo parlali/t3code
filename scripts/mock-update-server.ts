@@ -1,3 +1,4 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off - NodeHttpServer.layer takes `NodeHttp.createServer` as arg
 import * as NodeHttp from "node:http";
 
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
@@ -18,7 +19,7 @@ const resolveMockUpdateServerConfig = Effect.gen(function* () {
     root: Config.string("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_ROOT").pipe(
       Config.withDefault("../release-mock"),
     ),
-  }).asEffect();
+  });
 
   const resolvedRoot = path.resolve(import.meta.dirname, config.root);
 

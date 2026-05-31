@@ -17,6 +17,8 @@ import * as AcpSchema from "./_generated/schema.gen.ts";
 import { CLIENT_METHODS } from "./_generated/meta.gen.ts";
 import * as AcpError from "./errors.ts";
 
+const encodeJsonString = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString);
+
 export interface AcpProtocolLogEvent {
   readonly direction: "incoming" | "outgoing";
   readonly stage: "raw" | "decoded" | "decode_failed";
@@ -27,12 +29,12 @@ export type AcpIncomingNotification =
   | {
       readonly _tag: "SessionUpdate";
       readonly method: typeof CLIENT_METHODS.session_update;
-      readonly params: typeof AcpSchema.SessionNotification.Type;
+      readonly params: AcpSchema.SessionNotification;
     }
   | {
       readonly _tag: "ElicitationComplete";
       readonly method: typeof CLIENT_METHODS.session_elicitation_complete;
-      readonly params: typeof AcpSchema.ElicitationCompleteNotification.Type;
+      readonly params: AcpSchema.ElicitationCompleteNotification;
     }
   | {
       readonly _tag: "ExtNotification";
@@ -144,14 +146,16 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
       payload: message,
     });
 
-    const encoded = yield* Effect.try({
-      try: () => `${JSON.stringify(message)}\n`,
-      catch: (cause) =>
-        new AcpError.AcpProtocolParseError({
-          detail: "Failed to encode ACP message",
-          cause,
-        }),
-    });
+    const encoded = yield* encodeJsonString(message).pipe(
+      Effect.map((json) => `${json}\n`),
+      Effect.mapError(
+        (cause) =>
+          new AcpError.AcpProtocolParseError({
+            detail: "Failed to encode ACP message",
+            cause,
+          }),
+      ),
+    );
 
     yield* logProtocol({
       direction: "outgoing",

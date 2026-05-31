@@ -607,11 +607,13 @@ export const discoverCursorModelCapabilitiesViaAcp = (
           );
         }
 
-        const targetModelSlugs = new Set(
-          modelChoices
-            .map((modelChoice) => modelChoice.value.trim())
-            .filter((modelSlug) => modelSlug.length > 0 && !capabilitiesBySlug.has(modelSlug)),
-        );
+        const targetModelSlugs = new Set<string>();
+        for (const modelChoice of modelChoices) {
+          const modelSlug = modelChoice.value.trim();
+          if (modelSlug.length > 0 && !capabilitiesBySlug.has(modelSlug)) {
+            targetModelSlugs.add(modelSlug);
+          }
+        }
         if (targetModelSlugs.size === 0) {
           return buildCursorDiscoveredModels(
             modelChoices.map((modelChoice) => ({
@@ -732,9 +734,13 @@ export interface CursorAboutResult {
 }
 
 function joinProviderMessages(...messages: ReadonlyArray<string | undefined>): string | undefined {
-  const parts = messages
-    .map((message) => message?.trim())
-    .filter((message): message is string => Boolean(message));
+  const parts: Array<string> = [];
+  for (const message of messages) {
+    const trimmed = message?.trim();
+    if (trimmed) {
+      parts.push(trimmed);
+    }
+  }
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
@@ -866,11 +872,13 @@ export function parseCursorCliConfigChannel(raw: string): string | undefined {
 }
 
 function toTitleCaseWords(value: string): string {
-  return value
-    .split(/[\s_-]+/g)
-    .filter((part) => part.length > 0)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
+  const parts: Array<string> = [];
+  for (const part of value.split(/[\s_-]+/g)) {
+    if (part.length > 0) {
+      parts.push(part.charAt(0).toUpperCase() + part.slice(1).toLowerCase());
+    }
+  }
+  return parts.join(" ");
 }
 
 function cursorSubscriptionLabel(subscriptionType: string | undefined): string | undefined {

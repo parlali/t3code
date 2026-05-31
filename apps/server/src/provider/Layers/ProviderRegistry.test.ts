@@ -1212,6 +1212,88 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           ),
       );
 
+      it.effect("includes Claude Opus 4.8 with ultracode support on supported versions", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities(),
+          );
+          const opus48 = status.models.find((model) => model.slug === "claude-opus-4-8");
+          if (!opus48) {
+            assert.fail("Expected Claude Opus 4.8 to be present for Claude Code v2.1.154.");
+          }
+          if (!opus48.capabilities) {
+            assert.fail(
+              "Expected Claude Opus 4.8 capabilities to be present for Claude Code v2.1.154.",
+            );
+          }
+          const effortDescriptor = opus48.capabilities.optionDescriptors?.find(
+            (descriptor) => descriptor.type === "select" && descriptor.id === "effort",
+          );
+          assert.deepStrictEqual(
+            effortDescriptor?.type === "select"
+              ? effortDescriptor.options.find((option) => option.isDefault)
+              : undefined,
+            { id: "high", label: "High", isDefault: true },
+          );
+          assert.strictEqual(
+            effortDescriptor?.type === "select"
+              ? effortDescriptor.options.some((option) => option.id === "ultracode")
+              : false,
+            true,
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.154\n", stderr: "", code: 0 };
+              if (joined === "auth status")
+                return {
+                  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                  stderr: "",
+                  code: 0,
+                };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("hides Claude Opus 4.8 before the required Claude Code version", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities(),
+          );
+          assert.strictEqual(
+            status.models.some((model) => model.slug === "claude-opus-4-8"),
+            false,
+          );
+          assert.strictEqual(
+            status.models.some((model) => model.slug === "claude-opus-4-7"),
+            true,
+          );
+          assert.strictEqual(
+            status.message,
+            "Claude Code v2.1.111 is too old for Claude Opus 4.8. Upgrade to v2.1.154 or newer to access it.",
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.111\n", stderr: "", code: 0 };
+              if (joined === "auth status")
+                return {
+                  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                  stderr: "",
+                  code: 0,
+                };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
       it.effect("hides Claude Opus 4.7 on older Claude Code versions", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(

@@ -7,20 +7,20 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
-import {
-  Data,
-  Deferred,
-  Effect,
-  Exit,
-  Layer,
-  Option,
-  Path,
-  Queue,
-  Ref,
-  Scope,
-  Context,
-  Console,
-} from "effect";
+import * as Data from "effect/Data";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
+import * as Scope from "effect/Scope";
+import * as Context from "effect/Context";
+import * as Console from "effect/Console";
+import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 
 import { ServerConfig } from "./config.ts";
 import { Keybindings } from "./keybindings.ts";
@@ -171,6 +171,8 @@ export const resolveWelcomeBase = Effect.gen(function* () {
 });
 
 export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
+  const randomUUID = crypto.randomUUIDv4;
   const serverConfig = yield* ServerConfig;
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -188,13 +190,13 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
       let nextProjectDefaultModelSelection: ModelSelection;
 
       if (Option.isNone(existingProject)) {
-        const createdAt = new Date().toISOString();
-        nextProjectId = ProjectId.make(crypto.randomUUID());
+        const createdAt = DateTime.formatIso(yield* DateTime.now);
+        nextProjectId = ProjectId.make(yield* randomUUID);
         const bootstrapProjectTitle = path.basename(serverConfig.cwd) || "project";
         nextProjectDefaultModelSelection = getAutoBootstrapDefaultModelSelection();
         yield* orchestrationEngine.dispatch({
           type: "project.create",
-          commandId: CommandId.make(crypto.randomUUID()),
+          commandId: CommandId.make(yield* randomUUID),
           projectId: nextProjectId,
           title: bootstrapProjectTitle,
           workspaceRoot: serverConfig.cwd,
@@ -210,11 +212,11 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
       const existingThreadId =
         yield* projectionReadModelQuery.getFirstActiveThreadIdByProjectId(nextProjectId);
       if (Option.isNone(existingThreadId)) {
-        const createdAt = new Date().toISOString();
-        const createdThreadId = ThreadId.make(crypto.randomUUID());
+        const createdAt = DateTime.formatIso(yield* DateTime.now);
+        const createdThreadId = ThreadId.make(yield* randomUUID);
         yield* orchestrationEngine.dispatch({
           type: "thread.create",
-          commandId: CommandId.make(crypto.randomUUID()),
+          commandId: CommandId.make(yield* randomUUID),
           threadId: createdThreadId,
           projectId: nextProjectId,
           title: "New thread",

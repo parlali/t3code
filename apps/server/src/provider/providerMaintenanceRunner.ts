@@ -45,7 +45,7 @@ export interface ProviderMaintenanceRunnerShape {
 export class ProviderMaintenanceRunner extends Context.Service<
   ProviderMaintenanceRunner,
   ProviderMaintenanceRunnerShape
->()("t3/provider/ProviderMaintenanceRunner") {}
+>()("t3/provider/providerMaintenanceRunner") {}
 
 interface VerifiedProviderRefresh {
   readonly providers: ReadonlyArray<ServerProvider>;
@@ -195,13 +195,15 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
     instanceId: ProviderInstanceId,
   ): Effect.Effect<VerifiedProviderRefresh> =>
     providerRegistry.getProviders.pipe(
-      Effect.map((providers) =>
-        providers
-          .filter(
-            (candidate) => candidate.driver === provider && candidate.instanceId === instanceId,
-          )
-          .map((candidate) => candidate.instanceId),
-      ),
+      Effect.map((providers) => {
+        const instanceIds: Array<ProviderInstanceId> = [];
+        for (const candidate of providers) {
+          if (candidate.driver === provider && candidate.instanceId === instanceId) {
+            instanceIds.push(candidate.instanceId);
+          }
+        }
+        return instanceIds;
+      }),
       Effect.flatMap((instanceIds) =>
         instanceIds.length === 0
           ? providerRegistry.refreshInstance(instanceId)

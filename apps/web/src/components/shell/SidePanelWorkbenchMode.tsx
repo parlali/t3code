@@ -253,10 +253,7 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
     },
     [refreshWorkspace],
   );
-  const handleEntriesResubscribe = useCallback(
-    () => void refreshWorkspace(),
-    [refreshWorkspace],
-  );
+  const handleEntriesResubscribe = useCallback(() => void refreshWorkspace(), [refreshWorkspace]);
   useProjectEntriesSubscription(
     { environmentId, cwd },
     handleEntriesChanged,

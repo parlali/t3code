@@ -238,7 +238,7 @@ export interface ExternalLauncherShape {
 }
 
 export class ExternalLauncher extends Context.Service<ExternalLauncher, ExternalLauncherShape>()(
-  "t3/process/ExternalLauncher",
+  "t3/process/externalLauncher",
 ) {}
 
 export const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (

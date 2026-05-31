@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics globalDate:off
+// @effect-diagnostics globalTimers:off
 import * as Crypto from "node:crypto";
 
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";

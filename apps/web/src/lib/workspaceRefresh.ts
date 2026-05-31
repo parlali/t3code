@@ -147,10 +147,7 @@ export function refreshWorkspaceTarget(input: RefreshWorkspaceTargetInput): Prom
         environmentId: input.environmentId,
         cwd: input.cwd,
       }),
-      refreshGitStatus(
-        { environmentId: input.environmentId, cwd: input.cwd },
-        { force: true },
-      ),
+      refreshGitStatus({ environmentId: input.environmentId, cwd: input.cwd }, { force: true }),
     ]).then(() => undefined);
 
   state.promise = Promise.resolve()

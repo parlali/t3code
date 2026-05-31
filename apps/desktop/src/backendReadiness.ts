@@ -1,3 +1,5 @@
+// @effect-diagnostics globalDate:off
+// @effect-diagnostics globalTimers:off
 export interface WaitForHttpReadyOptions {
   readonly timeoutMs?: number;
   readonly intervalMs?: number;

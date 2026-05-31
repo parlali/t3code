@@ -1,4 +1,14 @@
-import { Cause, Duration, Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
+import * as Cause from "effect/Cause";
+import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL_MS,
   type AuthAccessStreamEvent,
@@ -210,6 +220,7 @@ function toAuthAccessStreamEvent(
 const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
+      const crypto = yield* Crypto.Crypto;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
       const orchestrationEngine = yield* OrchestrationEngineService;
       const checkpointDiffQuery = yield* CheckpointDiffQuery;
@@ -249,8 +260,21 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const sessions = yield* SessionCredentialService;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
+      const toDispatchCommandError = (cause: unknown, fallbackMessage: string) =>
+        Schema.is(OrchestrationDispatchCommandError)(cause)
+          ? cause
+          : new OrchestrationDispatchCommandError({
+              message: cause instanceof Error ? cause.message : fallbackMessage,
+              cause,
+            });
+      const randomUUID = crypto.randomUUIDv4.pipe(
+        Effect.mapError((cause) =>
+          toDispatchCommandError(cause, "Failed to generate orchestration command identifier."),
+        ),
+      );
+      const serverEventId = randomUUID.pipe(Effect.map(EventId.make));
       const serverCommandId = (tag: string) =>
-        CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
+        randomUUID.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
 
       const loadAuthAccessSnapshot = () =>
         Effect.all({
@@ -266,29 +290,28 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         readonly payload: Record<string, unknown>;
         readonly tone: "info" | "error";
       }) =>
-        orchestrationEngine.dispatch({
-          type: "thread.activity.append",
+        Effect.all({
           commandId: serverCommandId("setup-script-activity"),
-          threadId: input.threadId,
-          activity: {
-            id: EventId.make(crypto.randomUUID()),
-            tone: input.tone,
-            kind: input.kind,
-            summary: input.summary,
-            payload: input.payload,
-            turnId: null,
-            createdAt: input.createdAt,
-          },
-          createdAt: input.createdAt,
-        });
-
-      const toDispatchCommandError = (cause: unknown, fallbackMessage: string) =>
-        Schema.is(OrchestrationDispatchCommandError)(cause)
-          ? cause
-          : new OrchestrationDispatchCommandError({
-              message: cause instanceof Error ? cause.message : fallbackMessage,
-              cause,
-            });
+          activityId: serverEventId,
+        }).pipe(
+          Effect.flatMap(({ commandId, activityId }) =>
+            orchestrationEngine.dispatch({
+              type: "thread.activity.append",
+              commandId,
+              threadId: input.threadId,
+              activity: {
+                id: activityId,
+                tone: input.tone,
+                kind: input.kind,
+                summary: input.summary,
+                payload: input.payload,
+                turnId: null,
+                createdAt: input.createdAt,
+              },
+              createdAt: input.createdAt,
+            }),
+          ),
+        );
 
       const toBootstrapDispatchCommandCauseError = (cause: Cause.Cause<unknown>) => {
         const error = Cause.squash(cause);
@@ -424,13 +447,16 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
 
           const cleanupCreatedThread = () =>
             createdThread
-              ? orchestrationEngine
-                  .dispatch({
-                    type: "thread.delete",
-                    commandId: serverCommandId("bootstrap-thread-delete"),
-                    threadId: command.threadId,
-                  })
-                  .pipe(Effect.ignoreCause({ log: true }))
+              ? serverCommandId("bootstrap-thread-delete").pipe(
+                  Effect.flatMap((commandId) =>
+                    orchestrationEngine.dispatch({
+                      type: "thread.delete",
+                      commandId,
+                      threadId: command.threadId,
+                    }),
+                  ),
+                  Effect.ignoreCause({ log: true }),
+                )
               : Effect.void;
 
           const recordSetupScriptLaunchFailure = (input: {
@@ -502,7 +528,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                     worktreePath: input.worktreePath,
                     scriptId: input.scriptId,
                     terminalId: input.terminalId,
-                    detail: error.message,
+                    detail: error instanceof Error ? error.message : String(error),
                   },
                 ),
               ),
@@ -550,7 +576,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             if (bootstrap?.createThread) {
               yield* orchestrationEngine.dispatch({
                 type: "thread.create",
-                commandId: serverCommandId("bootstrap-thread-create"),
+                commandId: yield* serverCommandId("bootstrap-thread-create"),
                 threadId: command.threadId,
                 projectId: bootstrap.createThread.projectId,
                 title: bootstrap.createThread.title,
@@ -574,7 +600,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               targetWorktreePath = worktree.worktree.path;
               yield* orchestrationEngine.dispatch({
                 type: "thread.meta.update",
-                commandId: serverCommandId("bootstrap-thread-meta-update"),
+                commandId: yield* serverCommandId("bootstrap-thread-meta-update"),
                 threadId: command.threadId,
                 branch: worktree.worktree.refName,
                 worktreePath: targetWorktreePath,

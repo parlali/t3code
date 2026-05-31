@@ -1,6 +1,15 @@
 import { AuthSessionId, type AuthClientMetadata, type AuthClientSession } from "@t3tools/contracts";
-import { Clock, DateTime, Duration, Effect, Layer, PubSub, Ref, Schema, Stream } from "effect";
-import { Option } from "effect";
+import * as Clock from "effect/Clock";
+import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
+import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import * as Option from "effect/Option";
 
 import { ServerConfig } from "../../config.ts";
 import { AuthSessionRepositoryLive } from "../../persistence/Layers/AuthSessions.ts";
@@ -82,6 +91,7 @@ function toAuthClientSession(input: Omit<AuthClientSession, "current">): AuthCli
 }
 
 export const makeSessionCredentialService = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
   const serverConfig = yield* ServerConfig;
   const secretStore = yield* ServerSecretStore;
   const authSessions = yield* AuthSessionRepository;
@@ -194,7 +204,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
 
   const issue: SessionCredentialServiceShape["issue"] = (input) =>
     Effect.gen(function* () {
-      const sessionId = AuthSessionId.make(crypto.randomUUID());
+      const sessionId = AuthSessionId.make(yield* crypto.randomUUIDv4);
       const issuedAt = yield* DateTime.now;
       const expiresAt = DateTime.add(issuedAt, {
         milliseconds: Duration.toMillis(input?.ttl ?? DEFAULT_SESSION_TTL),

@@ -4,11 +4,11 @@ This fork may manually port upstream work without creating merge ancestry. GitHu
 
 ## Current Baseline
 
-- Last reviewed upstream: `4f0f24f0` (`upstream/main`, no release tag)
-- Review date: 2026-05-22
-- Local branch at review: `main` at `d27cc22e` with pre-existing uncommitted timestamp/timeline edits and manual sync edits pending
+- Last reviewed upstream: `cf07d063` (`upstream/main`, no release tag)
+- Review date: 2026-05-29
+- Local branch at review: `main` at `22acc0a3` with manual upstream sync edits pending
 - Merge strategy: manual integration, no synthetic merge marker
-- Next comparison should start at: `4f0f24f0..upstream/main`
+- Next comparison should start at: `cf07d063..upstream/main`
 
 ## Manual Alignment Policy
 
@@ -25,7 +25,7 @@ This fork has enough feature drift that a normal upstream merge is usually not v
 
 1. Run `git fetch upstream --prune`.
 2. Read this file before comparing code.
-3. List new upstream work with `git log --oneline 4f0f24f0..upstream/main`.
+3. List new upstream work with `git log --oneline cf07d063..upstream/main`.
 4. Inspect all new commits enough to classify them, then use targeted `git show` and `git diff` commands for likely ports.
 5. After porting or intentionally skipping new upstream work, rewrite this file with the new last reviewed upstream SHA and a fresh summary.
 
@@ -40,6 +40,8 @@ The upstream range `7e20b23e..ea20e800` was reviewed on 2026-05-14. Relevant tec
 The upstream range `ea20e800..d1e85c4e` was reviewed on 2026-05-16. It contained only release version bookkeeping; package versions were mirrored to `0.0.24` so this fork exposes the latest reviewed upstream release line.
 
 The upstream range `d1e85c4e..4f0f24f0` was reviewed on 2026-05-22. It contained one composer state bug fix for multi-instance provider option persistence; the relevant work was manually ported.
+
+The upstream range `4f0f24f0..cf07d063` was reviewed on 2026-05-29. It contained the Effect beta.73 upgrade, Claude Opus 4.8 support, TSGo migration, collection performance refactors, and web cleanup; relevant work was manually ported and adapted to this fork's server/web architecture.
 
 Manually ported or aligned:
 
@@ -72,10 +74,16 @@ Manually ported or aligned:
 - Desktop runtime dependency staging fix from upstream commit `ea20e800`: bundled workspace packages and Electron are omitted from staged desktop runtime dependencies.
 - Release version tracking from upstream commit `d1e85c4e`: mirrored `apps/desktop`, `apps/server`, `apps/web`, and `packages/contracts` package versions to `0.0.24` as upstream tracking metadata.
 - Composer provider option persistence from upstream commit `4f0f24f0`: composer traits state now reads and writes options by `ProviderInstanceId`, passes the selected instance into traits controls, and regression coverage asserts custom provider instances preserve reasoning selections.
+- Effect beta.73 migration from upstream commit `e6330ead`: bumped Effect platform packages, refreshed the patch file and lockfile, adapted JSON/schema helpers, RPC protocol socket options, ACP/Codex app-server examples, and shared runtime utility tests for the new APIs.
+- Claude Opus 4.8 support from upstream commit `83f0cc9e`: added the Claude Opus 4.8 model/capability definitions, Claude Code v2.1.154 gating and upgrade messaging, ultracode effort mapping, and provider/adapter regression coverage.
+- TSGo migration from upstream commit `6b3050ee`: adopted `tsgo --noEmit` package typecheck scripts/configuration, preserved real TypeScript checks, and locally disabled legacy server Effect diagnostic categories that this fork has not fully migrated yet.
+- Collection performance refactors from upstream commit `31268945`: ported targeted `Array`/`Result` collection updates across server, shared packages, and web state/composer flows.
+- Web cleanup from upstream commit `cf07d063`: aligned active local web surfaces with the upstream cleanup where they still exist in this fork, including workbench/settings/protocol adjustments and context-window/LRU/thread-sort test coverage.
+- Shared utility exports from the reviewed range: restored `@t3tools/shared` semver, observability, workbench media, and schema JSON helpers/tests needed by the upgraded packages and exports.
 
 Pending alignment work:
 
-- No technical alignment work is pending through upstream `4f0f24f0`.
+- No technical alignment work is pending through upstream `cf07d063`.
 
 Intentionally skipped or not relevant:
 
@@ -84,15 +92,27 @@ Intentionally skipped or not relevant:
 - Upstream commit `34bb18c8` (`feat(marketing): Made marketing site less cringe`) is marketing-site content/assets and should stay skipped for this fork unless the marketing app becomes a maintained surface again.
 - Upstream commit `b793401a` (`chore(release): prepare v0.0.23`) only bumped package versions from `0.0.22` to `0.0.23` and was superseded by the later `0.0.24` tracking version bump.
 - Upstream commit `e64c19f1` is mostly hosted Vercel release routing and public-domain aliasing. This fork currently keeps `apps/web/vercel.json` and self-hosted central-server direction, so defer unless the hosted channel/router release flow is revived.
+- Upstream-only workspace/package cleanup for surfaces not present in this fork remains skipped where applicable, including the removed `oxlint-plugin-t3code` workspace and web components already deleted locally (`DiffPanel`, `OpenInPicker`, and old keybinding settings logic).
 - Upstream ancestry merge marker. The fork is still ancestry-behind upstream by design.
 
 ## Known Divergences
 
 - This fork is used as a self-hosted central agent surface with browser clients connecting to a persistent server instance.
 - Local changes may prefer central-server reliability, predictable reconnect behavior, and maintainability over matching upstream desktop-oriented flows exactly.
+- The upstream TSGo migration is adopted, but this fork currently suppresses legacy server Effect environmental diagnostics while keeping real TypeScript errors and stricter non-legacy diagnostics enforced.
 - GitHub may report the branch as behind upstream even when the useful upstream work in the reviewed range has been manually handled.
 
 ## Verification History
+
+Latest upstream review completed on 2026-05-29 after upstream fetch:
+
+- Ran `git fetch upstream --prune`.
+- Inspected `git log --oneline 4f0f24f0..upstream/main`.
+- New upstream commits reviewed: `e6330ead`, `83f0cc9e`, `6b3050ee`, `31268945`, and `cf07d063`.
+- Inspected targeted upstream patches with `git show` / `git diff` and manually integrated the full reviewed range without creating merge ancestry.
+- Ran `bun install` after workspace/package updates.
+- Focused verification: `bun run test src/provider/Layers/ProviderRegistry.test.ts src/provider/Layers/ClaudeAdapter.test.ts` in `apps/server`; `bun run test src/lib/contextWindow.test.ts src/lib/lruCache.test.ts src/lib/threadSort.test.ts` in `apps/web`; and `bun run test src/schemaJson.test.ts src/observability.test.ts` in `packages/shared`.
+- Full repo gate: `bun fmt`, `bun lint`, and `bun typecheck`.
 
 Latest upstream review completed on 2026-05-22 after upstream fetch:
 

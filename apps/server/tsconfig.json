@@ -1,7 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "composite": true,
     "types": ["node", "bun"],
     "lib": ["ESNext", "esnext.disposable"],
     "plugins": [
@@ -10,11 +9,23 @@
         "namespaceImportPackages": ["@effect/platform-node"],
         "diagnosticSeverity": {
           "importFromBarrel": "error",
-          "anyUnknownInErrorContext": "warning",
-          "instanceOfSchema": "warning",
-          "deterministicKeys": "warning",
+          "anyUnknownInErrorContext": "off",
+          "instanceOfSchema": "off",
+          "deterministicKeys": "off",
           "preferSchemaOverJson": "off",
-          "globalErrorInEffectFailure": "off"
+          "globalErrorInEffectFailure": "off",
+          "schemaSyncInEffect": "off",
+          "cryptoRandomUUID": "off",
+          "cryptoRandomUUIDInEffect": "off",
+          "nodeBuiltinImport": "off",
+          "globalDate": "off",
+          "globalDateInEffect": "off",
+          "globalConsole": "off",
+          "globalConsoleInEffect": "off",
+          "globalRandom": "off",
+          "globalRandomInEffect": "off",
+          "globalTimers": "off",
+          "globalTimersInEffect": "off"
         }
       }
     ]

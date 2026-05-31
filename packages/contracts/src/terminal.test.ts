@@ -13,6 +13,8 @@ import {
   TerminalWriteInput,
 } from "./terminal.ts";
 
+const TEST_TIMESTAMP = "2026-01-01T00:00:00.000Z";
+
 function decodeSync<S extends Schema.Top>(schema: S, input: unknown): Schema.Schema.Type<S> {
   return Schema.decodeUnknownSync(schema as never)(input) as Schema.Schema.Type<S>;
 }
@@ -182,7 +184,7 @@ describe("TerminalSessionSnapshot", () => {
         history: "hello\n",
         exitCode: null,
         exitSignal: null,
-        updatedAt: new Date().toISOString(),
+        updatedAt: TEST_TIMESTAMP,
       }),
     ).toBe(true);
   });
@@ -195,7 +197,7 @@ describe("TerminalEvent", () => {
         type: "output",
         threadId: "thread-1",
         terminalId: DEFAULT_TERMINAL_ID,
-        createdAt: new Date().toISOString(),
+        createdAt: TEST_TIMESTAMP,
         data: "line\n",
       }),
     ).toBe(true);
@@ -207,7 +209,7 @@ describe("TerminalEvent", () => {
         type: "exited",
         threadId: "thread-1",
         terminalId: DEFAULT_TERMINAL_ID,
-        createdAt: new Date().toISOString(),
+        createdAt: TEST_TIMESTAMP,
         exitCode: 0,
         exitSignal: null,
       }),
@@ -220,7 +222,7 @@ describe("TerminalEvent", () => {
         type: "activity",
         threadId: "thread-1",
         terminalId: DEFAULT_TERMINAL_ID,
-        createdAt: new Date().toISOString(),
+        createdAt: TEST_TIMESTAMP,
         hasRunningSubprocess: true,
       }),
     ).toBe(true);
@@ -232,7 +234,7 @@ describe("TerminalEvent", () => {
         type: "started",
         threadId: "thread-1",
         terminalId: DEFAULT_TERMINAL_ID,
-        createdAt: new Date().toISOString(),
+        createdAt: TEST_TIMESTAMP,
         snapshot: {
           threadId: "thread-1",
           terminalId: DEFAULT_TERMINAL_ID,
@@ -244,7 +246,7 @@ describe("TerminalEvent", () => {
           history: "",
           exitCode: null,
           exitSignal: null,
-          updatedAt: new Date().toISOString(),
+          updatedAt: TEST_TIMESTAMP,
         },
       }),
     ).toBe(true);

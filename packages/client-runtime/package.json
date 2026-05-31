@@ -9,8 +9,7 @@
     }
   },
   "scripts": {
-    "prepare": "effect-language-service patch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
@@ -19,8 +18,6 @@
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/language-service": "catalog:",
-    "typescript": "catalog:",
     "vitest": "catalog:"
   }
 }

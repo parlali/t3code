@@ -2,6 +2,7 @@
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Console from "effect/Console";
 import { Config, Effect, FileSystem, Option, Path, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
@@ -93,7 +94,7 @@ const writeOutput = Effect.fn("writeOutput")(function* (
     yield* fs.writeFileString(githubOutputPath, serialized, { flag: "a" });
   } else {
     for (const [key, value] of entries) {
-      console.log(`${key}=${value}`);
+      yield* Console.log(`${key}=${value}`);
     }
   }
 });

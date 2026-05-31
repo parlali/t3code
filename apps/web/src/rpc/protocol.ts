@@ -19,9 +19,6 @@ import {
   WS_RECONNECT_MAX_RETRIES,
 } from "./wsConnectionState";
 
-const WS_HEARTBEAT_INTERVAL = Duration.seconds(10);
-const WS_HEARTBEAT_MISSED_PONG_LIMIT = 4;
-
 interface ClientRpcTiming {
   readonly tag: string;
   readonly stream: boolean;
@@ -264,8 +261,6 @@ export function createWsRpcProtocolLayer(
       RpcClient.makeProtocolSocket({
         retryPolicy,
         retryTransientErrors: true,
-        pingInterval: WS_HEARTBEAT_INTERVAL,
-        missedPongLimit: WS_HEARTBEAT_MISSED_PONG_LIMIT,
       }),
       (protocol) => ({
         ...protocol,

@@ -37,7 +37,7 @@ interface WorkspaceIndex {
   truncated: boolean;
 }
 
-type GitIgnoreMode = "all" | "directories";
+type GitIgnoreMode = "all" | "none";
 
 interface SearchableWorkspaceEntry extends ProjectEntry {
   normalizedPath: string;
@@ -203,9 +203,13 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
         return null;
       }
 
-      const listedPaths = [...listedFiles.paths]
-        .map((entry) => toPosixPath(entry))
-        .filter((entry) => entry.length > 0 && !isPathInIgnoredWorkspaceDirectory(entry));
+      const listedPaths: Array<string> = [];
+      for (const rawEntry of listedFiles.paths) {
+        const entry = toPosixPath(rawEntry);
+        if (entry.length > 0 && !isPathInIgnoredWorkspaceDirectory(entry)) {
+          listedPaths.push(entry);
+        }
+      }
       const filePaths = yield* vcs.driver.filterIgnoredPaths(cwd, listedPaths).pipe(
         Effect.map((paths) => [...paths]),
         Effect.catch(() => filterVcsIgnoredPaths(cwd, listedPaths)),
@@ -285,7 +289,8 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     cwd: string,
     options: { readonly gitIgnoreMode: GitIgnoreMode },
   ): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
-    const shouldFilterWithGitIgnore = yield* isInsideVcsWorkTree(cwd);
+    const shouldFilterWithGitIgnore =
+      options.gitIgnoreMode !== "none" && (yield* isInsideVcsWorkTree(cwd));
 
     let pendingDirectories: string[] = [""];
     const entries: SearchableWorkspaceEntry[] = [];
@@ -332,22 +337,14 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       const candidatePaths = candidateEntriesByDirectory.flatMap((candidateEntries) =>
         candidateEntries.map((entry) => entry.relativePath),
       );
-      const gitIgnoreCandidatePaths =
-        options.gitIgnoreMode === "all"
-          ? candidatePaths
-          : candidateEntriesByDirectory.flatMap((candidateEntries) =>
-              candidateEntries
-                .filter((entry) => entry.dirent.isDirectory())
-                .map((entry) => entry.relativePath),
-            );
+      const gitIgnoreCandidatePaths = options.gitIgnoreMode === "all" ? candidatePaths : [];
       const allowedPathSet = shouldFilterWithGitIgnore
         ? new Set(yield* filterVcsIgnoredPaths(cwd, gitIgnoreCandidatePaths))
         : null;
 
       for (const candidateEntries of candidateEntriesByDirectory) {
         for (const candidate of candidateEntries) {
-          const shouldApplyGitIgnore =
-            options.gitIgnoreMode === "all" || candidate.dirent.isDirectory();
+          const shouldApplyGitIgnore = options.gitIgnoreMode === "all";
           if (
             allowedPathSet &&
             shouldApplyGitIgnore &&
@@ -400,9 +397,9 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
   const buildWorkspaceListIndex = Effect.fn("WorkspaceEntries.buildWorkspaceListIndex")(function* (
     cwd: string,
   ): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
-    // The editor file browser must mirror the real filesystem. Git ignore rules
-    // are only used to prune ignored directories that are unsafe to crawl.
-    return yield* buildWorkspaceIndexFromFilesystem(cwd, { gitIgnoreMode: "directories" });
+    // The editor file browser should mirror the real filesystem. Keep search
+    // git-aware, but do not hide local-only files or folders from the tree.
+    return yield* buildWorkspaceIndexFromFilesystem(cwd, { gitIgnoreMode: "none" });
   });
 
   const workspaceSearchIndexCache = yield* Cache.makeWith<
@@ -464,21 +461,23 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
 
       const showHidden = endsWithSeparator || prefix.startsWith(".");
       const lowerPrefix = prefix.toLowerCase();
+      const entries: Array<{ readonly name: string; readonly fullPath: string }> = [];
+      for (const dirent of dirents) {
+        if (
+          dirent.isDirectory() &&
+          dirent.name.toLowerCase().startsWith(lowerPrefix) &&
+          (showHidden || !dirent.name.startsWith("."))
+        ) {
+          entries.push({
+            name: dirent.name,
+            fullPath: path.join(parentPath, dirent.name),
+          });
+        }
+      }
 
       return {
         parentPath,
-        entries: dirents
-          .filter(
-            (dirent) =>
-              dirent.isDirectory() &&
-              dirent.name.toLowerCase().startsWith(lowerPrefix) &&
-              (showHidden || !dirent.name.startsWith(".")),
-          )
-          .map((dirent) => ({
-            name: dirent.name,
-            fullPath: path.join(parentPath, dirent.name),
-          }))
-          .toSorted((left, right) => left.name.localeCompare(right.name)),
+        entries: entries.toSorted((left, right) => left.name.localeCompare(right.name)),
       };
     },
   );

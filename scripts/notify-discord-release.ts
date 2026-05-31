@@ -2,7 +2,7 @@
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Config, Data, Effect, Layer, Logger, Schema } from "effect";
+import { Config, Data, DateTime, Effect, Layer, Logger, Schema } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import {
   FetchHttpClient,
@@ -208,7 +208,7 @@ export const notifyDiscordReleaseCommand = Command.make(
         version: releaseVersion,
         tag,
         releaseUrl,
-        timestamp: new Date().toISOString(),
+        timestamp: DateTime.formatIso(yield* DateTime.now),
       });
 
       yield* Effect.logInfo("discord release announcement payload built").pipe(

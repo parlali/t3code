@@ -1,3 +1,7 @@
+// @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics globalDate:off
+// @effect-diagnostics globalConsole:off
+// @effect-diagnostics globalTimers:off
 import * as ChildProcess from "node:child_process";
 import * as Crypto from "node:crypto";
 import * as FS from "node:fs";

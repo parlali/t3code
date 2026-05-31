@@ -289,16 +289,17 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
   });
 
   describe("list", () => {
-    it.effect("includes gitignored files while pruning gitignored directories", () =>
+    it.effect("includes gitignored entries while pruning built-in ignored directories", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTempDir({
           prefix: "t3code-workspace-list-ignored-file-",
           git: true,
         });
-        yield* writeTextFile(cwd, ".gitignore", ".env\nsecrets/\n");
+        yield* writeTextFile(cwd, ".gitignore", ".env\nsecrets/\nnode_modules/\n");
         yield* writeTextFile(cwd, ".env", "TOKEN=local\n");
         yield* writeTextFile(cwd, "src/keep.ts", "export {};\n");
         yield* writeTextFile(cwd, "secrets/local.json", "{}");
+        yield* writeTextFile(cwd, "node_modules/pkg/index.js", "module.exports = {};\n");
 
         const result = yield* listWorkspaceEntries({ cwd, limit: 100 });
         const paths = result.entries.map((entry) => entry.path);
@@ -307,8 +308,10 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
         expect(paths).toContain(".gitignore");
         expect(paths).toContain("src");
         expect(paths).toContain("src/keep.ts");
-        expect(paths).not.toContain("secrets");
-        expect(paths.some((entryPath) => entryPath.startsWith("secrets/"))).toBe(false);
+        expect(paths).toContain("secrets");
+        expect(paths).toContain("secrets/local.json");
+        expect(paths).not.toContain("node_modules");
+        expect(paths.some((entryPath) => entryPath.startsWith("node_modules/"))).toBe(false);
         expect(result.truncated).toBe(false);
       }),
     );

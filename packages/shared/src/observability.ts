@@ -1,18 +1,24 @@
 import * as Cause from "effect/Cause";
-import * as Exit from "effect/Exit";
+import * as Effect from "effect/Effect";
+import type * as Exit from "effect/Exit";
+import * as ExitRuntime from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Tracer from "effect/Tracer";
-
-import { compactTraceAttributes } from "./Attributes.ts";
 import { OtlpResource, OtlpTracer } from "effect/unstable/observability";
 
-interface TraceRecordEvent {
+import { RotatingFileSink } from "./logging.ts";
+
+const FLUSH_BUFFER_THRESHOLD = 32;
+
+export type TraceAttributes = Readonly<Record<string, unknown>>;
+
+export interface TraceRecordEvent {
   readonly name: string;
   readonly timeUnixNano: string;
   readonly attributes: Readonly<Record<string, unknown>>;
 }
 
-interface TraceRecordLink {
+export interface TraceRecordLink {
   readonly traceId: string;
   readonly spanId: string;
   readonly attributes: Readonly<Record<string, unknown>>;
@@ -49,7 +55,7 @@ export interface EffectTraceRecord extends BaseTraceRecord {
       };
 }
 
-interface OtlpTraceRecord extends BaseTraceRecord {
+export interface OtlpTraceRecord extends BaseTraceRecord {
   readonly type: "otlp-span";
   readonly resourceAttributes: Readonly<Record<string, unknown>>;
   readonly scope: Readonly<{
@@ -66,6 +72,25 @@ interface OtlpTraceRecord extends BaseTraceRecord {
 }
 
 export type TraceRecord = EffectTraceRecord | OtlpTraceRecord;
+
+export interface TraceSinkOptions {
+  readonly filePath: string;
+  readonly maxBytes: number;
+  readonly maxFiles: number;
+  readonly batchWindowMs: number;
+}
+
+export interface TraceSink {
+  readonly filePath: string;
+  push: (record: TraceRecord) => void;
+  flush: Effect.Effect<void>;
+  close: () => Effect.Effect<void>;
+}
+
+export interface LocalFileTracerOptions extends TraceSinkOptions {
+  readonly delegate?: Tracer.Tracer;
+  readonly sink?: TraceSink;
+}
 
 type OtlpSpan = OtlpTracer.ScopeSpan["spans"][number];
 type OtlpSpanEvent = OtlpSpan["events"][number];
@@ -87,8 +112,89 @@ interface SerializableSpan {
   >;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function markSeen(value: object, seen: WeakSet<object>): boolean {
+  if (seen.has(value)) {
+    return true;
+  }
+  seen.add(value);
+  return false;
+}
+
+function normalizeJsonValue(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value ?? null;
+  }
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? "Invalid Date" : value.toISOString();
+  }
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+      ...(value.stack ? { stack: value.stack } : {}),
+    };
+  }
+  if (Array.isArray(value)) {
+    if (markSeen(value, seen)) {
+      return "[Circular]";
+    }
+    return value.map((entry) => normalizeJsonValue(entry, seen));
+  }
+  if (value instanceof Map) {
+    if (markSeen(value, seen)) {
+      return "[Circular]";
+    }
+    return Object.fromEntries(
+      Array.from(value.entries(), ([key, entryValue]) => [
+        String(key),
+        normalizeJsonValue(entryValue, seen),
+      ]),
+    );
+  }
+  if (value instanceof Set) {
+    if (markSeen(value, seen)) {
+      return "[Circular]";
+    }
+    return Array.from(value.values(), (entry) => normalizeJsonValue(entry, seen));
+  }
+  if (!isPlainObject(value)) {
+    return String(value);
+  }
+  if (markSeen(value, seen)) {
+    return "[Circular]";
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entryValue]) => [key, normalizeJsonValue(entryValue, seen)]),
+  );
+}
+
+export function compactTraceAttributes(
+  attributes: Readonly<Record<string, unknown>>,
+): TraceAttributes {
+  const entries: Array<[string, unknown]> = [];
+  for (const [key, value] of Object.entries(attributes)) {
+    if (value !== undefined) {
+      entries.push([key, normalizeJsonValue(value)]);
+    }
+  }
+  return Object.fromEntries(entries);
+}
+
 function formatTraceExit(exit: Exit.Exit<unknown, unknown>): EffectTraceRecord["exit"] {
-  if (Exit.isSuccess(exit)) {
+  if (ExitRuntime.isSuccess(exit)) {
     return { _tag: "Success" };
   }
   if (Cause.hasInterruptsOnly(exit.cause)) {
@@ -132,6 +238,151 @@ export function spanToTraceRecord(span: SerializableSpan): EffectTraceRecord {
     exit: formatTraceExit(status.exit),
   };
 }
+
+export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: TraceSinkOptions) {
+  const sink = new RotatingFileSink({
+    filePath: options.filePath,
+    maxBytes: options.maxBytes,
+    maxFiles: options.maxFiles,
+  });
+
+  let buffer: Array<string> = [];
+
+  const flushUnsafe = () => {
+    if (buffer.length === 0) {
+      return;
+    }
+
+    const chunk = buffer.join("");
+    buffer = [];
+
+    try {
+      sink.write(chunk);
+    } catch {
+      buffer.unshift(chunk);
+    }
+  };
+
+  const flush = Effect.sync(flushUnsafe).pipe(Effect.withTracerEnabled(false));
+
+  yield* Effect.addFinalizer(() => flush.pipe(Effect.ignore));
+  yield* Effect.forkScoped(
+    Effect.sleep(`${options.batchWindowMs} millis`).pipe(Effect.andThen(flush), Effect.forever),
+  );
+
+  return {
+    filePath: options.filePath,
+    push(record) {
+      try {
+        buffer.push(`${JSON.stringify(record)}\n`);
+        if (buffer.length >= FLUSH_BUFFER_THRESHOLD) {
+          flushUnsafe();
+        }
+      } catch {
+        return;
+      }
+    },
+    flush,
+    close: () => flush,
+  } satisfies TraceSink;
+});
+
+class LocalFileSpan implements Tracer.Span {
+  readonly _tag = "Span";
+  readonly name: string;
+  readonly spanId: string;
+  readonly traceId: string;
+  readonly parent: Option.Option<Tracer.AnySpan>;
+  readonly annotations: Tracer.Span["annotations"];
+  readonly links: Array<Tracer.SpanLink>;
+  readonly sampled: boolean;
+  readonly kind: Tracer.SpanKind;
+
+  status: Tracer.SpanStatus;
+  attributes: Map<string, unknown>;
+  events: Array<[name: string, startTime: bigint, attributes: Record<string, unknown>]>;
+  private readonly delegate: Tracer.Span;
+  private readonly push: (record: EffectTraceRecord) => void;
+
+  constructor(
+    options: Parameters<Tracer.Tracer["span"]>[0],
+    delegate: Tracer.Span,
+    push: (record: EffectTraceRecord) => void,
+  ) {
+    this.delegate = delegate;
+    this.push = push;
+    this.name = delegate.name;
+    this.spanId = delegate.spanId;
+    this.traceId = delegate.traceId;
+    this.parent = options.parent;
+    this.annotations = options.annotations;
+    this.links = [...options.links];
+    this.sampled = delegate.sampled;
+    this.kind = delegate.kind;
+    this.status = {
+      _tag: "Started",
+      startTime: options.startTime,
+    };
+    this.attributes = new Map();
+    this.events = [];
+  }
+
+  end(endTime: bigint, exit: Exit.Exit<unknown, unknown>): void {
+    this.status = {
+      _tag: "Ended",
+      startTime: this.status.startTime,
+      endTime,
+      exit,
+    };
+    this.delegate.end(endTime, exit);
+
+    if (this.sampled) {
+      this.push(spanToTraceRecord(this));
+    }
+  }
+
+  attribute(key: string, value: unknown): void {
+    this.attributes.set(key, value);
+    this.delegate.attribute(key, value);
+  }
+
+  event(name: string, startTime: bigint, attributes?: Record<string, unknown>): void {
+    const nextAttributes = attributes ?? {};
+    this.events.push([name, startTime, nextAttributes]);
+    this.delegate.event(name, startTime, nextAttributes);
+  }
+
+  addLinks(links: ReadonlyArray<Tracer.SpanLink>): void {
+    this.links.push(...links);
+    this.delegate.addLinks(links);
+  }
+}
+
+export const makeLocalFileTracer = Effect.fn("makeLocalFileTracer")(function* (
+  options: LocalFileTracerOptions,
+) {
+  const sink =
+    options.sink ??
+    (yield* makeTraceSink({
+      filePath: options.filePath,
+      maxBytes: options.maxBytes,
+      maxFiles: options.maxFiles,
+      batchWindowMs: options.batchWindowMs,
+    }));
+
+  const delegate =
+    options.delegate ??
+    Tracer.make({
+      span: (spanOptions) => new Tracer.NativeSpan(spanOptions),
+    });
+
+  return Tracer.make({
+    span(spanOptions) {
+      return new LocalFileSpan(spanOptions, delegate.span(spanOptions), sink.push);
+    },
+    ...(delegate.context ? { context: delegate.context } : {}),
+  });
+});
 
 const SPAN_KIND_MAP: Record<number, OtlpTraceRecord["kind"]> = {
   1: "internal",

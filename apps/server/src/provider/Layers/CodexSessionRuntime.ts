@@ -17,7 +17,17 @@ import {
   TurnId,
 } from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
-import { Deferred, Effect, Exit, Layer, Queue, Ref, Scope, Random, Schema, Stream } from "effect";
+import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
+import * as Scope from "effect/Scope";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as SchemaIssue from "effect/SchemaIssue";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexClient from "effect-codex-app-server/client";
@@ -685,11 +695,12 @@ export const makeCodexSessionRuntime = (
 ): Effect.Effect<
   CodexSessionRuntimeShape,
   CodexErrors.CodexAppServerError,
-  ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
+  ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
 > =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const runtimeScope = yield* Scope.Scope;
+    const crypto = yield* Crypto.Crypto;
     const events = yield* Queue.unbounded<ProviderEvent>();
     const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>());
     const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>());
@@ -734,7 +745,18 @@ export const makeCodexSessionRuntime = (
       Effect.provide(clientContext),
     );
     const serverNotifications = yield* Queue.unbounded<CodexServerNotification>();
+    const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+    const randomUUIDv4 = crypto.randomUUIDv4.pipe(
+      Effect.mapError(
+        (cause) =>
+          new CodexErrors.CodexAppServerTransportError({
+            detail: "Failed to generate Codex runtime identifier.",
+            cause,
+          }),
+      ),
+    );
 
+    const sessionCreatedAt = yield* nowIso;
     const initialSession = {
       provider: PROVIDER,
       ...(options.providerInstanceId ? { providerInstanceId: options.providerInstanceId } : {}),
@@ -744,22 +766,23 @@ export const makeCodexSessionRuntime = (
       ...(options.model ? { model: options.model } : {}),
       threadId: options.threadId,
       ...(options.resumeCursor !== undefined ? { resumeCursor: options.resumeCursor } : {}),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: sessionCreatedAt,
+      updatedAt: sessionCreatedAt,
     } satisfies ProviderSession;
     const sessionRef = yield* Ref.make<ProviderSession>(initialSession);
     const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
 
     const emitEvent = (event: Omit<ProviderEvent, "id" | "provider" | "createdAt">) =>
-      Effect.flatMap(Random.nextUUIDv4, (id) =>
-        offerEvent({
+      Effect.gen(function* () {
+        const id = yield* randomUUIDv4;
+        return yield* offerEvent({
           id: EventId.make(id),
           provider: PROVIDER,
           ...(options.providerInstanceId ? { providerInstanceId: options.providerInstanceId } : {}),
-          createdAt: new Date().toISOString(),
+          createdAt: yield* nowIso,
           ...event,
-        }),
-      );
+        });
+      });
     const emitSessionEvent = (method: string, message: string) =>
       emitEvent({
         kind: "session",
@@ -919,7 +942,7 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/commandExecution/requestApproval", (payload) =>
       Effect.gen(function* () {
-        const requestId = ApprovalRequestId.make(yield* Random.nextUUIDv4);
+        const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
         const turnId = TurnId.make(payload.turnId);
         const itemId = ProviderItemId.make(payload.itemId);
         const decision = yield* Deferred.make<ProviderApprovalDecision>();
@@ -975,7 +998,7 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/fileChange/requestApproval", (payload) =>
       Effect.gen(function* () {
-        const requestId = ApprovalRequestId.make(yield* Random.nextUUIDv4);
+        const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
         const turnId = TurnId.make(payload.turnId);
         const itemId = ProviderItemId.make(payload.itemId);
         const decision = yield* Deferred.make<ProviderApprovalDecision>();
@@ -1031,7 +1054,7 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/tool/requestUserInput", (payload) =>
       Effect.gen(function* () {
-        const requestId = ApprovalRequestId.make(yield* Random.nextUUIDv4);
+        const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
         const turnId = TurnId.make(payload.turnId);
         const itemId = ProviderItemId.make(payload.itemId);
         const answers = yield* Deferred.make<ProviderUserInputAnswers>();
@@ -1215,7 +1238,11 @@ export const makeCodexSessionRuntime = (
         status: "closed",
         activeTurnId: undefined,
       });
-      yield* emitSessionEvent("session/closed", "Session stopped");
+      yield* emitSessionEvent("session/closed", "Session stopped").pipe(
+        Effect.catch((cause) =>
+          Effect.logError("Failed to emit Codex session closed event.", { cause }),
+        ),
+      );
       yield* Scope.close(runtimeScope, Exit.void);
       yield* Queue.shutdown(serverNotifications);
       yield* Queue.shutdown(events);

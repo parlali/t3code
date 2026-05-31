@@ -1,3 +1,4 @@
+// @effect-diagnostics globalConsole:off
 import {
   listLoginShellCandidates,
   mergePathEntries,

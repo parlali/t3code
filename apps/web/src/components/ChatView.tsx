@@ -109,7 +109,7 @@ import { useDelayedUnmount } from "../hooks/useDelayedUnmount";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
-import { cn, randomUUID } from "~/lib/utils";
+import { cn, randomHex, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { projectScriptIdFromCommand } from "~/projectScripts";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
@@ -1754,8 +1754,9 @@ export default function ChatView(props: ChatViewProps) {
     if (previewUrls.length === 0) return;
 
     const previousPreviewUrls = attachmentPreviewHandoffByMessageIdRef.current[messageId] ?? [];
+    const nextPreviewUrlSet = new Set(previewUrls);
     for (const previewUrl of previousPreviewUrls) {
-      if (!previewUrls.includes(previewUrl)) {
+      if (!nextPreviewUrlSet.has(previewUrl)) {
         revokeBlobPreviewUrl(previewUrl);
       }
     }
@@ -3153,7 +3154,7 @@ export default function ChatView(props: ChatViewProps) {
                     prepareWorktree: {
                       projectCwd: activeProject.cwd,
                       baseBranch: baseBranchForWorktree,
-                      branch: buildTemporaryWorktreeBranchName(),
+                      branch: buildTemporaryWorktreeBranchName(randomHex),
                     },
                     runSetupScript: true,
                   }

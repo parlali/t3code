@@ -7,7 +7,7 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { Effect } from "effect";
+import { Crypto, Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { decideOrchestrationCommand } from "./decider.ts";
@@ -111,7 +111,15 @@ describe("decideOrchestrationCommand turn interrupt", () => {
           threadId: asThreadId("thread-interrupt"),
           createdAt: "2026-04-15T10:00:01.000Z",
         },
-      }),
+      }).pipe(
+        Effect.provideService(
+          Crypto.Crypto,
+          Crypto.make({
+            randomBytes: (size) => new Uint8Array(size),
+            digest: (_algorithm, data) => Effect.succeed(data),
+          }),
+        ),
+      ),
     );
 
     if (Array.isArray(event)) {

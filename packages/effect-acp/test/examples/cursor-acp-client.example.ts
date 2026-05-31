@@ -1,11 +1,14 @@
 import * as Effect from "effect/Effect";
 import * as Console from "effect/Console";
+import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 
 import * as AcpClient from "../../src/client.ts";
+
+const encodeJson = Schema.encodeUnknownSync(Schema.UnknownFromJsonString);
 
 const program = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -48,7 +51,7 @@ const program = Effect.gen(function* () {
         version: "0.0.0",
       },
     });
-    yield* Console.log("initialized", JSON.stringify(initialized, null, 4));
+    yield* Console.log("initialized", encodeJson(initialized));
 
     const session = yield* acp.agent.createSession({
       cwd: process.cwd(),
@@ -61,7 +64,7 @@ const program = Effect.gen(function* () {
       value: "claude-opus-4-6",
     });
 
-    yield* Console.log("config", JSON.stringify(config, null, 4));
+    yield* Console.log("config", encodeJson(config));
 
     const result = yield* acp.agent.prompt({
       sessionId: session.sessionId,
@@ -73,7 +76,7 @@ const program = Effect.gen(function* () {
       ],
     });
 
-    yield* Console.log("prompt result", JSON.stringify(result));
+    yield* Console.log("prompt result", encodeJson(result));
     yield* acp.agent.cancel({ sessionId: session.sessionId });
   }).pipe(Effect.provide(acpLayer));
 });
