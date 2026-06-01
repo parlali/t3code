@@ -41,6 +41,7 @@ import {
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
 } from "@t3tools/shared/model";
+import { normalizePlanExplanation, normalizePlanSteps } from "@t3tools/shared/providerPlan";
 
 import { buildChromeDevToolsMcpCodexConfigArgs } from "../../integrations/chromeDevToolsMcp.ts";
 import {
@@ -786,21 +787,22 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "turn/plan/updated") {
-    const payload = readPayload(EffectCodexSchema.V2TurnPlanUpdatedNotification, event.payload);
-    if (!payload) {
+    const payload =
+      event.payload && typeof event.payload === "object"
+        ? (event.payload as Record<string, unknown>)
+        : null;
+    const plan = normalizePlanSteps(payload?.plan);
+    if (plan.length === 0) {
       return [];
     }
+    const explanation = normalizePlanExplanation(payload?.explanation);
     return [
       {
         ...runtimeEventBase(event, canonicalThreadId),
         type: "turn.plan.updated",
         payload: {
-          ...(trimText(payload.explanation) ? { explanation: trimText(payload.explanation) } : {}),
-          plan: payload.plan.map((step) => ({
-            step: trimText(step.step) ?? "step",
-            status:
-              step.status === "completed" || step.status === "inProgress" ? step.status : "pending",
-          })),
+          ...(explanation ? { explanation } : {}),
+          plan,
         },
       },
     ];

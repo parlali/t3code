@@ -5,6 +5,7 @@ import type {
   OrchestrationProposedPlanId,
   RepositoryIdentity,
   OrchestrationSessionStatus,
+  OrchestrationTaskPlan,
   OrchestrationThreadActivity,
   ProjectScript as ContractProjectScript,
   ThreadId,
@@ -105,6 +106,7 @@ export interface Thread {
   session: ThreadSession | null;
   messages: ChatMessage[];
   proposedPlans: ProposedPlan[];
+  latestTaskPlan?: OrchestrationTaskPlan | null | undefined;
   error: string | null;
   createdAt: string;
   archivedAt: string | null;

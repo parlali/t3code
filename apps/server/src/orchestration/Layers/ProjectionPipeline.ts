@@ -22,6 +22,10 @@ import {
   type ProjectionThreadProposedPlan,
   ProjectionThreadProposedPlanRepository,
 } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
+import {
+  type ProjectionThreadTaskPlan,
+  ProjectionThreadTaskPlanRepository,
+} from "../../persistence/Services/ProjectionThreadTaskPlans.ts";
 import { ProjectionThreadSessionRepository } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import {
   type ProjectionTurn,
@@ -34,6 +38,7 @@ import { ProjectionStateRepositoryLive } from "../../persistence/Layers/Projecti
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
 import { ProjectionThreadMessageRepositoryLive } from "../../persistence/Layers/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlanRepositoryLive } from "../../persistence/Layers/ProjectionThreadProposedPlans.ts";
+import { ProjectionThreadTaskPlanRepositoryLive } from "../../persistence/Layers/ProjectionThreadTaskPlans.ts";
 import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/ProjectionThreadSessions.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
@@ -48,12 +53,14 @@ import {
   parseThreadSegmentFromAttachmentId,
   toSafeThreadAttachmentSegment,
 } from "../../attachmentStore.ts";
+import { normalizePlanExplanation, normalizePlanSteps } from "@t3tools/shared/providerPlan";
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
   threads: "projection.threads",
   threadMessages: "projection.thread-messages",
   threadProposedPlans: "projection.thread-proposed-plans",
+  threadTaskPlans: "projection.thread-task-plans",
   threadActivities: "projection.thread-activities",
   threadSessions: "projection.thread-sessions",
   threadTurns: "projection.thread-turns",
@@ -296,6 +303,52 @@ function retainProjectionProposedPlansAfterRevert(
   );
 }
 
+function retainProjectionTaskPlansAfterRevert(
+  taskPlans: ReadonlyArray<ProjectionThreadTaskPlan>,
+  turns: ReadonlyArray<ProjectionTurn>,
+  turnCount: number,
+): ReadonlyArray<ProjectionThreadTaskPlan> {
+  const retainedTurnIds = new Set<string>(
+    turns
+      .filter(
+        (turn) =>
+          turn.turnId !== null &&
+          turn.checkpointTurnCount !== null &&
+          turn.checkpointTurnCount <= turnCount,
+      )
+      .flatMap((turn) => (turn.turnId === null ? [] : [turn.turnId])),
+  );
+  return taskPlans.filter((taskPlan) => retainedTurnIds.has(taskPlan.turnId));
+}
+
+function taskPlanTerminalStatusFromSessionStatus(
+  status: string,
+): ProjectionThreadTaskPlan["status"] | null {
+  switch (status) {
+    case "ready":
+      return "completed";
+    case "interrupted":
+    case "stopped":
+      return "interrupted";
+    case "error":
+      return "failed";
+    default:
+      return null;
+  }
+}
+
+function taskPlanTerminalStatusFromCheckpointStatus(
+  status: "ready" | "missing" | "error",
+): ProjectionThreadTaskPlan["status"] {
+  if (status === "error") return "failed";
+  if (status === "missing") return "interrupted";
+  return "completed";
+}
+
+function maxIso(left: string, right: string): string {
+  return left > right ? left : right;
+}
+
 function collectThreadAttachmentRelativePaths(
   threadId: string,
   messages: ReadonlyArray<ProjectionThreadMessage>,
@@ -447,6 +500,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadRepository = yield* ProjectionThreadRepository;
     const projectionThreadMessageRepository = yield* ProjectionThreadMessageRepository;
     const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
+    const projectionThreadTaskPlanRepository = yield* ProjectionThreadTaskPlanRepository;
     const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
@@ -898,6 +952,151 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             threadId: event.payload.threadId,
           });
           yield* Effect.forEach(keptRows, projectionThreadProposedPlanRepository.upsert, {
+            concurrency: 1,
+          }).pipe(Effect.asVoid);
+          return;
+        }
+
+        default:
+          return;
+      }
+    });
+
+    const settleThreadTaskPlan = Effect.fn("settleThreadTaskPlan")(function* (input: {
+      readonly threadId: ThreadId;
+      readonly turnId: ProjectionThreadTaskPlan["turnId"] | null;
+      readonly status: ProjectionThreadTaskPlan["status"];
+      readonly settledAt: string;
+    }) {
+      if (input.turnId === null) {
+        return;
+      }
+
+      const existingRow = yield* projectionThreadTaskPlanRepository.getByTurnId({
+        threadId: input.threadId,
+        turnId: input.turnId,
+      });
+      if (Option.isNone(existingRow)) {
+        return;
+      }
+
+      if (existingRow.value.status !== "active") {
+        return;
+      }
+
+      yield* projectionThreadTaskPlanRepository.upsert({
+        ...existingRow.value,
+        status: input.status,
+        updatedAt: maxIso(existingRow.value.updatedAt, input.settledAt),
+        settledAt: input.settledAt,
+      });
+    });
+
+    const applyThreadTaskPlansProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyThreadTaskPlansProjection",
+    )(function* (event, _attachmentSideEffects) {
+      switch (event.type) {
+        case "thread.activity-appended": {
+          const { activity } = event.payload;
+          if (activity.kind !== "turn.plan.updated" || activity.turnId === null) {
+            return;
+          }
+
+          const payload =
+            typeof activity.payload === "object" && activity.payload !== null
+              ? (activity.payload as Record<string, unknown>)
+              : null;
+          const steps = normalizePlanSteps(payload?.plan);
+          if (steps.length === 0) {
+            return;
+          }
+
+          const existingRow = yield* projectionThreadTaskPlanRepository.getByTurnId({
+            threadId: event.payload.threadId,
+            turnId: activity.turnId,
+          });
+          const previous = Option.getOrNull(existingRow);
+          const isSettled = previous !== null && previous.status !== "active";
+
+          yield* projectionThreadTaskPlanRepository.upsert({
+            threadId: event.payload.threadId,
+            turnId: activity.turnId,
+            status: isSettled ? previous.status : "active",
+            explanation: normalizePlanExplanation(payload?.explanation),
+            steps,
+            sourceActivityId: activity.id,
+            createdAt: previous?.createdAt ?? activity.createdAt,
+            updatedAt: activity.createdAt,
+            settledAt: isSettled ? previous.settledAt : null,
+          });
+          return;
+        }
+
+        case "thread.turn-diff-completed":
+          yield* settleThreadTaskPlan({
+            threadId: event.payload.threadId,
+            turnId: event.payload.turnId,
+            status: taskPlanTerminalStatusFromCheckpointStatus(event.payload.status),
+            settledAt: event.payload.completedAt,
+          });
+          return;
+
+        case "thread.turn-interrupt-requested":
+          yield* settleThreadTaskPlan({
+            threadId: event.payload.threadId,
+            turnId: event.payload.turnId ?? null,
+            status: "interrupted",
+            settledAt: event.payload.createdAt,
+          });
+          return;
+
+        case "thread.session-set": {
+          if (event.payload.session.activeTurnId !== null) {
+            return;
+          }
+          const status = taskPlanTerminalStatusFromSessionStatus(event.payload.session.status);
+          if (status === null) {
+            return;
+          }
+          const threadRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(threadRow)) {
+            return;
+          }
+          yield* settleThreadTaskPlan({
+            threadId: event.payload.threadId,
+            turnId: threadRow.value.latestTurnId,
+            status,
+            settledAt: event.payload.session.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.reverted": {
+          const existingRows = yield* projectionThreadTaskPlanRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (existingRows.length === 0) {
+            return;
+          }
+
+          const existingTurns = yield* projectionTurnRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          const keptRows = retainProjectionTaskPlansAfterRevert(
+            existingRows,
+            existingTurns,
+            event.payload.turnCount,
+          );
+          if (keptRows.length === existingRows.length) {
+            return;
+          }
+
+          yield* projectionThreadTaskPlanRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          yield* Effect.forEach(keptRows, projectionThreadTaskPlanRepository.upsert, {
             concurrency: 1,
           }).pipe(Effect.asVoid);
           return;
@@ -1364,6 +1563,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyThreadProposedPlansProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.threadTaskPlans,
+        apply: applyThreadTaskPlansProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
         apply: applyThreadActivitiesProjection,
       },
@@ -1485,6 +1688,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadRepositoryLive),
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),
+  Layer.provideMerge(ProjectionThreadTaskPlanRepositoryLive),
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),

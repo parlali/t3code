@@ -28,6 +28,7 @@ const threadCache = new WeakMap<
     messages: Thread["messages"];
     activities: Thread["activities"];
     proposedPlans: Thread["proposedPlans"];
+    latestTaskPlan: Thread["latestTaskPlan"];
     turnDiffSummaries: Thread["turnDiffSummaries"];
     thread: Thread;
   }
@@ -112,6 +113,7 @@ export function getThreadFromEnvironmentState(
   const messages = selectThreadMessages(state, threadId);
   const activities = selectThreadActivities(state, threadId);
   const proposedPlans = selectThreadProposedPlans(state, threadId);
+  const latestTaskPlan = state.taskPlanByThreadId[threadId] ?? null;
   const turnDiffSummaries = selectThreadTurnDiffSummaries(state, threadId);
   const cached = threadCache.get(shell);
 
@@ -122,6 +124,7 @@ export function getThreadFromEnvironmentState(
     cached.messages === messages &&
     cached.activities === activities &&
     cached.proposedPlans === proposedPlans &&
+    cached.latestTaskPlan === latestTaskPlan &&
     cached.turnDiffSummaries === turnDiffSummaries
   ) {
     return cached.thread;
@@ -135,6 +138,7 @@ export function getThreadFromEnvironmentState(
     messages,
     activities,
     proposedPlans,
+    latestTaskPlan,
     turnDiffSummaries,
   };
 
@@ -144,6 +148,7 @@ export function getThreadFromEnvironmentState(
     messages,
     activities,
     proposedPlans,
+    latestTaskPlan,
     turnDiffSummaries,
     thread,
   });

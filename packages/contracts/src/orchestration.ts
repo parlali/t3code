@@ -237,6 +237,40 @@ export const OrchestrationProposedPlan = Schema.Struct({
 });
 export type OrchestrationProposedPlan = typeof OrchestrationProposedPlan.Type;
 
+export const OrchestrationTaskPlanStatus = Schema.Literals([
+  "active",
+  "completed",
+  "interrupted",
+  "failed",
+]);
+export type OrchestrationTaskPlanStatus = typeof OrchestrationTaskPlanStatus.Type;
+
+export const OrchestrationTaskPlanStepStatus = Schema.Literals([
+  "pending",
+  "inProgress",
+  "completed",
+]);
+export type OrchestrationTaskPlanStepStatus = typeof OrchestrationTaskPlanStepStatus.Type;
+
+export const OrchestrationTaskPlanStep = Schema.Struct({
+  step: TrimmedNonEmptyString,
+  status: OrchestrationTaskPlanStepStatus,
+});
+export type OrchestrationTaskPlanStep = typeof OrchestrationTaskPlanStep.Type;
+
+export const OrchestrationTaskPlan = Schema.Struct({
+  threadId: ThreadId,
+  turnId: TurnId,
+  status: OrchestrationTaskPlanStatus,
+  explanation: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  steps: Schema.Array(OrchestrationTaskPlanStep),
+  sourceActivityId: EventId,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  settledAt: Schema.NullOr(IsoDateTime),
+});
+export type OrchestrationTaskPlan = typeof OrchestrationTaskPlan.Type;
+
 const SourceProposedPlanReference = Schema.Struct({
   threadId: ThreadId,
   planId: OrchestrationProposedPlanId,
@@ -346,6 +380,7 @@ export const OrchestrationThread = Schema.Struct({
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  latestTaskPlan: Schema.optionalKey(Schema.NullOr(OrchestrationTaskPlan)),
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),

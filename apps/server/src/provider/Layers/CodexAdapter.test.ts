@@ -522,6 +522,48 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("normalizes snake-case plan statuses from Codex plan updates", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-plan-updated"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: new Date().toISOString(),
+        method: "turn/plan/updated",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        payload: {
+          explanation: "  Work plan  ",
+          plan: [
+            { step: "Inspect", status: "done" },
+            { step: "Patch", status: "in_progress" },
+          ],
+        },
+      });
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+
+      assert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") {
+        return;
+      }
+      assert.equal(firstEvent.value.type, "turn.plan.updated");
+      if (firstEvent.value.type !== "turn.plan.updated") {
+        return;
+      }
+      assert.deepEqual(firstEvent.value.payload, {
+        explanation: "Work plan",
+        plan: [
+          { step: "Inspect", status: "completed" },
+          { step: "Patch", status: "inProgress" },
+        ],
+      });
+    }),
+  );
+
   it.effect("maps completed plan items to canonical proposed-plan completion events", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();

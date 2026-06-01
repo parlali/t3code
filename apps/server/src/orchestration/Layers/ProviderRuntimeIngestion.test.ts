@@ -2689,7 +2689,8 @@ describe("ProviderRuntimeIngestion", () => {
         ) &&
         entry.checkpoints.some(
           (checkpoint: ProviderRuntimeTestCheckpoint) => checkpoint.turnId === "turn-p1",
-        ),
+        ) &&
+        entry.latestTaskPlan?.status === "interrupted",
     );
 
     expect(thread.title).toBe("Renamed by provider");
@@ -2703,6 +2704,14 @@ describe("ProviderRuntimeIngestion", () => {
         : undefined;
     expect(planActivity?.kind).toBe("turn.plan.updated");
     expect(Array.isArray(planPayload?.plan)).toBe(true);
+    expect(thread.latestTaskPlan).toMatchObject({
+      status: "interrupted",
+      explanation: "Working through the plan",
+      steps: [
+        { step: "Inspect files", status: "completed" },
+        { step: "Apply patch", status: "inProgress" },
+      ],
+    });
 
     const toolUpdate = thread.activities.find(
       (activity: ProviderRuntimeTestActivity) => activity.id === "evt-item-updated",

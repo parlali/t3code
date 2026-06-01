@@ -43,6 +43,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_state`;
       yield* sql`DELETE FROM projection_thread_proposed_plans`;
+      yield* sql`DELETE FROM projection_thread_task_plans`;
       yield* sql`DELETE FROM projection_turns`;
 
       yield* sql`
@@ -150,6 +151,31 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'thread-2',
           '2026-02-24T00:00:05.000Z',
           '2026-02-24T00:00:05.500Z'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_task_plans (
+          thread_id,
+          turn_id,
+          status,
+          explanation,
+          steps_json,
+          source_activity_id,
+          created_at,
+          updated_at,
+          settled_at
+        )
+        VALUES (
+          'thread-1',
+          'turn-1',
+          'completed',
+          'Complete the work',
+          '[{"step":"Inspect","status":"completed"},{"step":"Patch","status":"inProgress"}]',
+          'activity-plan-1',
+          '2026-02-24T00:00:05.700Z',
+          '2026-02-24T00:00:08.000Z',
+          '2026-02-24T00:00:08.000Z'
         )
       `;
 
@@ -332,6 +358,20 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               updatedAt: "2026-02-24T00:00:05.500Z",
             },
           ],
+          latestTaskPlan: {
+            threadId: ThreadId.make("thread-1"),
+            turnId: asTurnId("turn-1"),
+            status: "completed",
+            explanation: "Complete the work",
+            steps: [
+              { step: "Inspect", status: "completed" },
+              { step: "Patch", status: "inProgress" },
+            ],
+            sourceActivityId: asEventId("activity-plan-1"),
+            createdAt: "2026-02-24T00:00:05.700Z",
+            updatedAt: "2026-02-24T00:00:08.000Z",
+            settledAt: "2026-02-24T00:00:08.000Z",
+          },
           activities: [
             {
               id: asEventId("activity-1"),
@@ -452,6 +492,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_threads`;
       yield* sql`DELETE FROM projection_thread_messages`;
       yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_thread_task_plans`;
       yield* sql`DELETE FROM projection_turns`;
 
       yield* sql`
@@ -642,6 +683,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
       yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_thread_task_plans`;
       yield* sql`DELETE FROM projection_state`;
 
       yield* sql`
@@ -793,6 +835,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_task_plans`;
       yield* sql`DELETE FROM projection_state`;
 
       yield* sql`
@@ -915,6 +958,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
 
         yield* sql`DELETE FROM projection_projects`;
         yield* sql`DELETE FROM projection_threads`;
+        yield* sql`DELETE FROM projection_thread_task_plans`;
         yield* sql`DELETE FROM projection_turns`;
 
         yield* sql`
@@ -1047,6 +1091,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_task_plans`;
       yield* sql`DELETE FROM projection_turns`;
 
       yield* sql`
@@ -1200,6 +1245,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
       yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_thread_task_plans`;
       yield* sql`DELETE FROM projection_state`;
 
       yield* sql`
@@ -1361,6 +1407,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_task_plans`;
       yield* sql`DELETE FROM projection_turns`;
 
       yield* sql`
@@ -1504,6 +1551,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_task_plans`;
       yield* sql`DELETE FROM projection_turns`;
       yield* sql`DELETE FROM projection_state`;
 
@@ -1656,6 +1704,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_task_plans`;
       yield* sql`DELETE FROM projection_turns`;
       yield* sql`DELETE FROM projection_state`;
 
@@ -1809,6 +1858,7 @@ it.effect(
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_task_plans`;
       yield* sql`DELETE FROM projection_turns`;
       yield* sql`DELETE FROM projection_state`;
 

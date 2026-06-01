@@ -3,6 +3,7 @@
  * Additional reference provided by the Cursor team: https://anysphere.enterprise.slack.com/files/U068SSJE141/F0APT1HSZRP/cursor-acp-extension-method-schemas.md
  */
 import type { UserInputQuestion } from "@t3tools/contracts";
+import { normalizePlanStepStatus } from "@t3tools/shared/providerPlan";
 import { Schema } from "effect";
 
 const CursorAskQuestionOption = Schema.Struct({
@@ -87,12 +88,7 @@ export function extractTodosAsPlan(params: typeof CursorUpdateTodosRequest.Type)
     if (step === "") {
       return [];
     }
-    const status: "pending" | "inProgress" | "completed" =
-      todo.status === "completed"
-        ? "completed"
-        : todo.status === "in_progress" || todo.status === "inProgress"
-          ? "inProgress"
-          : "pending";
+    const status = normalizePlanStepStatus(todo.status);
     return [{ step, status }];
   });
   return { plan };

@@ -11,6 +11,7 @@ import type {
   OrchestrationShellStreamEvent,
   OrchestrationSession,
   OrchestrationSessionStatus,
+  OrchestrationTaskPlan,
   OrchestrationThread,
   OrchestrationThreadShell,
   OrchestrationThreadActivity,
@@ -22,6 +23,7 @@ import { isProviderDriverKind, ProviderDriverKind } from "@t3tools/contracts";
 import type { ThreadId, TurnId } from "@t3tools/contracts";
 import { Schema } from "effect";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
+import { normalizePlanExplanation, normalizePlanSteps } from "@t3tools/shared/providerPlan";
 import { create } from "zustand";
 import {
   type ChatMessage,
@@ -74,6 +76,7 @@ export interface EnvironmentState {
   activityByThreadId: Record<ThreadId, Record<string, OrchestrationThreadActivity>>;
   proposedPlanIdsByThreadId: Record<ThreadId, string[]>;
   proposedPlanByThreadId: Record<ThreadId, Record<string, ProposedPlan>>;
+  taskPlanByThreadId: Record<ThreadId, OrchestrationTaskPlan | null>;
   turnDiffIdsByThreadId: Record<ThreadId, TurnId[]>;
   turnDiffSummaryByThreadId: Record<ThreadId, Record<TurnId, TurnDiffSummary>>;
 
@@ -108,6 +111,7 @@ const initialEnvironmentState: EnvironmentState = {
   activityByThreadId: {},
   proposedPlanIdsByThreadId: {},
   proposedPlanByThreadId: {},
+  taskPlanByThreadId: {},
   turnDiffIdsByThreadId: {},
   turnDiffSummaryByThreadId: {},
   sidebarThreadSummaryById: {},
@@ -242,6 +246,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     session: thread.session ? mapSession(thread.session) : null,
     messages: thread.messages.map((message) => mapMessage(environmentId, message)),
     proposedPlans: thread.proposedPlans.map(mapProposedPlan),
+    latestTaskPlan: thread.latestTaskPlan ?? null,
     error: sanitizeThreadErrorMessage(thread.session?.lastError),
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
@@ -362,6 +367,29 @@ function latestTurnsEqual(
     left.completedAt === right.completedAt &&
     left.assistantMessageId === right.assistantMessageId &&
     sourceProposedPlansEqual(left.sourceProposedPlan, right.sourceProposedPlan)
+  );
+}
+
+function taskPlansEqual(
+  left: OrchestrationTaskPlan | null | undefined,
+  right: OrchestrationTaskPlan | null | undefined,
+): boolean {
+  if (left === right) return true;
+  if (left == null || right == null) return false;
+  return (
+    left.threadId === right.threadId &&
+    left.turnId === right.turnId &&
+    left.status === right.status &&
+    left.explanation === right.explanation &&
+    left.sourceActivityId === right.sourceActivityId &&
+    left.createdAt === right.createdAt &&
+    left.updatedAt === right.updatedAt &&
+    left.settledAt === right.settledAt &&
+    left.steps.length === right.steps.length &&
+    left.steps.every(
+      (step, index) =>
+        step.step === right.steps[index]?.step && step.status === right.steps[index]?.status,
+    )
   );
 }
 
@@ -661,6 +689,16 @@ function writeThreadState(
     };
   }
 
+  if (!taskPlansEqual(previousThread?.latestTaskPlan, nextThread.latestTaskPlan)) {
+    nextState = {
+      ...nextState,
+      taskPlanByThreadId: {
+        ...nextState.taskPlanByThreadId,
+        [nextThread.id]: nextThread.latestTaskPlan ?? null,
+      },
+    };
+  }
+
   if (previousThread?.turnDiffSummaries !== nextThread.turnDiffSummaries) {
     const nextTurnDiffSlice = buildTurnDiffSlice(nextThread);
     nextState = {
@@ -801,6 +839,7 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
   const { [threadId]: _removedPlanIds, ...proposedPlanIdsByThreadId } =
     state.proposedPlanIdsByThreadId;
   const { [threadId]: _removedPlans, ...proposedPlanByThreadId } = state.proposedPlanByThreadId;
+  const { [threadId]: _removedTaskPlan, ...taskPlanByThreadId } = state.taskPlanByThreadId;
   const { [threadId]: _removedTurnDiffIds, ...turnDiffIdsByThreadId } = state.turnDiffIdsByThreadId;
   const { [threadId]: _removedTurnDiffs, ...turnDiffSummaryByThreadId } =
     state.turnDiffSummaryByThreadId;
@@ -820,6 +859,7 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
     activityByThreadId,
     proposedPlanIdsByThreadId,
     proposedPlanByThreadId,
+    taskPlanByThreadId,
     turnDiffIdsByThreadId,
     turnDiffSummaryByThreadId,
     sidebarThreadSummaryById,
@@ -986,6 +1026,88 @@ function retainThreadProposedPlansAfterRevert(
   );
 }
 
+function retainThreadTaskPlanAfterRevert(
+  taskPlan: OrchestrationTaskPlan | null,
+  retainedTurnIds: ReadonlySet<string>,
+): OrchestrationTaskPlan | null {
+  return taskPlan !== null && retainedTurnIds.has(taskPlan.turnId) ? taskPlan : null;
+}
+
+function taskPlanTerminalStatusFromSessionStatus(
+  status: OrchestrationSessionStatus,
+): OrchestrationTaskPlan["status"] | null {
+  switch (status) {
+    case "ready":
+      return "completed";
+    case "interrupted":
+    case "stopped":
+      return "interrupted";
+    case "error":
+      return "failed";
+    default:
+      return null;
+  }
+}
+
+function taskPlanTerminalStatusFromCheckpointStatus(
+  status: "ready" | "missing" | "error",
+): OrchestrationTaskPlan["status"] {
+  if (status === "error") return "failed";
+  if (status === "missing") return "interrupted";
+  return "completed";
+}
+
+function taskPlanFromActivity(
+  thread: Thread,
+  activity: OrchestrationThreadActivity,
+): OrchestrationTaskPlan | null {
+  if (activity.kind !== "turn.plan.updated" || activity.turnId === null) {
+    return null;
+  }
+  const payload =
+    typeof activity.payload === "object" && activity.payload !== null
+      ? (activity.payload as Record<string, unknown>)
+      : null;
+  const steps = normalizePlanSteps(payload?.plan);
+  if (steps.length === 0) {
+    return null;
+  }
+
+  const previous = thread.latestTaskPlan?.turnId === activity.turnId ? thread.latestTaskPlan : null;
+  const isSettled = previous !== null && previous.status !== "active";
+  return {
+    threadId: thread.id,
+    turnId: activity.turnId,
+    status: isSettled ? previous.status : "active",
+    explanation: normalizePlanExplanation(payload?.explanation),
+    steps,
+    sourceActivityId: activity.id,
+    createdAt: previous?.createdAt ?? activity.createdAt,
+    updatedAt: activity.createdAt,
+    settledAt: isSettled ? previous.settledAt : null,
+  };
+}
+
+function settleThreadTaskPlan(
+  taskPlan: OrchestrationTaskPlan | null,
+  turnId: TurnId | null,
+  status: OrchestrationTaskPlan["status"],
+  settledAt: string,
+): OrchestrationTaskPlan | null {
+  if (taskPlan === null || turnId === null || taskPlan.turnId !== turnId) {
+    return taskPlan;
+  }
+  if (taskPlan.status !== "active") {
+    return taskPlan;
+  }
+  return {
+    ...taskPlan,
+    status,
+    updatedAt: taskPlan.updatedAt > settledAt ? taskPlan.updatedAt : settledAt,
+    settledAt,
+  };
+}
+
 function toLegacySessionStatus(
   status: OrchestrationSessionStatus,
 ): "connecting" | "ready" | "running" | "error" | "closed" {
@@ -1099,6 +1221,7 @@ function syncEnvironmentShellSnapshot(
       nextThreadIds,
     ),
     proposedPlanByThreadId: retainThreadScopedRecord(state.proposedPlanByThreadId, nextThreadIds),
+    taskPlanByThreadId: retainThreadScopedRecord(state.taskPlanByThreadId, nextThreadIds),
     turnDiffIdsByThreadId: retainThreadScopedRecord(state.turnDiffIdsByThreadId, nextThreadIds),
     turnDiffSummaryByThreadId: retainThreadScopedRecord(
       state.turnDiffSummaryByThreadId,
@@ -1265,6 +1388,7 @@ function applyEnvironmentOrchestrationEvent(
           deletedAt: null,
           messages: [],
           proposedPlans: [],
+          latestTaskPlan: null,
           activities: [],
           checkpoints: [],
           session: null,
@@ -1351,6 +1475,12 @@ function applyEnvironmentOrchestrationEvent(
             completedAt: latestTurn.completedAt ?? event.payload.createdAt,
             assistantMessageId: latestTurn.assistantMessageId,
           }),
+          latestTaskPlan: settleThreadTaskPlan(
+            thread.latestTaskPlan ?? null,
+            event.payload.turnId,
+            "interrupted",
+            event.payload.createdAt,
+          ),
           updatedAt: event.occurredAt,
         };
       });
@@ -1447,34 +1577,50 @@ function applyEnvironmentOrchestrationEvent(
       });
 
     case "thread.session-set":
-      return updateThreadState(state, event.payload.threadId, (thread) => ({
-        ...thread,
-        session: mapSession(event.payload.session),
-        error: sanitizeThreadErrorMessage(event.payload.session.lastError),
-        latestTurn:
-          event.payload.session.status === "running" && event.payload.session.activeTurnId !== null
-            ? buildLatestTurn({
-                previous: thread.latestTurn,
-                turnId: event.payload.session.activeTurnId,
-                state: "running",
-                requestedAt:
-                  thread.latestTurn?.turnId === event.payload.session.activeTurnId
-                    ? thread.latestTurn.requestedAt
-                    : event.payload.session.updatedAt,
-                startedAt:
-                  thread.latestTurn?.turnId === event.payload.session.activeTurnId
-                    ? (thread.latestTurn.startedAt ?? event.payload.session.updatedAt)
-                    : event.payload.session.updatedAt,
-                completedAt: null,
-                assistantMessageId:
-                  thread.latestTurn?.turnId === event.payload.session.activeTurnId
-                    ? thread.latestTurn.assistantMessageId
-                    : null,
-                sourceProposedPlan: thread.pendingSourceProposedPlan,
-              })
-            : thread.latestTurn,
-        updatedAt: event.occurredAt,
-      }));
+      return updateThreadState(state, event.payload.threadId, (thread) => {
+        const terminalPlanStatus =
+          event.payload.session.activeTurnId === null
+            ? taskPlanTerminalStatusFromSessionStatus(event.payload.session.status)
+            : null;
+        return {
+          ...thread,
+          session: mapSession(event.payload.session),
+          error: sanitizeThreadErrorMessage(event.payload.session.lastError),
+          latestTurn:
+            event.payload.session.status === "running" &&
+            event.payload.session.activeTurnId !== null
+              ? buildLatestTurn({
+                  previous: thread.latestTurn,
+                  turnId: event.payload.session.activeTurnId,
+                  state: "running",
+                  requestedAt:
+                    thread.latestTurn?.turnId === event.payload.session.activeTurnId
+                      ? thread.latestTurn.requestedAt
+                      : event.payload.session.updatedAt,
+                  startedAt:
+                    thread.latestTurn?.turnId === event.payload.session.activeTurnId
+                      ? (thread.latestTurn.startedAt ?? event.payload.session.updatedAt)
+                      : event.payload.session.updatedAt,
+                  completedAt: null,
+                  assistantMessageId:
+                    thread.latestTurn?.turnId === event.payload.session.activeTurnId
+                      ? thread.latestTurn.assistantMessageId
+                      : null,
+                  sourceProposedPlan: thread.pendingSourceProposedPlan,
+                })
+              : thread.latestTurn,
+          latestTaskPlan:
+            terminalPlanStatus === null
+              ? thread.latestTaskPlan
+              : settleThreadTaskPlan(
+                  thread.latestTaskPlan ?? null,
+                  thread.latestTurn?.turnId ?? thread.latestTaskPlan?.turnId ?? null,
+                  terminalPlanStatus,
+                  event.payload.session.updatedAt,
+                ),
+          updatedAt: event.occurredAt,
+        };
+      });
 
     case "thread.session-stop-requested":
       return updateThreadState(state, event.payload.threadId, (thread) =>
@@ -1556,6 +1702,12 @@ function applyEnvironmentOrchestrationEvent(
           ...thread,
           turnDiffSummaries,
           latestTurn,
+          latestTaskPlan: settleThreadTaskPlan(
+            thread.latestTaskPlan ?? null,
+            event.payload.turnId,
+            taskPlanTerminalStatusFromCheckpointStatus(event.payload.status),
+            event.payload.completedAt,
+          ),
           updatedAt: event.occurredAt,
         };
       });
@@ -1584,6 +1736,10 @@ function applyEnvironmentOrchestrationEvent(
           thread.proposedPlans,
           retainedTurnIds,
         ).slice(-MAX_THREAD_PROPOSED_PLANS);
+        const latestTaskPlan = retainThreadTaskPlanAfterRevert(
+          thread.latestTaskPlan ?? null,
+          retainedTurnIds,
+        );
         const activities = retainThreadActivitiesAfterRevert(thread.activities, retainedTurnIds);
         const latestCheckpoint = turnDiffSummaries.at(-1) ?? null;
 
@@ -1592,6 +1748,7 @@ function applyEnvironmentOrchestrationEvent(
           turnDiffSummaries,
           messages,
           proposedPlans,
+          latestTaskPlan,
           activities,
           pendingSourceProposedPlan: undefined,
           latestTurn:
@@ -1613,15 +1770,18 @@ function applyEnvironmentOrchestrationEvent(
 
     case "thread.activity-appended":
       return updateThreadState(state, event.payload.threadId, (thread) => {
+        const activity = { ...event.payload.activity };
         const activities = [
-          ...thread.activities.filter((activity) => activity.id !== event.payload.activity.id),
-          { ...event.payload.activity },
+          ...thread.activities.filter((entry) => entry.id !== activity.id),
+          activity,
         ]
           .toSorted(compareActivities)
           .slice(-MAX_THREAD_ACTIVITIES);
+        const latestTaskPlan = taskPlanFromActivity(thread, activity) ?? thread.latestTaskPlan;
         return {
           ...thread,
           activities,
+          latestTaskPlan,
           updatedAt: event.occurredAt,
         };
       });

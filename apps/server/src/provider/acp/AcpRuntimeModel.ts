@@ -1,4 +1,5 @@
 import type * as EffectAcpSchema from "effect-acp/schema";
+import { normalizePlanStepStatus as normalizeSharedPlanStepStatus } from "@t3tools/shared/providerPlan";
 import { deriveToolActivityPresentation } from "@t3tools/shared/toolActivity";
 import type { ToolLifecycleItemType } from "@t3tools/contracts";
 
@@ -147,18 +148,6 @@ export function parseSessionModeState(
     currentModeId,
     availableModes,
   };
-}
-
-function normalizePlanStepStatus(raw: unknown): "pending" | "inProgress" | "completed" {
-  switch (raw) {
-    case "completed":
-      return "completed";
-    case "in_progress":
-    case "inProgress":
-      return "inProgress";
-    default:
-      return "pending";
-  }
 }
 
 function normalizeToolCallStatus(
@@ -436,7 +425,7 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
     case "plan": {
       const plan = upd.entries.map((entry, index) => ({
         step: entry.content.trim().length > 0 ? entry.content.trim() : `Step ${index + 1}`,
-        status: normalizePlanStepStatus(entry.status),
+        status: normalizeSharedPlanStepStatus(entry.status),
       }));
       if (plan.length > 0) {
         events.push({

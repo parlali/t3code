@@ -552,6 +552,9 @@ function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) 
         Object.fromEntries(thread.proposedPlans.map((plan) => [plan.id, plan])),
       ]),
     ),
+    taskPlanByThreadId: Object.fromEntries(
+      threads.map((thread) => [thread.id, thread.latestTaskPlan ?? null]),
+    ),
     turnDiffIdsByThreadId: Object.fromEntries(
       threads.map((thread) => [
         thread.id,

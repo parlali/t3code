@@ -312,6 +312,142 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       assert.deepEqual(threadRows, [{ latestTurnId: turnId }]);
     }),
   );
+
+  it.effect("projects task plans and settles active steps when a turn completes", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+      const projectId = ProjectId.make("project-task-plan");
+      const threadId = ThreadId.make("thread-task-plan");
+      const turnId = TurnId.make("turn-task-plan");
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.make("evt-task-plan-1"),
+        aggregateKind: "project",
+        aggregateId: projectId,
+        occurredAt: "2026-05-16T11:00:00.000Z",
+        commandId: CommandId.make("cmd-task-plan-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-task-plan-1"),
+        metadata: {},
+        payload: {
+          projectId,
+          title: "Project Task Plan",
+          workspaceRoot: "/tmp/project-task-plan",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-05-16T11:00:00.000Z",
+          updatedAt: "2026-05-16T11:00:00.000Z",
+        },
+      });
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.make("evt-task-plan-2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-05-16T11:00:01.000Z",
+        commandId: CommandId.make("cmd-task-plan-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-task-plan-2"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId,
+          title: "Thread Task Plan",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-05-16T11:00:01.000Z",
+          updatedAt: "2026-05-16T11:00:01.000Z",
+        },
+      });
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.make("evt-task-plan-3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-05-16T11:00:02.000Z",
+        commandId: CommandId.make("cmd-task-plan-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-task-plan-3"),
+        metadata: {},
+        payload: {
+          threadId,
+          activity: {
+            id: EventId.make("activity-task-plan"),
+            tone: "info",
+            kind: "turn.plan.updated",
+            summary: "Plan updated",
+            payload: {
+              explanation: "  Finish work  ",
+              plan: [
+                { content: "Inspect", status: "done" },
+                { content: "Patch", status: "in_progress" },
+              ],
+            },
+            turnId,
+            createdAt: "2026-05-16T11:00:02.000Z",
+          },
+        },
+      });
+      yield* appendAndProject({
+        type: "thread.turn-diff-completed",
+        eventId: EventId.make("evt-task-plan-4"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-05-16T11:00:03.000Z",
+        commandId: CommandId.make("cmd-task-plan-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-task-plan-4"),
+        metadata: {},
+        payload: {
+          threadId,
+          turnId,
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.make("checkpoint-task-plan"),
+          status: "ready",
+          files: [],
+          assistantMessageId: MessageId.make("assistant-task-plan"),
+          completedAt: "2026-05-16T11:00:03.000Z",
+        },
+      });
+
+      const rows = yield* sql<{
+        readonly status: string;
+        readonly explanation: string | null;
+        readonly stepsJson: string;
+        readonly settledAt: string | null;
+      }>`
+        SELECT
+          status,
+          explanation,
+          steps_json AS "stepsJson",
+          settled_at AS "settledAt"
+        FROM projection_thread_task_plans
+        WHERE thread_id = ${threadId} AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(rows, [
+        {
+          status: "completed",
+          explanation: "Finish work",
+          stepsJson:
+            '[{"step":"Inspect","status":"completed"},{"step":"Patch","status":"inProgress"}]',
+          settledAt: "2026-05-16T11:00:03.000Z",
+        },
+      ]);
+    }),
+  );
 });
 
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(

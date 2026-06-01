@@ -51,6 +51,7 @@ import {
   getProviderOptionDescriptors,
   resolvePromptInjectedEffort,
 } from "@t3tools/shared/model";
+import { normalizePlanStep } from "@t3tools/shared/providerPlan";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -62,7 +63,6 @@ import * as Fiber from "effect/Fiber";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -502,31 +502,14 @@ function isTodoTool(toolName: string): boolean {
   return toolName.toLowerCase().includes("todowrite");
 }
 
-type PlanStep = {
-  step: string;
-  status: "pending" | "inProgress" | "completed";
-};
-
-function extractPlanStepsFromTodoInput(input: Record<string, unknown>): PlanStep[] | null {
+function extractPlanStepsFromTodoInput(input: Record<string, unknown>) {
   // TodoWrite format: { todos: [{ content, status, activeForm? }] }
-  const todos = input.todos;
-  if (!Array.isArray(todos) || todos.length === 0) {
-    return null;
-  }
-  return todos
-    .filter((t): t is Record<string, unknown> => t !== null && typeof t === "object")
-    .map((todo) => ({
-      step:
-        typeof todo.content === "string" && todo.content.trim().length > 0
-          ? todo.content.trim()
-          : "Task",
-      status:
-        todo.status === "completed"
-          ? "completed"
-          : todo.status === "in_progress"
-            ? "inProgress"
-            : "pending",
-    }));
+  return Array.isArray(input.todos)
+    ? input.todos.flatMap((todo) => {
+        const step = normalizePlanStep(todo, "Task");
+        return step ? [step] : [];
+      })
+    : [];
 }
 
 function summarizeToolRequest(toolName: string, input: Record<string, unknown>): string {
@@ -1044,6 +1027,33 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Queue.offer(runtimeEventQueue, event).pipe(Effect.asVoid);
+
+  const emitTodoPlanUpdate = Effect.fn("emitTodoPlanUpdate")(function* (
+    context: ClaudeSessionContext,
+    toolInput: Record<string, unknown>,
+  ) {
+    const planSteps = extractPlanStepsFromTodoInput(toolInput);
+    if (planSteps.length === 0) {
+      return;
+    }
+    const planStamp = yield* makeEventStamp();
+    yield* offerRuntimeEvent({
+      type: "turn.plan.updated",
+      eventId: planStamp.eventId,
+      provider: PROVIDER,
+      createdAt: planStamp.createdAt,
+      threadId: context.session.threadId,
+      ...(context.turnState
+        ? {
+            turnId: asCanonicalTurnId(context.turnState.turnId),
+          }
+        : {}),
+      payload: {
+        plan: planSteps,
+      },
+      providerRefs: nativeProviderRefs(context),
+    });
+  });
 
   const logNativeSdkMessage = Effect.fn("logNativeSdkMessage")(function* (
     context: ClaudeSessionContext,
@@ -1746,26 +1756,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
         // Emit plan update when TodoWrite input is parsed
         if (parsedInput && isTodoTool(nextTool.toolName)) {
-          const planSteps = extractPlanStepsFromTodoInput(parsedInput);
-          if (planSteps && planSteps.length > 0) {
-            const planStamp = yield* makeEventStamp();
-            yield* offerRuntimeEvent({
-              type: "turn.plan.updated",
-              eventId: planStamp.eventId,
-              provider: PROVIDER,
-              createdAt: planStamp.createdAt,
-              threadId: context.session.threadId,
-              ...(context.turnState
-                ? {
-                    turnId: asCanonicalTurnId(context.turnState.turnId),
-                  }
-                : {}),
-              payload: {
-                plan: planSteps,
-              },
-              providerRefs: nativeProviderRefs(context),
-            });
-          }
+          yield* emitTodoPlanUpdate(context, parsedInput);
         }
       }
       return;
@@ -1838,6 +1829,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           payload: message,
         },
       });
+      if (isTodoTool(tool.toolName) && inputFingerprint) {
+        yield* emitTodoPlanUpdate(context, toolInput);
+      }
       return;
     }
 
