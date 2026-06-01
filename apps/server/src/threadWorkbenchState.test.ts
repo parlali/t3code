@@ -22,6 +22,7 @@ layer("ThreadWorkbenchStates", (it) => {
         CREATE TABLE thread_workbench_state (
           thread_id TEXT PRIMARY KEY,
           selection_source TEXT,
+          change_source TEXT,
           relative_path TEXT,
           updated_at TEXT NOT NULL
         )
@@ -39,6 +40,7 @@ layer("ThreadWorkbenchStates", (it) => {
       });
       assert.deepEqual(selected.selection, {
         source: "changes",
+        changeSource: "working-tree",
         relativePath: "apps/web/src/App.tsx",
       });
 
@@ -50,10 +52,12 @@ layer("ThreadWorkbenchStates", (it) => {
 
       const rows = yield* sql<{
         readonly selectionSource: string | null;
+        readonly changeSource: string | null;
         readonly relativePath: string | null;
       }>`
         SELECT
           selection_source AS "selectionSource",
+          change_source AS "changeSource",
           relative_path AS "relativePath"
         FROM thread_workbench_state
         WHERE thread_id = ${threadId}
@@ -61,6 +65,7 @@ layer("ThreadWorkbenchStates", (it) => {
       assert.deepEqual(rows, [
         {
           selectionSource: null,
+          changeSource: null,
           relativePath: null,
         },
       ]);

@@ -21,12 +21,12 @@ interface ChangesTreeProps {
   readonly actionsDisabled?: boolean | undefined;
 }
 
-export const ChangesTree = memo(function ChangesTree(props: ChangesTreeProps) {
-  const collectPaths = (node: TurnDiffTreeNode): string[] => {
-    if (node.kind === "file") return [node.path];
-    return node.children.flatMap((child) => collectPaths(child));
-  };
+function collectPaths(node: TurnDiffTreeNode): string[] {
+  if (node.kind === "file") return [node.path];
+  return node.children.flatMap((child) => collectPaths(child));
+}
 
+export const ChangesTree = memo(function ChangesTree(props: ChangesTreeProps) {
   const renderNode = (node: TurnDiffTreeNode, depth: number) => {
     const leftPadding = 8 + depth * 14;
 

@@ -140,41 +140,99 @@ function parseBranchAb(value: string): { ahead: number; behind: number } {
   };
 }
 
-function parseNumstatEntries(
-  stdout: string,
-): Array<{ path: string; insertions: number; deletions: number }> {
-  const entries: Array<{ path: string; insertions: number; deletions: number }> = [];
-  for (const line of stdout.split(/\r?\n/g)) {
-    if (line.trim().length === 0) continue;
-    const [addedRaw, deletedRaw, ...pathParts] = line.split("\t");
-    const rawPath =
-      pathParts.length > 1 ? (pathParts.at(-1) ?? "").trim() : pathParts.join("\t").trim();
-    if (rawPath.length === 0) continue;
-    const added = Number.parseInt(addedRaw ?? "0", 10);
-    const deleted = Number.parseInt(deletedRaw ?? "0", 10);
-    const normalizedPath = normalizeNumstatPath(rawPath);
+interface ParsedNumstatEntry {
+  readonly path: string;
+  readonly oldPath?: string | undefined;
+  readonly insertions: number;
+  readonly deletions: number;
+}
+
+interface ChangeStatTotals {
+  insertions: number;
+  deletions: number;
+}
+
+interface ParsedPorcelainChange {
+  path: string;
+  oldPath?: string | undefined;
+  status: string;
+  indexStatus: string;
+  worktreeStatus: string;
+  staged: boolean;
+  unstaged: boolean;
+  untracked: boolean;
+  conflicted: boolean;
+}
+
+interface StatusFileEntry {
+  path: string;
+  insertions: number;
+  deletions: number;
+  status?: string | undefined;
+  oldPath?: string | undefined;
+  indexStatus?: string | undefined;
+  worktreeStatus?: string | undefined;
+  staged?: boolean | undefined;
+  unstaged?: boolean | undefined;
+  untracked?: boolean | undefined;
+  conflicted?: boolean | undefined;
+  stagedInsertions?: number | undefined;
+  stagedDeletions?: number | undefined;
+  unstagedInsertions?: number | undefined;
+  unstagedDeletions?: number | undefined;
+}
+
+function pathspecStdin(relativePaths: readonly string[]): string {
+  return `${relativePaths.join("\0")}\0`;
+}
+
+function parseNumstatCount(value: string | undefined): number {
+  const parsed = Number.parseInt(value ?? "0", 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseNumstatEntries(stdout: string): ParsedNumstatEntry[] {
+  const entries: ParsedNumstatEntry[] = [];
+  const records = stdout.split("\0");
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+
+    const firstTab = record.indexOf("\t");
+    if (firstTab < 0) continue;
+    const secondTab = record.indexOf("\t", firstTab + 1);
+    if (secondTab < 0) continue;
+
+    const insertions = parseNumstatCount(record.slice(0, firstTab));
+    const deletions = parseNumstatCount(record.slice(firstTab + 1, secondTab));
+    const inlinePath = record.slice(secondTab + 1);
+    if (inlinePath.length > 0) {
+      entries.push({ path: inlinePath, insertions, deletions });
+      continue;
+    }
+
+    const oldPath = records[index + 1];
+    const newPath = records[index + 2];
+    if (!oldPath || !newPath) continue;
+    index += 2;
     entries.push({
-      path: normalizedPath.length > 0 ? normalizedPath : rawPath,
-      insertions: Number.isFinite(added) ? added : 0,
-      deletions: Number.isFinite(deleted) ? deleted : 0,
+      path: newPath,
+      oldPath,
+      insertions,
+      deletions,
     });
   }
   return entries;
 }
 
-function normalizeNumstatPath(rawPath: string): string {
-  const braceRenameMatch = /^(.*)\{([^{}]*) => ([^{}]*)\}(.*)$/.exec(rawPath);
-  if (braceRenameMatch) {
-    const [, prefix = "", , nextName = "", suffix = ""] = braceRenameMatch;
-    return `${prefix}${nextName}${suffix}`.trim();
-  }
-
-  const renameArrowIndex = rawPath.indexOf(" => ");
-  if (renameArrowIndex >= 0) {
-    return rawPath.slice(renameArrowIndex + " => ".length).trim();
-  }
-
-  return rawPath;
+function addStat(
+  stats: Map<string, ChangeStatTotals>,
+  entry: Pick<ParsedNumstatEntry, "path" | "insertions" | "deletions">,
+): void {
+  const existing = stats.get(entry.path) ?? { insertions: 0, deletions: 0 };
+  existing.insertions += entry.insertions;
+  existing.deletions += entry.deletions;
+  stats.set(entry.path, existing);
 }
 
 function countTextLines(contents: string): number {
@@ -184,65 +242,31 @@ function countTextLines(contents: string): number {
   return contents.endsWith("\n") ? newlineCount : newlineCount + 1;
 }
 
-function parsePorcelainPathAfterFields(line: string, fieldCountBeforePath: number): string | null {
+function parsePorcelainPathAfterFields(
+  record: string,
+  fieldCountBeforePath: number,
+): string | null {
   let index = 0;
-  let fieldsSeen = 0;
-
-  while (index < line.length && fieldsSeen < fieldCountBeforePath) {
-    while (index < line.length && /\s/.test(line[index] ?? "")) {
-      index += 1;
-    }
-    while (index < line.length && !/\s/.test(line[index] ?? "")) {
-      index += 1;
-    }
-    fieldsSeen += 1;
+  for (let fieldsSeen = 0; fieldsSeen < fieldCountBeforePath; fieldsSeen += 1) {
+    const separatorIndex = record.indexOf(" ", index);
+    if (separatorIndex < 0) return null;
+    index = separatorIndex + 1;
   }
 
-  const path = line.slice(index).trim();
-  return path.length > 0 ? path : null;
+  const pathValue = record.slice(index);
+  return pathValue.length > 0 ? pathValue : null;
 }
 
-function parsePorcelainPath(line: string): string | null {
-  if (line.startsWith("? ") || line.startsWith("! ")) {
-    const simple = line.slice(2).trim();
-    return simple.length > 0 ? simple : null;
-  }
-
-  if (line.startsWith("1 ")) {
-    return parsePorcelainPathAfterFields(line, 8);
-  }
-
-  if (line.startsWith("2 ")) {
-    const targetAndSource = parsePorcelainPathAfterFields(line, 9);
-    if (!targetAndSource) return null;
-    const [targetPath] = targetAndSource.split("\t");
-    return targetPath?.trim().length ? targetPath.trim() : null;
-  }
-
-  if (line.startsWith("u ")) {
-    return parsePorcelainPathAfterFields(line, 10);
-  }
-
-  return null;
-}
-
-function parsePorcelainChange(line: string): {
-  path: string;
-  status: string;
-  indexStatus: string;
-  worktreeStatus: string;
-  staged: boolean;
-  unstaged: boolean;
-  untracked: boolean;
-  conflicted: boolean;
-} | null {
-  const path = parsePorcelainPath(line);
-  if (!path) return null;
-
-  if (line.startsWith("? ")) {
+function parsePorcelainChange(
+  record: string,
+  renameOldPath?: string | undefined,
+): ParsedPorcelainChange | null {
+  if (record.startsWith("? ")) {
+    const path = record.slice(2);
+    if (path.length === 0) return null;
     return {
       path,
-      status: "U",
+      status: "A",
       indexStatus: "?",
       worktreeStatus: "?",
       staged: false,
@@ -252,7 +276,9 @@ function parsePorcelainChange(line: string): {
     };
   }
 
-  if (line.startsWith("u ")) {
+  if (record.startsWith("u ")) {
+    const path = parsePorcelainPathAfterFields(record, 10);
+    if (!path) return null;
     return {
       path,
       status: "U",
@@ -265,11 +291,14 @@ function parsePorcelainChange(line: string): {
     };
   }
 
-  if (!(line.startsWith("1 ") || line.startsWith("2 "))) {
+  if (!(record.startsWith("1 ") || record.startsWith("2 "))) {
     return null;
   }
 
-  const xy = line.slice(2, 4);
+  const isRename = record.startsWith("2 ");
+  const path = parsePorcelainPathAfterFields(record, isRename ? 9 : 8);
+  if (!path) return null;
+  const xy = record.slice(2, 4);
   const indexStatus = xy[0] ?? ".";
   const worktreeStatus = xy[1] ?? ".";
   const staged = indexStatus !== ".";
@@ -277,6 +306,7 @@ function parsePorcelainChange(line: string): {
   const status = staged ? indexStatus : unstaged ? worktreeStatus : "M";
   return {
     path,
+    ...(renameOldPath ? { oldPath: renameOldPath } : {}),
     status,
     indexStatus,
     worktreeStatus,
@@ -940,6 +970,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   ): Effect.Effect<void, GitCommandError> =>
     executeGit(operation, cwd, args, { allowNonZeroExit }).pipe(Effect.asVoid);
 
+  const runGitWithPathspecStdin = (
+    operation: string,
+    cwd: string,
+    args: readonly string[],
+    relativePaths: readonly string[],
+  ): Effect.Effect<void, GitCommandError> =>
+    executeGit(operation, cwd, [...args, "--pathspec-from-file=-", "--pathspec-file-nul"], {
+      stdin: pathspecStdin(relativePaths),
+    }).pipe(Effect.asVoid);
+
   const runGitStdout = (
     operation: string,
     cwd: string,
@@ -1031,6 +1071,50 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ),
       ),
     );
+  });
+
+  const readGitObjectText = Effect.fn("GitVcsDriver.readGitObjectText")(function* (
+    operation: string,
+    cwd: string,
+    revision: string,
+  ) {
+    const result = yield* executeGit(operation, cwd, ["show", revision], {
+      allowNonZeroExit: true,
+      maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
+    });
+    return result.exitCode === 0 ? result.stdout : null;
+  });
+
+  const readStagedRenameOldPath = Effect.fn("GitVcsDriver.readStagedRenameOldPath")(function* (
+    cwd: string,
+    relativePath: string,
+  ) {
+    const result = yield* executeGit(
+      "GitVcsDriver.readStagedRenameOldPath.status",
+      cwd,
+      ["status", "--porcelain=2", "-z", "--untracked-files=no"],
+      {
+        allowNonZeroExit: true,
+      },
+    );
+    if (result.exitCode !== 0) return null;
+
+    const records = result.stdout.split("\0");
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index];
+      if (!record?.startsWith("2 ")) continue;
+
+      const renameOldPath = records[index + 1];
+      if (renameOldPath !== undefined) {
+        index += 1;
+      }
+      const change = parsePorcelainChange(record, renameOldPath);
+      if (change?.path === relativePath && change.staged && change.oldPath) {
+        return change.oldPath;
+      }
+    }
+
+    return null;
   });
 
   const countUntrackedFileInsertions = Effect.fn("GitVcsDriver.countUntrackedFileInsertions")(
@@ -1413,7 +1497,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const statusResult = yield* executeGit(
       "GitVcsDriver.statusDetails.status",
       cwd,
-      ["status", "--porcelain=2", "--branch", "--untracked-files=all"],
+      ["status", "--porcelain=2", "-z", "--branch", "--untracked-files=all"],
       {
         allowNonZeroExit: true,
       },
@@ -1428,7 +1512,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       return yield* createGitCommandError(
         "GitVcsDriver.statusDetails.status",
         cwd,
-        ["status", "--porcelain=2", "--branch", "--untracked-files=all"],
+        ["status", "--porcelain=2", "-z", "--branch", "--untracked-files=all"],
         stderr || "git status failed",
       );
     }
@@ -1436,11 +1520,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const [unstagedNumstatStdout, stagedNumstatStdout, defaultRefResult, hasPrimaryRemote] =
       yield* Effect.all(
         [
-          runGitStdout("GitVcsDriver.statusDetails.unstagedNumstat", cwd, ["diff", "--numstat"]),
+          runGitStdout("GitVcsDriver.statusDetails.unstagedNumstat", cwd, [
+            "diff",
+            "--numstat",
+            "-z",
+          ]),
           runGitStdout("GitVcsDriver.statusDetails.stagedNumstat", cwd, [
             "diff",
             "--cached",
             "--numstat",
+            "-z",
           ]),
           executeGit(
             "GitVcsDriver.statusDetails.defaultRef",
@@ -1467,11 +1556,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     let behindCount = 0;
     let aheadOfDefaultCount = 0;
     let hasWorkingTreeChanges = false;
-    const changedFilesWithoutNumstat = new Set<string>();
     const changeMetadataByPath = new Map<
       string,
       {
         path: string;
+        oldPath?: string | undefined;
         status: string;
         indexStatus: string;
         worktreeStatus: string;
@@ -1482,34 +1571,40 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
     >();
 
-    for (const line of statusStdout.split(/\r?\n/g)) {
-      if (line.startsWith("# branch.head ")) {
-        const value = line.slice("# branch.head ".length).trim();
+    const statusRecords = statusStdout.split("\0");
+    for (let index = 0; index < statusRecords.length; index += 1) {
+      const record = statusRecords[index];
+      if (!record) continue;
+      if (record.startsWith("# branch.head ")) {
+        const value = record.slice("# branch.head ".length).trim();
         refName = value.startsWith("(") ? null : value;
         continue;
       }
-      if (line.startsWith("# branch.oid ")) {
-        const value = line.slice("# branch.oid ".length).trim();
+      if (record.startsWith("# branch.oid ")) {
+        const value = record.slice("# branch.oid ".length).trim();
         headSha = value.length > 0 && !value.startsWith("(") ? value : null;
         continue;
       }
-      if (line.startsWith("# branch.upstream ")) {
-        const value = line.slice("# branch.upstream ".length).trim();
+      if (record.startsWith("# branch.upstream ")) {
+        const value = record.slice("# branch.upstream ".length).trim();
         upstreamRef = value.length > 0 ? value : null;
         continue;
       }
-      if (line.startsWith("# branch.ab ")) {
-        const value = line.slice("# branch.ab ".length).trim();
+      if (record.startsWith("# branch.ab ")) {
+        const value = record.slice("# branch.ab ".length).trim();
         const parsed = parseBranchAb(value);
         aheadCount = parsed.ahead;
         behindCount = parsed.behind;
         continue;
       }
-      if (line.trim().length > 0 && !line.startsWith("#")) {
+      if (!record.startsWith("#")) {
         hasWorkingTreeChanges = true;
-        const change = parsePorcelainChange(line);
+        const renameOldPath = record.startsWith("2 ") ? statusRecords[index + 1] : undefined;
+        if (renameOldPath !== undefined) {
+          index += 1;
+        }
+        const change = parsePorcelainChange(record, renameOldPath);
         if (change) {
-          changedFilesWithoutNumstat.add(change.path);
           changeMetadataByPath.set(change.path, change);
         }
       }
@@ -1540,14 +1635,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             );
     }
 
-    const stagedEntries = parseNumstatEntries(stagedNumstatStdout);
-    const unstagedEntries = parseNumstatEntries(unstagedNumstatStdout);
-    const fileStatMap = new Map<string, { insertions: number; deletions: number }>();
-    for (const entry of [...stagedEntries, ...unstagedEntries]) {
-      const existing = fileStatMap.get(entry.path) ?? { insertions: 0, deletions: 0 };
-      existing.insertions += entry.insertions;
-      existing.deletions += entry.deletions;
-      fileStatMap.set(entry.path, existing);
+    const stagedStatMap = new Map<string, ChangeStatTotals>();
+    const unstagedStatMap = new Map<string, ChangeStatTotals>();
+    for (const entry of parseNumstatEntries(stagedNumstatStdout)) {
+      addStat(stagedStatMap, entry);
+    }
+    for (const entry of parseNumstatEntries(unstagedNumstatStdout)) {
+      addStat(unstagedStatMap, entry);
     }
     const untrackedPaths = Array.from(changeMetadataByPath.values())
       .filter((metadata) => metadata.untracked)
@@ -1561,57 +1655,52 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       { concurrency: 16 },
     );
     for (const [filePath, insertionCount] of untrackedInsertionCounts) {
-      if (fileStatMap.has(filePath)) continue;
-      fileStatMap.set(filePath, { insertions: insertionCount, deletions: 0 });
+      if (unstagedStatMap.has(filePath)) continue;
+      unstagedStatMap.set(filePath, { insertions: insertionCount, deletions: 0 });
     }
 
     let insertions = 0;
     let deletions = 0;
-    const files = Array.from(fileStatMap.entries())
-      .map(([filePath, stat]) => {
-        insertions += stat.insertions;
-        deletions += stat.deletions;
+    const filePaths = new Set([
+      ...changeMetadataByPath.keys(),
+      ...stagedStatMap.keys(),
+      ...unstagedStatMap.keys(),
+    ]);
+    const files = Array.from(filePaths)
+      .map((filePath) => {
+        const stagedStat = stagedStatMap.get(filePath);
+        const unstagedStat = unstagedStatMap.get(filePath);
+        const fileInsertions = (stagedStat?.insertions ?? 0) + (unstagedStat?.insertions ?? 0);
+        const fileDeletions = (stagedStat?.deletions ?? 0) + (unstagedStat?.deletions ?? 0);
+        insertions += fileInsertions;
+        deletions += fileDeletions;
         const metadata = changeMetadataByPath.get(filePath);
-        return {
+        const file: StatusFileEntry = {
           path: filePath,
-          insertions: stat.insertions,
-          deletions: stat.deletions,
-          ...(metadata
-            ? {
-                status: metadata.status,
-                indexStatus: metadata.indexStatus,
-                worktreeStatus: metadata.worktreeStatus,
-                staged: metadata.staged,
-                unstaged: metadata.unstaged,
-                untracked: metadata.untracked,
-                conflicted: metadata.conflicted,
-              }
-            : {}),
+          insertions: fileInsertions,
+          deletions: fileDeletions,
         };
+        if (metadata) {
+          file.status = metadata.status;
+          if (metadata.oldPath) file.oldPath = metadata.oldPath;
+          file.indexStatus = metadata.indexStatus;
+          file.worktreeStatus = metadata.worktreeStatus;
+          file.staged = metadata.staged;
+          file.unstaged = metadata.unstaged;
+          file.untracked = metadata.untracked;
+          file.conflicted = metadata.conflicted;
+        }
+        if (stagedStat) {
+          file.stagedInsertions = stagedStat.insertions;
+          file.stagedDeletions = stagedStat.deletions;
+        }
+        if (unstagedStat) {
+          file.unstagedInsertions = unstagedStat.insertions;
+          file.unstagedDeletions = unstagedStat.deletions;
+        }
+        return file;
       })
       .toSorted((a, b) => a.path.localeCompare(b.path));
-
-    for (const filePath of changedFilesWithoutNumstat) {
-      if (fileStatMap.has(filePath)) continue;
-      const metadata = changeMetadataByPath.get(filePath);
-      files.push({
-        path: filePath,
-        insertions: 0,
-        deletions: 0,
-        ...(metadata
-          ? {
-              status: metadata.status,
-              indexStatus: metadata.indexStatus,
-              worktreeStatus: metadata.worktreeStatus,
-              staged: metadata.staged,
-              unstaged: metadata.unstaged,
-              untracked: metadata.untracked,
-              conflicted: metadata.conflicted,
-            }
-          : {}),
-      });
-    }
-    files.sort((a, b) => a.path.localeCompare(b.path));
 
     return {
       isRepo: true,
@@ -2040,40 +2129,39 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
         },
       );
-      const original = yield* runGitStdoutWithOptions(
-        "GitVcsDriver.fileDiff.original",
-        input.cwd,
-        ["show", source === "staged" ? `HEAD:${relativePath}` : `:${relativePath}`],
-        {
-          allowNonZeroExit: true,
-          maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
-        },
-      ).pipe(
-        Effect.catch(() =>
-          source === "working-tree"
-            ? runGitStdoutWithOptions(
-                "GitVcsDriver.fileDiff.originalHeadFallback",
-                input.cwd,
-                ["show", `HEAD:${relativePath}`],
-                {
-                  allowNonZeroExit: true,
-                  maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
-                },
-              ).pipe(Effect.catch(() => Effect.succeed("")))
-            : Effect.succeed(""),
-        ),
-      );
+      const stagedOriginalPath =
+        source === "staged"
+          ? ((yield* readStagedRenameOldPath(input.cwd, relativePath)) ?? relativePath)
+          : relativePath;
+      const original =
+        source === "staged"
+          ? ((yield* readGitObjectText(
+              "GitVcsDriver.fileDiff.original",
+              input.cwd,
+              `HEAD:${stagedOriginalPath}`,
+            )) ?? "")
+          : yield* readGitObjectText(
+              "GitVcsDriver.fileDiff.original",
+              input.cwd,
+              `:${relativePath}`,
+            ).pipe(
+              Effect.flatMap((indexContents) =>
+                indexContents !== null
+                  ? Effect.succeed(indexContents)
+                  : readGitObjectText(
+                      "GitVcsDriver.fileDiff.originalHeadFallback",
+                      input.cwd,
+                      `HEAD:${relativePath}`,
+                    ).pipe(Effect.map((headContents) => headContents ?? "")),
+              ),
+            );
       const modified =
         source === "staged"
-          ? yield* runGitStdoutWithOptions(
+          ? ((yield* readGitObjectText(
               "GitVcsDriver.fileDiff.modified",
               input.cwd,
-              ["show", `:${relativePath}`],
-              {
-                allowNonZeroExit: true,
-                maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
-              },
-            ).pipe(Effect.catch(() => Effect.succeed("")))
+              `:${relativePath}`,
+            )) ?? "")
           : yield* readWorkingTreeTextFile(input.cwd, relativePath);
 
       return {
@@ -2158,7 +2246,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         input.cwd,
         input.relativePath,
       );
-      yield* runGit("GitVcsDriver.stageFile", input.cwd, ["add", "--", relativePath]);
+      yield* runGitWithPathspecStdin("GitVcsDriver.stageFile", input.cwd, ["add"], [relativePath]);
     },
   );
 
@@ -2169,7 +2257,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           normalizeGitRelativePath("GitVcsDriver.stageFiles.path", input.cwd, relativePath),
         ),
       );
-      yield* runGit("GitVcsDriver.stageFiles", input.cwd, ["add", "--", ...relativePaths]);
+      yield* runGitWithPathspecStdin("GitVcsDriver.stageFiles", input.cwd, ["add"], relativePaths);
     },
   );
 
@@ -2180,12 +2268,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         input.cwd,
         input.relativePath,
       );
-      yield* runGit("GitVcsDriver.unstageFile", input.cwd, [
-        "restore",
-        "--staged",
-        "--",
-        relativePath,
-      ]);
+      yield* runGitWithPathspecStdin(
+        "GitVcsDriver.unstageFile",
+        input.cwd,
+        ["reset"],
+        [relativePath],
+      );
     },
   );
 
@@ -2196,12 +2284,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           normalizeGitRelativePath("GitVcsDriver.unstageFiles.path", input.cwd, relativePath),
         ),
       );
-      yield* runGit("GitVcsDriver.unstageFiles", input.cwd, [
-        "restore",
-        "--staged",
-        "--",
-        ...relativePaths,
-      ]);
+      yield* runGitWithPathspecStdin(
+        "GitVcsDriver.unstageFiles",
+        input.cwd,
+        ["reset"],
+        relativePaths,
+      );
     },
   );
 

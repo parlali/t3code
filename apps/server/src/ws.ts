@@ -1270,7 +1270,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.vcsStageFile]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsStageFile,
-            gitWorkflow.stageFile(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            gitWorkflow
+              .stageFile(input)
+              .pipe(Effect.andThen(vcsStatusBroadcaster.refreshStatus(input.cwd))),
             {
               "rpc.aggregate": "vcs",
             },
@@ -1278,7 +1280,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.vcsStageFiles]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsStageFiles,
-            gitWorkflow.stageFiles(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            gitWorkflow
+              .stageFiles(input)
+              .pipe(Effect.andThen(vcsStatusBroadcaster.refreshStatus(input.cwd))),
             {
               "rpc.aggregate": "vcs",
             },
@@ -1286,7 +1290,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.vcsUnstageFile]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsUnstageFile,
-            gitWorkflow.unstageFile(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            gitWorkflow
+              .unstageFile(input)
+              .pipe(Effect.andThen(vcsStatusBroadcaster.refreshStatus(input.cwd))),
             {
               "rpc.aggregate": "vcs",
             },
@@ -1294,7 +1300,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.vcsUnstageFiles]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsUnstageFiles,
-            gitWorkflow.unstageFiles(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            gitWorkflow
+              .unstageFiles(input)
+              .pipe(Effect.andThen(vcsStatusBroadcaster.refreshStatus(input.cwd))),
             {
               "rpc.aggregate": "vcs",
             },
@@ -1302,7 +1310,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.vcsRevertFile]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsRevertFile,
-            gitWorkflow.revertFile(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            gitWorkflow
+              .revertFile(input)
+              .pipe(Effect.andThen(vcsStatusBroadcaster.refreshStatus(input.cwd))),
             {
               "rpc.aggregate": "vcs",
             },
@@ -1310,7 +1320,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.vcsApplyPatch]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsApplyPatch,
-            gitWorkflow.applyPatch(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            gitWorkflow
+              .applyPatch(input)
+              .pipe(Effect.andThen(vcsStatusBroadcaster.refreshStatus(input.cwd))),
             {
               "rpc.aggregate": "vcs",
             },

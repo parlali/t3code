@@ -49,8 +49,8 @@ import {
   markDirty,
   languageFor,
   configureWorkbenchMonaco,
-  isChangeSelectionAvailable,
   isFileSelectionAvailable,
+  resolveAvailableChangeSource,
   selectionForTab,
   tabForSelection,
   workbenchCodeEditorOptions,
@@ -369,6 +369,42 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     [persistWorkbenchSelection, publishActiveSelection, tabs],
   );
 
+  const replaceTab = useCallback(
+    (previousTabId: string, nextTab: WorkbenchTab) => {
+      setTabState((current) => {
+        let inserted = false;
+        const nextTabs: WorkbenchTab[] = [];
+        for (const tab of current.tabs) {
+          if (tab.id === nextTab.id) {
+            continue;
+          }
+          if (tab.id === previousTabId) {
+            nextTabs.push(nextTab);
+            inserted = true;
+            continue;
+          }
+          nextTabs.push(tab);
+        }
+        if (!inserted) {
+          nextTabs.push(nextTab);
+        }
+        return {
+          tabs: nextTabs,
+          activeTabId: nextTab.id,
+        };
+      });
+      setDirtyTabs((current) => {
+        if (!current.has(previousTabId)) return current;
+        const next = new Set(current);
+        next.delete(previousTabId);
+        return next;
+      });
+      publishActiveSelection(activeSelectionForTab(nextTab));
+      persistWorkbenchSelection(selectionForTab(nextTab));
+    },
+    [persistWorkbenchSelection, publishActiveSelection],
+  );
+
   useEffect(() => {
     workbenchSelectionVersionRef.current += 1;
     const restoreVersion = workbenchSelectionVersionRef.current;
@@ -573,23 +609,33 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     }
 
     if (gitStatus.isPending || gitStatus.data === null) return;
-    if (
-      !isChangeSelectionAvailable(
-        gitStatus.data.workingTree.files,
-        activeTab.path,
-        activeTab.source,
-      )
-    ) {
-      clearUnavailableActiveSelection(activeTab.id);
+    const availableSource = resolveAvailableChangeSource(
+      gitStatus.data.workingTree.files,
+      activeTab.path,
+      activeTab.source,
+    );
+    if (availableSource === activeTab.source) {
+      return;
     }
+
+    if (activeTabDirty) return;
+
+    if (availableSource !== null) {
+      replaceTab(activeTab.id, tabFor("diff", activeTab.path, { source: availableSource }));
+      return;
+    }
+
+    clearUnavailableActiveSelection(activeTab.id);
   }, [
     activeTab,
+    activeTabDirty,
     clearUnavailableActiveSelection,
     cwd,
     gitStatus.data,
     gitStatus.isPending,
     listQuery.isPlaceholderData,
     listQuery.isSuccess,
+    replaceTab,
     treeEntries,
   ]);
 

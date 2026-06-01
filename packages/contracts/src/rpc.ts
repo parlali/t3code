@@ -424,32 +424,38 @@ export const WsVcsFileDiffRpc = Rpc.make(WS_METHODS.vcsFileDiff, {
 
 export const WsVcsStageFileRpc = Rpc.make(WS_METHODS.vcsStageFile, {
   payload: VcsFileInput,
-  error: GitCommandError,
+  success: VcsStatusResult,
+  error: GitManagerServiceError,
 });
 
 export const WsVcsStageFilesRpc = Rpc.make(WS_METHODS.vcsStageFiles, {
   payload: VcsPathsInput,
-  error: GitCommandError,
+  success: VcsStatusResult,
+  error: GitManagerServiceError,
 });
 
 export const WsVcsUnstageFileRpc = Rpc.make(WS_METHODS.vcsUnstageFile, {
   payload: VcsFileInput,
-  error: GitCommandError,
+  success: VcsStatusResult,
+  error: GitManagerServiceError,
 });
 
 export const WsVcsUnstageFilesRpc = Rpc.make(WS_METHODS.vcsUnstageFiles, {
   payload: VcsPathsInput,
-  error: GitCommandError,
+  success: VcsStatusResult,
+  error: GitManagerServiceError,
 });
 
 export const WsVcsRevertFileRpc = Rpc.make(WS_METHODS.vcsRevertFile, {
   payload: VcsFileInput,
-  error: GitCommandError,
+  success: VcsStatusResult,
+  error: GitManagerServiceError,
 });
 
 export const WsVcsApplyPatchRpc = Rpc.make(WS_METHODS.vcsApplyPatch, {
   payload: VcsApplyPatchInput,
-  error: GitCommandError,
+  success: VcsStatusResult,
+  error: GitManagerServiceError,
 });
 
 export const WsVcsRefreshStatusRpc = Rpc.make(WS_METHODS.vcsRefreshStatus, {

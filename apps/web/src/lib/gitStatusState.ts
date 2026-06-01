@@ -15,7 +15,7 @@ import {
 } from "../environments/runtime";
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
 
-interface GitStatusState {
+export interface GitStatusState {
   readonly data: VcsStatusResult | null;
   readonly error: GitManagerServiceError | null;
   readonly cause: Cause.Cause<GitManagerServiceError> | null;
@@ -106,6 +106,20 @@ export function getGitStatusSnapshot(target: GitStatusTarget): GitStatusState {
   return appAtomRegistry.get(gitStatusStateAtom(targetKey));
 }
 
+export function applyGitStatusSnapshot(target: GitStatusTarget, status: VcsStatusResult): void {
+  const targetKey = getGitStatusTargetKey(target);
+  if (targetKey === null) {
+    return;
+  }
+
+  appAtomRegistry.set(gitStatusStateAtom(targetKey), {
+    data: status,
+    error: null,
+    cause: null,
+    isPending: false,
+  });
+}
+
 export function watchGitStatus(target: GitStatusTarget, client?: GitStatusClient): () => void {
   const targetKey = getGitStatusTargetKey(target);
   if (targetKey === null) {
@@ -160,11 +174,22 @@ export function refreshGitStatus(
   }
 
   gitStatusLastRefreshAtByKey.set(targetKey, Date.now());
-  const refreshPromise = resolvedClient.refreshStatus({ cwd: target.cwd }).finally(() => {
-    if (gitStatusRefreshInFlight.get(targetKey) === refreshPromise) {
-      gitStatusRefreshInFlight.delete(targetKey);
-    }
-  });
+  markGitStatusPending(targetKey);
+  const refreshPromise = resolvedClient
+    .refreshStatus({ cwd: target.cwd })
+    .then((status) => {
+      applyGitStatusSnapshot(target, status);
+      return status;
+    })
+    .catch((error: unknown) => {
+      setGitStatusError(targetKey, error as GitManagerServiceError);
+      throw error;
+    })
+    .finally(() => {
+      if (gitStatusRefreshInFlight.get(targetKey) === refreshPromise) {
+        gitStatusRefreshInFlight.delete(targetKey);
+      }
+    });
   gitStatusRefreshInFlight.set(targetKey, refreshPromise);
   return refreshPromise;
 }
@@ -305,4 +330,15 @@ function markGitStatusPending(targetKey: string): void {
   }
 
   appAtomRegistry.set(atom, next);
+}
+
+function setGitStatusError(targetKey: string, error: GitManagerServiceError): void {
+  const atom = gitStatusStateAtom(targetKey);
+  const current = appAtomRegistry.get(atom);
+  appAtomRegistry.set(atom, {
+    ...current,
+    error,
+    cause: null,
+    isPending: false,
+  });
 }

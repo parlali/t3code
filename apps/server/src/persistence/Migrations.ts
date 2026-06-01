@@ -51,6 +51,7 @@ import Migration0035 from "./Migrations/035_ThreadStatusLifecycleBadges.ts";
 import Migration0036 from "./Migrations/036_ThreadStatusResetCompletedBackfill.ts";
 import Migration0037 from "./Migrations/037_ThreadStatusResetTerminalClientState.ts";
 import Migration0038 from "./Migrations/038_ThreadStatusTerminalObservedAt.ts";
+import Migration0039 from "./Migrations/039_ThreadWorkbenchChangeSource.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -101,6 +102,7 @@ export const migrationEntries = [
   [36, "ThreadStatusResetCompletedBackfill", Migration0036],
   [37, "ThreadStatusResetTerminalClientState", Migration0037],
   [38, "ThreadStatusTerminalObservedAt", Migration0038],
+  [39, "ThreadWorkbenchChangeSource", Migration0039],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

@@ -6,11 +6,16 @@ export function selectionForTab(tab: WorkbenchTab): ThreadWorkbenchSelection {
   return {
     source: tab.kind === "file" ? "files" : "changes",
     relativePath: tab.path,
+    ...(tab.kind === "diff" ? { changeSource: tab.source } : {}),
   };
 }
 
 export function tabForSelection(selection: ThreadWorkbenchSelection): WorkbenchTab {
-  return tabFor(selection.source === "files" ? "file" : "diff", selection.relativePath);
+  return tabFor(
+    selection.source === "files" ? "file" : "diff",
+    selection.relativePath,
+    selection.changeSource ? { source: selection.changeSource } : undefined,
+  );
 }
 
 export function isFileSelectionAvailable(
@@ -35,4 +40,16 @@ export function isChangeSelectionAvailable(
       file.staged !== true
     );
   });
+}
+
+export function resolveAvailableChangeSource(
+  files: VcsStatusResult["workingTree"]["files"],
+  relativePath: string,
+  preferredSource: "working-tree" | "staged" = "working-tree",
+): "working-tree" | "staged" | null {
+  if (isChangeSelectionAvailable(files, relativePath, preferredSource)) {
+    return preferredSource;
+  }
+  const alternateSource = preferredSource === "working-tree" ? "staged" : "working-tree";
+  return isChangeSelectionAvailable(files, relativePath, alternateSource) ? alternateSource : null;
 }

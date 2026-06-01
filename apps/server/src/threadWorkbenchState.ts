@@ -12,6 +12,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 interface ThreadWorkbenchStateRow {
   readonly threadId: string;
   readonly selectionSource: string | null;
+  readonly changeSource: string | null;
   readonly relativePath: string | null;
   readonly updatedAt: string;
 }
@@ -45,6 +46,9 @@ function toSelection(row: ThreadWorkbenchStateRow): ThreadWorkbenchSelection | n
   return {
     source: row.selectionSource,
     relativePath: row.relativePath,
+    ...(row.changeSource === "staged" || row.changeSource === "working-tree"
+      ? { changeSource: row.changeSource }
+      : {}),
   };
 }
 
@@ -61,11 +65,12 @@ const makeThreadWorkbenchStates = Effect.gen(function* () {
 
   const readState = (input: ThreadWorkbenchGetStateInput) =>
     sql<ThreadWorkbenchStateRow>`
-      SELECT
-        thread_id AS "threadId",
-        selection_source AS "selectionSource",
-        relative_path AS "relativePath",
-        updated_at AS "updatedAt"
+        SELECT
+          thread_id AS "threadId",
+          selection_source AS "selectionSource",
+          change_source AS "changeSource",
+          relative_path AS "relativePath",
+          updated_at AS "updatedAt"
       FROM thread_workbench_state
       WHERE thread_id = ${input.threadId}
     `.pipe(
@@ -90,18 +95,21 @@ const makeThreadWorkbenchStates = Effect.gen(function* () {
         INSERT INTO thread_workbench_state (
           thread_id,
           selection_source,
+          change_source,
           relative_path,
           updated_at
         )
         VALUES (
           ${input.threadId},
           ${input.selection?.source ?? null},
+          ${input.selection?.source === "changes" ? (input.selection.changeSource ?? "working-tree") : null},
           ${input.selection?.relativePath ?? null},
           ${updatedAt}
         )
         ON CONFLICT (thread_id)
         DO UPDATE SET
           selection_source = excluded.selection_source,
+          change_source = excluded.change_source,
           relative_path = excluded.relative_path,
           updated_at = excluded.updated_at
       `.pipe(

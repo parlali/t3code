@@ -18,6 +18,7 @@ export {
   tabForSelection,
   isFileSelectionAvailable,
   isChangeSelectionAvailable,
+  resolveAvailableChangeSource,
 } from "./workbenchSelection";
 export {
   configureWorkbenchMonaco,

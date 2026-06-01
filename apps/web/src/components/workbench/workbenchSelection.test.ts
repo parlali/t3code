@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isChangeSelectionAvailable,
   isFileSelectionAvailable,
+  resolveAvailableChangeSource,
   selectionForTab,
   tabForSelection,
 } from "./workbenchSelection";
@@ -23,6 +24,19 @@ describe("workbenchSelection", () => {
     ).toEqual({
       source: "changes",
       relativePath: "README.md",
+      changeSource: "working-tree",
+    });
+    expect(
+      selectionForTab({
+        id: "diff:staged:README.md",
+        kind: "diff",
+        path: "README.md",
+        source: "staged",
+      }),
+    ).toEqual({
+      source: "changes",
+      relativePath: "README.md",
+      changeSource: "staged",
     });
     expect(tabForSelection({ source: "files", relativePath: "src/App.tsx" })).toEqual({
       id: "file:src/App.tsx",
@@ -34,6 +48,18 @@ describe("workbenchSelection", () => {
       kind: "diff",
       path: "src/App.tsx",
       source: "working-tree",
+    });
+    expect(
+      tabForSelection({
+        source: "changes",
+        relativePath: "src/App.tsx",
+        changeSource: "staged",
+      }),
+    ).toEqual({
+      id: "diff:staged:src/App.tsx",
+      kind: "diff",
+      path: "src/App.tsx",
+      source: "staged",
     });
   });
 
@@ -54,5 +80,23 @@ describe("workbenchSelection", () => {
     expect(isFileSelectionAvailable(entries, "src")).toBe(false);
     expect(isChangeSelectionAvailable(changedFiles, "src/App.tsx")).toBe(true);
     expect(isChangeSelectionAvailable(changedFiles, "README.md")).toBe(false);
+  });
+
+  it("falls across staged and working-tree change sources without dropping the path", () => {
+    const changedFiles: VcsStatusResult["workingTree"]["files"] = [
+      {
+        path: "src/App.tsx",
+        insertions: 2,
+        deletions: 0,
+        staged: true,
+        unstaged: false,
+      },
+    ];
+
+    expect(resolveAvailableChangeSource(changedFiles, "src/App.tsx", "working-tree")).toBe(
+      "staged",
+    );
+    expect(resolveAvailableChangeSource(changedFiles, "src/App.tsx", "staged")).toBe("staged");
+    expect(resolveAvailableChangeSource(changedFiles, "README.md", "working-tree")).toBeNull();
   });
 });

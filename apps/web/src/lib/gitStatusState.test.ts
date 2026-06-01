@@ -285,7 +285,7 @@ describe("gitStatusState", () => {
     expect(gitClient.refreshStatus).toHaveBeenCalledWith({ cwd: "/repo" });
     expect(refreshed).toEqual({ ...BASE_STATUS, refName: "/repo-refreshed" });
     expect(getGitStatusSnapshot(TARGET)).toEqual({
-      data: BASE_STATUS,
+      data: { ...BASE_STATUS, refName: "/repo-refreshed" },
       error: null,
       cause: null,
       isPending: false,

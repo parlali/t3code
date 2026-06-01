@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { IsoDateTime, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { VcsFileDiffSource } from "./git.ts";
 
 const THREAD_WORKBENCH_PATH_MAX_LENGTH = 512;
 
@@ -9,6 +10,7 @@ export type ThreadWorkbenchSelectionSource = typeof ThreadWorkbenchSelectionSour
 export const ThreadWorkbenchSelection = Schema.Struct({
   source: ThreadWorkbenchSelectionSource,
   relativePath: TrimmedNonEmptyString.check(Schema.isMaxLength(THREAD_WORKBENCH_PATH_MAX_LENGTH)),
+  changeSource: Schema.optional(VcsFileDiffSource),
 });
 export type ThreadWorkbenchSelection = typeof ThreadWorkbenchSelection.Type;
 

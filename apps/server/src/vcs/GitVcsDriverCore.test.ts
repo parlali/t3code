@@ -199,6 +199,33 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("uses the old path as staged diff original content for renames", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* writeTextFile(cwd, "old.txt", "one\ntwo\nthree\n");
+        yield* git(cwd, ["add", "old.txt"]);
+        yield* git(cwd, ["commit", "-m", "add old file"]);
+
+        yield* git(cwd, ["mv", "old.txt", "new.txt"]);
+        yield* writeTextFile(cwd, "new.txt", "one\nTWO\nthree\n");
+        yield* git(cwd, ["add", "new.txt"]);
+
+        const status = yield* driver.statusDetails(cwd);
+        const renamed = status.workingTree.files.find((file) => file.path === "new.txt");
+        const diff = yield* driver.fileDiff({
+          cwd,
+          relativePath: "new.txt",
+          source: "staged",
+        });
+
+        assert.equal(renamed?.oldPath, "old.txt");
+        assert.equal(diff.original, "one\ntwo\nthree\n");
+        assert.equal(diff.modified, "one\nTWO\nthree\n");
+      }),
+    );
+
     it.effect("stages and unstages multiple paths with one operation", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -228,6 +255,65 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
             ["second.txt", true],
           ],
         );
+      }),
+    );
+
+    it.effect("stages and unstages pathspecs through stdin without mangling special paths", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const specialPath = "dir/file with space\tand tab.txt";
+
+        yield* writeTextFile(cwd, specialPath, "special\n");
+        yield* driver.stageFiles({ cwd, relativePaths: [specialPath] });
+
+        const staged = yield* driver.statusDetails(cwd);
+        const stagedFile = staged.workingTree.files.find((file) => file.path === specialPath);
+        assert.equal(stagedFile?.staged, true);
+
+        yield* driver.unstageFiles({ cwd, relativePaths: [specialPath] });
+
+        const unstaged = yield* driver.statusDetails(cwd);
+        const unstagedFile = unstaged.workingTree.files.find((file) => file.path === specialPath);
+        assert.equal(unstagedFile?.untracked, true);
+      }),
+    );
+
+    it.effect("unstages files in an unborn repository", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* driver.initRepo({ cwd });
+        yield* writeTextFile(cwd, "first.txt", "first\n");
+        yield* driver.stageFiles({ cwd, relativePaths: ["first.txt"] });
+        yield* driver.unstageFiles({ cwd, relativePaths: ["first.txt"] });
+
+        const status = yield* driver.statusDetails(cwd);
+        const file = status.workingTree.files.find((entry) => entry.path === "first.txt");
+        assert.equal(file?.untracked, true);
+        assert.equal(file?.staged, false);
+      }),
+    );
+
+    it.effect("keeps staged and unstaged stats separate for partially staged files", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "partial.txt", "one\n");
+        yield* driver.stageFiles({ cwd, relativePaths: ["partial.txt"] });
+        yield* writeTextFile(cwd, "partial.txt", "one\ntwo\n");
+
+        const status = yield* driver.statusDetails(cwd);
+        const file = status.workingTree.files.find((entry) => entry.path === "partial.txt");
+        assert.equal(file?.staged, true);
+        assert.equal(file?.unstaged, true);
+        assert.equal(file?.stagedInsertions, 1);
+        assert.equal(file?.unstagedInsertions, 1);
+        assert.equal(file?.insertions, 2);
       }),
     );
   });

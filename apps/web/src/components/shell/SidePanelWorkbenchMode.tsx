@@ -1,4 +1,4 @@
-import type { ProjectEntriesStreamEvent, ProjectEntry, VcsStatusResult } from "@t3tools/contracts";
+import type { ProjectEntriesStreamEvent, ProjectEntry } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Schema from "effect/Schema";
 import { type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -18,10 +18,17 @@ import {
 
 import { ensureEnvironmentApi } from "../../environmentApi";
 import { gitCommitGraphQueryOptions } from "../../lib/gitReactQuery";
-import { useGitStatus } from "../../lib/gitStatusState";
 import { projectListEntriesQueryOptions } from "../../lib/projectReactQuery";
 import { buildTurnDiffTree } from "../../lib/turnDiffTree";
 import { cn, randomUUID } from "../../lib/utils";
+import {
+  sectionFiles,
+  sourceStatForSection,
+  statusLabelForSection,
+  useVcsWorktree,
+  type VcsChangeFile,
+  type VcsChangeSectionId,
+} from "../../lib/vcsWorktreeState";
 import { refreshWorkspaceTarget, useProjectEntriesSubscription } from "../../lib/workspaceRefresh";
 import { readLocalApi } from "../../localApi";
 import { requestWorkbenchOpen, useWorkbenchSelection } from "../../workbenchEvents";
@@ -49,51 +56,19 @@ import {
 import { useActiveShellContext } from "./useActiveShellContext";
 
 const EMPTY_TREE_ENTRIES: readonly ProjectEntry[] = Object.freeze([]);
-const EMPTY_CHANGED_FILES: VcsStatusResult["workingTree"]["files"] = Object.freeze([]);
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error && error.message.length > 0 ? error.message : "Unknown error";
 }
 
-type ChangeFile = VcsStatusResult["workingTree"]["files"][number];
-
-function changeTree(files: readonly ChangeFile[]) {
+function changeTree(files: readonly VcsChangeFile[], sectionId: VcsChangeSectionId) {
   return buildTurnDiffTree(
     files.map((file) => ({
       path: file.path,
-      additions: file.insertions,
-      deletions: file.deletions,
+      additions: sourceStatForSection(file, sectionId).insertions,
+      deletions: sourceStatForSection(file, sectionId).deletions,
     })),
   );
-}
-
-function sectionFiles(
-  files: readonly ChangeFile[],
-  section: "staged" | "changes" | "untracked" | "conflicts",
-) {
-  if (section === "conflicts") return files.filter((file) => file.conflicted === true);
-  if (section === "staged") {
-    return files.filter((file) => file.staged === true && file.conflicted !== true);
-  }
-  if (section === "untracked") {
-    return files.filter((file) => file.untracked === true && file.conflicted !== true);
-  }
-  return files.filter(
-    (file) =>
-      file.conflicted !== true &&
-      file.untracked !== true &&
-      (file.unstaged === true || file.staged !== true),
-  );
-}
-
-function statusLabelForSection(
-  file: ChangeFile,
-  sectionId: "conflicts" | "staged" | "changes" | "untracked",
-) {
-  if (sectionId === "conflicts") return "U";
-  if (sectionId === "untracked") return "A";
-  if (sectionId === "staged") return file.indexStatus ?? file.status ?? "M";
-  return file.worktreeStatus ?? file.status ?? "M";
 }
 
 export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "changes" }) {
@@ -116,11 +91,19 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
       limit: 10_000,
     }),
   );
-  const gitStatus = useGitStatus({ environmentId, cwd });
+  const {
+    actionState: worktreeActionState,
+    changedFiles,
+    refresh: refreshWorktree,
+    sections: changeSections,
+    stagePaths: runStagePaths,
+    status: gitStatus,
+    unstagePaths: runUnstagePaths,
+    revertPaths: runRevertPaths,
+  } = useVcsWorktree({ environmentId, cwd, queryClient });
   const commitGraphQuery = useQuery(gitCommitGraphQueryOptions({ environmentId, cwd }));
   const treeEntries = listQuery.data?.entries ?? EMPTY_TREE_ENTRIES;
   const tree = useMemo(() => buildTree(treeEntries), [treeEntries]);
-  const changedFiles = gitStatus.data?.workingTree.files ?? EMPTY_CHANGED_FILES;
   const stagedFiles = useMemo(() => sectionFiles(changedFiles, "staged"), [changedFiles]);
   const unstagedFiles = useMemo(() => sectionFiles(changedFiles, "changes"), [changedFiles]);
   const untrackedFiles = useMemo(() => sectionFiles(changedFiles, "untracked"), [changedFiles]);
@@ -136,10 +119,6 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
   const [sourceControlBusy, setSourceControlBusy] = useState<"commit" | "generate" | "push" | null>(
     null,
   );
-  const [changeActionBusy, setChangeActionBusy] = useState<"stage" | "unstage" | "revert" | null>(
-    null,
-  );
-  const changeActionBusyRef = useRef(false);
   const commitMessageRef = useRef<HTMLTextAreaElement | null>(null);
   const changesSplitRef = useRef<HTMLDivElement | null>(null);
   const graphResizeRef = useRef<{
@@ -338,65 +317,19 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
     [cwd, environmentId, expandCreateParent, refreshWorkspace],
   );
 
-  const runPathAction = useCallback(
-    async (
-      kind: "stage" | "unstage" | "revert",
-      paths: readonly string[],
-      action: (paths: readonly string[]) => Promise<unknown>,
-    ) => {
-      if (changeActionBusyRef.current) return;
-      const uniquePaths = Array.from(new Set(paths.filter((path) => path.length > 0)));
-      if (uniquePaths.length === 0) return;
-
-      changeActionBusyRef.current = true;
-      setChangeActionBusy(kind);
-      setSourceControlError(null);
-      let actionError: unknown = null;
-      try {
-        await action(uniquePaths);
-      } catch (error) {
-        actionError = error;
-        setSourceControlError(getErrorMessage(error));
-      } finally {
-        try {
-          await refreshWorkspace();
-        } catch (refreshError) {
-          if (!actionError) {
-            setSourceControlError(getErrorMessage(refreshError));
-          }
-        }
-        changeActionBusyRef.current = false;
-        setChangeActionBusy(null);
-      }
-    },
-    [refreshWorkspace],
-  );
-
   const stagePaths = useCallback(
-    async (paths: readonly string[]) => {
-      if (!cwd || !environmentId) return;
-      const api = ensureEnvironmentApi(environmentId);
-      await runPathAction("stage", paths, async (relativePaths) => {
-        await api.vcs.stageFiles({ cwd, relativePaths });
-      });
-    },
-    [cwd, environmentId, runPathAction],
+    (paths: readonly string[]) => void runStagePaths(paths),
+    [runStagePaths],
   );
 
   const unstagePaths = useCallback(
-    async (paths: readonly string[]) => {
-      if (!cwd || !environmentId) return;
-      const api = ensureEnvironmentApi(environmentId);
-      await runPathAction("unstage", paths, async (relativePaths) => {
-        await api.vcs.unstageFiles({ cwd, relativePaths });
-      });
-    },
-    [cwd, environmentId, runPathAction],
+    (paths: readonly string[]) => void runUnstagePaths(paths),
+    [runUnstagePaths],
   );
 
   const revertPaths = useCallback(
-    async (paths: readonly string[]) => {
-      if (!cwd || !environmentId || changeActionBusy !== null) return;
+    (paths: readonly string[]) => {
+      if (!cwd || !environmentId || worktreeActionState.kind !== null) return;
       const uniquePaths = Array.from(new Set(paths.filter((path) => path.length > 0)));
       if (uniquePaths.length === 0) return;
       const confirmed = window.confirm(
@@ -405,16 +338,9 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
           : `Discard changes in ${uniquePaths.length} files?`,
       );
       if (!confirmed) return;
-      const api = ensureEnvironmentApi(environmentId);
-      await runPathAction("revert", uniquePaths, async (relativePaths) => {
-        const results = await Promise.allSettled(
-          relativePaths.map((relativePath) => api.vcs.revertFile({ cwd, relativePath })),
-        );
-        const firstRejected = results.find((result) => result.status === "rejected");
-        if (firstRejected?.status === "rejected") throw firstRejected.reason;
-      });
+      void runRevertPaths(uniquePaths);
     },
-    [changeActionBusy, cwd, environmentId, runPathAction],
+    [cwd, environmentId, runRevertPaths, worktreeActionState.kind],
   );
 
   const stageFile = useCallback((path: string) => void stagePaths([path]), [stagePaths]);
@@ -483,6 +409,7 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
     const status = gitStatus.data ?? null;
     const isRepo = status?.isRepo ?? true;
     const hasConflicts = conflictFiles.length > 0;
+    const changeActionBusy = worktreeActionState.kind;
     const isSourceControlIdle = sourceControlBusy === null && changeActionBusy === null;
     const canCommit =
       Boolean(status?.isRepo) &&
@@ -510,12 +437,8 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
     const showActionMenu = showOpenPr;
     const actionsDisabled =
       gitStatus.isPending || sourceControlBusy !== null || changeActionBusy !== null;
-    const sections = [
-      { id: "conflicts", label: "Merge Changes", files: conflictFiles, action: undefined },
-      { id: "staged", label: "Staged Changes", files: stagedFiles, action: "unstage" as const },
-      { id: "changes", label: "Changes", files: unstagedFiles, action: "stage" as const },
-      { id: "untracked", label: "Untracked", files: untrackedFiles, action: "stage" as const },
-    ].filter((section) => section.files.length > 0);
+    const sections = changeSections;
+    const worktreeActionError = worktreeActionState.error;
 
     return (
       <div ref={changesSplitRef} className="flex h-full min-h-0 flex-col">
@@ -527,7 +450,7 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
             className="size-7 cursor-pointer"
             aria-label="Refresh changes"
             disabled={actionsDisabled}
-            onClick={() => void refreshWorkspace()}
+            onClick={() => void refreshWorktree()}
           >
             <RefreshCwIcon className={cn("size-3.5", gitStatus.isPending && "animate-spin")} />
           </Button>
@@ -665,9 +588,9 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
               ) : null}
             </div>
           ) : null}
-          {sourceControlError ? (
+          {sourceControlError || worktreeActionError ? (
             <div className="rounded-sm border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
-              {sourceControlError}
+              {sourceControlError ?? worktreeActionError}
             </div>
           ) : !isRepo ? (
             <div className="rounded-sm border border-border px-2 py-1 text-xs text-muted-foreground">
@@ -702,7 +625,7 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
           ) : (
             sections.map((section) => {
               const collapsed = collapsedChangeSections.has(section.id);
-              const sectionId = section.id as "conflicts" | "staged" | "changes" | "untracked";
+              const sectionId = section.id;
               const sectionSource = sectionId === "staged" ? "staged" : "working-tree";
               const selectedChangePath =
                 workbenchSelection?.mode === "changes" &&
@@ -780,7 +703,7 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
                   </div>
                   {!collapsed ? (
                     <ChangesTree
-                      nodes={changeTree(section.files)}
+                      nodes={changeTree(section.files, sectionId)}
                       collapsedDirectories={collapsedChangeDirectories}
                       selectedPath={selectedChangePath}
                       onToggleDirectory={(path) =>
