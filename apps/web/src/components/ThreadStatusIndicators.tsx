@@ -9,8 +9,7 @@ import {
 } from "../environments/runtime";
 import { useGitStatus } from "../lib/gitStatusState";
 import { type AppState, selectProjectByRef, useStore } from "../store";
-import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
-import { useThreadAttentionStore } from "../threadAttentionStore";
+import { useThreadStatusStore } from "../threadStatusStore";
 import { resolveChangeRequestPresentation } from "../sourceControlPresentation";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "./Sidebar.logic";
 import type { SidebarThreadSummary } from "../types";
@@ -136,8 +135,8 @@ export function ThreadStatusLabel({
  */
 export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummary }) {
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
-  const hasUnseenAttention = useThreadAttentionStore(
-    (state) => state.attentionByThreadKey[scopedThreadKey(threadRef)] !== undefined,
+  const persistedThreadStatus = useThreadStatusStore(
+    (state) => state.statusByThreadKey[scopedThreadKey(threadRef)],
   );
   const threadProjectCwd = useStore(
     useMemo(
@@ -157,7 +156,7 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
-      hasUnseenAttention,
+      threadStatus: persistedThreadStatus,
     },
   });
 
@@ -197,8 +196,8 @@ export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSumma
     () => scopeThreadRef(thread.environmentId, thread.id),
     [thread.environmentId, thread.id],
   );
-  const hasOpenTerminal = useTerminalStateStore(
-    (state) => selectThreadTerminalState(state.terminalStateByThreadKey, threadRef).terminalOpen,
+  const hasOpenTerminal = useThreadStatusStore(
+    (state) => state.statusByThreadKey[scopedThreadKey(threadRef)]?.terminal === true,
   );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isRemoteThread =

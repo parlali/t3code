@@ -90,7 +90,7 @@ import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./server
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
-import { ThreadAttention, type ThreadAttentionShape } from "./threadAttention.ts";
+import { ThreadStatusStates, type ThreadStatusStatesShape } from "./threadStatusState.ts";
 import { ThreadWorkbenchStates, type ThreadWorkbenchStateShape } from "./threadWorkbenchState.ts";
 import {
   BrowserTraceCollector,
@@ -341,7 +341,7 @@ const buildAppUnderTest = (options?: {
     vcsStatusBroadcaster?: Partial<VcsStatusBroadcaster.VcsStatusBroadcasterShape>;
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunnerShape>;
     terminalManager?: Partial<TerminalManagerShape>;
-    threadAttention?: Partial<ThreadAttentionShape>;
+    threadStatusStates?: Partial<ThreadStatusStatesShape>;
     threadWorkbenchStates?: Partial<ThreadWorkbenchStateShape>;
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
@@ -765,32 +765,70 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ThreadAttention)({
+        Layer.mock(ThreadStatusStates)({
           getSnapshot: () =>
             Effect.succeed({
               states: [],
               updatedAt: "1970-01-01T00:00:00.000Z",
             }),
-          markSeen: (viewerId, input) =>
+          markRead: (input) =>
             Effect.succeed({
               type: "state-cleared" as const,
               threadId: input.threadId,
               updatedAt: input.observedAt ?? "1970-01-01T00:00:00.000Z",
               revision: 0,
             }),
-          markUnseen: (_viewerId, input) =>
+          markUnread: (input) =>
             Effect.succeed({
               type: "state-updated" as const,
               state: {
                 threadId: input.threadId,
-                kind: "completed" as const,
-                turnId: defaultTurnId,
-                attentionAt: input.observedAt ?? "1970-01-01T00:00:00.000Z",
-                acknowledgedAt: null,
+                primaryStatus: "completed",
+                pendingApproval: false,
+                awaitingInput: false,
+                working: false,
+                completed: true,
+                connecting: false,
+                planReady: false,
+                terminal: false,
+                latestTurnId: defaultTurnId,
+                completedAt: input.observedAt ?? "1970-01-01T00:00:00.000Z",
+                readAt: null,
+                manuallyMarkedUnreadAt: input.observedAt ?? "1970-01-01T00:00:00.000Z",
                 updatedAt: input.observedAt ?? "1970-01-01T00:00:00.000Z",
                 revision: 0,
               },
             }),
+          markViewed: (input) =>
+            Effect.succeed({
+              type: "state-cleared" as const,
+              threadId: input.threadId,
+              updatedAt: input.observedAt ?? "1970-01-01T00:00:00.000Z",
+              revision: 0,
+            }),
+          applyOrchestrationEvent: () => Effect.succeed(Option.none()),
+          setTerminalOpen: (threadId, terminal, observedAt) =>
+            Effect.succeed({
+              type: "state-updated" as const,
+              state: {
+                threadId,
+                primaryStatus: null,
+                pendingApproval: false,
+                awaitingInput: false,
+                working: false,
+                completed: false,
+                connecting: false,
+                planReady: false,
+                terminal,
+                latestTurnId: null,
+                completedAt: null,
+                readAt: null,
+                manuallyMarkedUnreadAt: null,
+                updatedAt: observedAt,
+                revision: 0,
+              },
+            }),
+          reconcile: () => Effect.void,
           streamWithSnapshot: () =>
             Effect.succeed(
               Stream.make({
@@ -801,7 +839,7 @@ const buildAppUnderTest = (options?: {
                 },
               }),
             ),
-          ...options?.layers?.threadAttention,
+          ...options?.layers?.threadStatusStates,
         }),
       ),
       Layer.provide(

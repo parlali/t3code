@@ -77,12 +77,14 @@ import type {
   TerminalWriteInput,
 } from "./terminal.ts";
 import type {
-  ThreadAttentionMarkSeenInput,
-  ThreadAttentionMarkUnseenInput,
-  ThreadAttentionMutationEvent,
-  ThreadAttentionSnapshot,
-  ThreadAttentionStreamEvent,
-} from "./threadAttention.ts";
+  ThreadStatusMarkReadInput,
+  ThreadStatusMarkUnreadInput,
+  ThreadStatusMarkViewedInput,
+  ThreadStatusMutationEvent,
+  ThreadStatusSetTerminalOpenInput,
+  ThreadStatusSnapshot,
+  ThreadStatusStreamEvent,
+} from "./threadStatus.ts";
 import type {
   ThreadWorkbenchGetStateInput,
   ThreadWorkbenchSetStateInput,
@@ -390,11 +392,15 @@ export interface EnvironmentApi {
       options?: { readonly onResubscribe?: () => void },
     ) => () => void;
   };
-  threadAttention: {
-    getSnapshot: () => Promise<ThreadAttentionSnapshot>;
-    markSeen: (input: ThreadAttentionMarkSeenInput) => Promise<ThreadAttentionMutationEvent>;
-    markUnseen: (input: ThreadAttentionMarkUnseenInput) => Promise<ThreadAttentionMutationEvent>;
-    subscribe: (callback: (event: ThreadAttentionStreamEvent) => void) => () => void;
+  threadStatus: {
+    getSnapshot: () => Promise<ThreadStatusSnapshot>;
+    markRead: (input: ThreadStatusMarkReadInput) => Promise<ThreadStatusMutationEvent>;
+    markUnread: (input: ThreadStatusMarkUnreadInput) => Promise<ThreadStatusMutationEvent>;
+    markViewed: (input: ThreadStatusMarkViewedInput) => Promise<ThreadStatusMutationEvent>;
+    setTerminalOpen: (
+      input: ThreadStatusSetTerminalOpenInput,
+    ) => Promise<ThreadStatusMutationEvent>;
+    subscribe: (callback: (event: ThreadStatusStreamEvent) => void) => () => void;
   };
   threadWorkbench: {
     getState: (input: ThreadWorkbenchGetStateInput) => Promise<ThreadWorkbenchState>;

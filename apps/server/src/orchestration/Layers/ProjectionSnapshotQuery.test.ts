@@ -443,7 +443,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
-  it.effect("returns bounded subscription detail snapshots without activity payloads", () =>
+  it.effect("returns bounded subscription detail snapshots with redacted tool payloads", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
@@ -629,6 +629,158 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         assert.deepEqual(
           snapshot.value.checkpoints.map((checkpoint) => checkpoint.checkpointTurnCount),
           [2, 3],
+        );
+      }
+    }),
+  );
+
+  it.effect("keeps client-visible activity payloads in subscription detail snapshots", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-visible-activity-payloads',
+          'Visible Activity Payloads',
+          '/tmp/visible-activity-payloads',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-04-11T00:00:00.000Z',
+          '2026-04-11T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          latest_user_message_at,
+          pending_approval_count,
+          pending_user_input_count,
+          has_actionable_proposed_plan,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-visible-activity-payloads',
+          'project-visible-activity-payloads',
+          'Visible Activity Payloads',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          'full-access',
+          'plan',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          0,
+          1,
+          0,
+          '2026-04-11T00:00:02.000Z',
+          '2026-04-11T00:00:03.000Z',
+          NULL
+        )
+      `;
+
+      const userInputPayload = {
+        requestId: "request-user-input-1",
+        questions: [
+          {
+            id: "scope",
+            header: "Scope",
+            question: "Which scope should be used?",
+            options: [
+              {
+                label: "Server",
+                description: "Use the server implementation.",
+              },
+            ],
+            multiSelect: false,
+          },
+        ],
+      };
+
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          (
+            'activity-tool-redacted',
+            'thread-visible-activity-payloads',
+            NULL,
+            'tool',
+            'tool.completed',
+            'Tool completed',
+            ${JSON.stringify({ detail: "x".repeat(1024), data: { secret: "redacted" } })},
+            1,
+            '2026-04-11T00:00:04.000Z'
+          ),
+          (
+            'activity-user-input-visible',
+            'thread-visible-activity-payloads',
+            NULL,
+            'info',
+            'user-input.requested',
+            'User input requested',
+            ${JSON.stringify(userInputPayload)},
+            2,
+            '2026-04-11T00:00:05.000Z'
+          )
+      `;
+
+      const snapshot = yield* snapshotQuery.getThreadDetailSubscriptionSnapshotById(
+        ThreadId.make("thread-visible-activity-payloads"),
+        {
+          activityLimit: 10,
+          checkpointLimit: 10,
+          messageLimit: 10,
+        },
+      );
+
+      assert.equal(snapshot._tag, "Some");
+      if (snapshot._tag === "Some") {
+        assert.deepEqual(
+          snapshot.value.activities.map((activity) => ({
+            id: activity.id,
+            payload: activity.payload,
+          })),
+          [
+            { id: asEventId("activity-tool-redacted"), payload: null },
+            { id: asEventId("activity-user-input-visible"), payload: userInputPayload },
+          ],
         );
       }
     }),

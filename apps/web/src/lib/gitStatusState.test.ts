@@ -85,19 +85,45 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
       onEvent: vi.fn(() => () => undefined),
       onSessionEvent: vi.fn(() => () => undefined),
     },
-    threadAttention: {
+    threadStatus: {
       getSnapshot: vi.fn(async () => ({ states: [], updatedAt: new Date().toISOString() })),
-      markSeen: vi.fn(async (input) => ({
+      markRead: vi.fn(async (input) => ({
         type: "state-cleared" as const,
         threadId: input.threadId,
         updatedAt: input.observedAt ?? new Date().toISOString(),
         revision: 1,
       })),
-      markUnseen: vi.fn(async (input) => ({
+      markUnread: vi.fn(async (input) => ({
         type: "state-cleared" as const,
         threadId: input.threadId,
         updatedAt: input.observedAt ?? new Date().toISOString(),
         revision: 1,
+      })),
+      markViewed: vi.fn(async (input) => ({
+        type: "state-cleared" as const,
+        threadId: input.threadId,
+        updatedAt: input.observedAt ?? new Date().toISOString(),
+        revision: 1,
+      })),
+      setTerminalOpen: vi.fn(async (input) => ({
+        type: "state-updated" as const,
+        state: {
+          threadId: input.threadId,
+          primaryStatus: null,
+          pendingApproval: false,
+          awaitingInput: false,
+          working: false,
+          completed: false,
+          connecting: false,
+          planReady: false,
+          terminal: input.terminal,
+          latestTurnId: null,
+          completedAt: null,
+          readAt: null,
+          manuallyMarkedUnreadAt: null,
+          updatedAt: input.observedAt ?? new Date().toISOString(),
+          revision: 1,
+        },
       })),
       subscribe: vi.fn(() => () => undefined),
     },

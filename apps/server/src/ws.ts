@@ -1,6 +1,5 @@
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
-import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -55,6 +54,7 @@ import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import { CheckpointRevertPlanner } from "./orchestration/Services/CheckpointRevertPlanner.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { redactThreadActivityPayloadForDetail } from "./orchestration/threadActivityPayloadVisibility.ts";
 import {
   observeRpcEffect,
   observeRpcStream,
@@ -66,7 +66,7 @@ import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
-import { ThreadAttention } from "./threadAttention.ts";
+import { ThreadStatusStates } from "./threadStatusState.ts";
 import { ThreadWorkbenchStates } from "./threadWorkbenchState.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
@@ -146,10 +146,7 @@ function makeServerStreamKeepalive() {
 function sanitizeThreadActivity(
   activity: OrchestrationThread["activities"][number],
 ): OrchestrationThread["activities"][number] {
-  return {
-    ...activity,
-    payload: null,
-  };
+  return redactThreadActivityPayloadForDetail(activity);
 }
 
 function sanitizeThreadDetailSnapshot(thread: OrchestrationThread): OrchestrationThread {
@@ -231,7 +228,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const vcsProvisioning = yield* VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager;
-      const threadAttention = yield* ThreadAttention;
+      const threadStatusStates = yield* ThreadStatusStates;
       const threadWorkbenchStates = yield* ThreadWorkbenchStates;
       const providerRegistry = yield* ProviderRegistry;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
@@ -1384,23 +1381,35 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             terminalManager.getStatusSnapshot(input),
             { "rpc.aggregate": "terminal" },
           ),
-        [WS_METHODS.threadAttentionGetSnapshot]: (_input) =>
+        [WS_METHODS.threadStatusGetSnapshot]: (_input) =>
+          observeRpcEffect(WS_METHODS.threadStatusGetSnapshot, threadStatusStates.getSnapshot(), {
+            "rpc.aggregate": "threadStatus",
+          }),
+        [WS_METHODS.threadStatusMarkRead]: (input) =>
+          observeRpcEffect(WS_METHODS.threadStatusMarkRead, threadStatusStates.markRead(input), {
+            "rpc.aggregate": "threadStatus",
+          }),
+        [WS_METHODS.threadStatusMarkUnread]: (input) =>
           observeRpcEffect(
-            WS_METHODS.threadAttentionGetSnapshot,
-            threadAttention.getSnapshot(currentSessionId),
-            { "rpc.aggregate": "threadAttention" },
+            WS_METHODS.threadStatusMarkUnread,
+            threadStatusStates.markUnread(input),
+            { "rpc.aggregate": "threadStatus" },
           ),
-        [WS_METHODS.threadAttentionMarkSeen]: (input) =>
+        [WS_METHODS.threadStatusMarkViewed]: (input) =>
           observeRpcEffect(
-            WS_METHODS.threadAttentionMarkSeen,
-            threadAttention.markSeen(currentSessionId, input),
-            { "rpc.aggregate": "threadAttention" },
+            WS_METHODS.threadStatusMarkViewed,
+            threadStatusStates.markViewed(input),
+            { "rpc.aggregate": "threadStatus" },
           ),
-        [WS_METHODS.threadAttentionMarkUnseen]: (input) =>
+        [WS_METHODS.threadStatusSetTerminalOpen]: (input) =>
           observeRpcEffect(
-            WS_METHODS.threadAttentionMarkUnseen,
-            threadAttention.markUnseen(currentSessionId, input),
-            { "rpc.aggregate": "threadAttention" },
+            WS_METHODS.threadStatusSetTerminalOpen,
+            threadStatusStates.setTerminalOpen(
+              input.threadId,
+              input.terminal,
+              input.observedAt ?? new Date().toISOString(),
+            ),
+            { "rpc.aggregate": "threadStatus" },
           ),
         [WS_METHODS.threadWorkbenchGetState]: (input) =>
           observeRpcEffect(
@@ -1429,14 +1438,11 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "terminal" },
           ),
-        [WS_METHODS.subscribeThreadAttention]: (_input) =>
+        [WS_METHODS.subscribeThreadStatus]: (_input) =>
           observeRpcStreamEffect(
-            WS_METHODS.subscribeThreadAttention,
-            threadAttention.streamWithSnapshot(
-              currentSessionId,
-              orchestrationEngine.streamDomainEvents,
-            ),
-            { "rpc.aggregate": "threadAttention" },
+            WS_METHODS.subscribeThreadStatus,
+            threadStatusStates.streamWithSnapshot(),
+            { "rpc.aggregate": "threadStatus" },
           ),
         [WS_METHODS.subscribeServerConfig]: (_input) =>
           observeRpcStreamEffect(

@@ -7,7 +7,7 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationShellSnapshot,
-  type ThreadAttentionState,
+  type ThreadStatusState,
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -148,13 +148,21 @@ function makeThreadShellSnapshot(params: {
   };
 }
 
-function makeThreadAttentionState(threadId: ThreadId): ThreadAttentionState {
+function makeThreadStatusState(threadId: ThreadId): ThreadStatusState {
   return {
     threadId,
-    kind: "completed",
-    turnId: TurnId.make("turn-attention"),
-    attentionAt: "2026-04-13T00:01:00.000Z",
-    acknowledgedAt: null,
+    primaryStatus: "completed",
+    pendingApproval: false,
+    awaitingInput: false,
+    working: false,
+    completed: true,
+    connecting: false,
+    planReady: false,
+    terminal: false,
+    latestTurnId: TurnId.make("turn-status"),
+    completedAt: "2026-04-13T00:01:00.000Z",
+    readAt: null,
+    manuallyMarkedUnreadAt: null,
     updatedAt: "2026-04-13T00:01:00.000Z",
     revision: 1,
   };
@@ -342,10 +350,10 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("does not orphan-clean attention for environments without an applied shell snapshot", async () => {
+  it("does not orphan-clean thread status for environments without an applied shell snapshot", async () => {
     const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
       await import("./service");
-    const { useThreadAttentionStore } = await import("~/threadAttentionStore");
+    const { useThreadStatusStore } = await import("~/threadStatusStore");
 
     const stop = startEnvironmentConnectionService(new QueryClient());
     const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
@@ -357,11 +365,11 @@ describe("retainThreadDetailSubscription", () => {
     const remoteThreadId = ThreadId.make("thread-remote");
     const remoteThreadKey = scopedThreadKey(scopeThreadRef(remoteEnvironmentId, remoteThreadId));
 
-    connectionInput.applyThreadAttentionEvent(
+    connectionInput.applyThreadStatusEvent(
       {
         type: "snapshot",
         snapshot: {
-          states: [makeThreadAttentionState(remoteThreadId)],
+          states: [makeThreadStatusState(remoteThreadId)],
           updatedAt: "2026-04-13T00:01:00.000Z",
         },
       },
@@ -373,7 +381,7 @@ describe("retainThreadDetailSubscription", () => {
       localEnvironmentId,
     );
 
-    expect(useThreadAttentionStore.getState().attentionByThreadKey[remoteThreadKey]).toBeDefined();
+    expect(useThreadStatusStore.getState().statusByThreadKey[remoteThreadKey]).toBeDefined();
 
     stop();
     await resetEnvironmentServiceForTests();

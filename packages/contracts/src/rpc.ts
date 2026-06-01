@@ -99,13 +99,15 @@ import {
   TerminalWriteInput,
 } from "./terminal.ts";
 import {
-  ThreadAttentionError,
-  ThreadAttentionMarkSeenInput,
-  ThreadAttentionMarkUnseenInput,
-  ThreadAttentionMutationEvent,
-  ThreadAttentionSnapshot,
-  ThreadAttentionStreamEvent,
-} from "./threadAttention.ts";
+  ThreadStatusError,
+  ThreadStatusMarkReadInput,
+  ThreadStatusMarkUnreadInput,
+  ThreadStatusMarkViewedInput,
+  ThreadStatusMutationEvent,
+  ThreadStatusSetTerminalOpenInput,
+  ThreadStatusSnapshot,
+  ThreadStatusStreamEvent,
+} from "./threadStatus.ts";
 import {
   ThreadWorkbenchGetStateInput,
   ThreadWorkbenchSetStateInput,
@@ -195,10 +197,12 @@ export const WS_METHODS = {
   terminalClose: "terminal.close",
   terminalGetStatusSnapshot: "terminal.getStatusSnapshot",
 
-  // Thread attention methods
-  threadAttentionGetSnapshot: "threadAttention.getSnapshot",
-  threadAttentionMarkSeen: "threadAttention.markSeen",
-  threadAttentionMarkUnseen: "threadAttention.markUnseen",
+  // Thread status methods
+  threadStatusGetSnapshot: "threadStatus.getSnapshot",
+  threadStatusMarkRead: "threadStatus.markRead",
+  threadStatusMarkUnread: "threadStatus.markUnread",
+  threadStatusMarkViewed: "threadStatus.markViewed",
+  threadStatusSetTerminalOpen: "threadStatus.setTerminalOpen",
 
   // Thread workbench state methods
   threadWorkbenchGetState: "threadWorkbench.getState",
@@ -228,7 +232,7 @@ export const WS_METHODS = {
   // Streaming subscriptions
   subscribeVcsStatus: "subscribeVcsStatus",
   subscribeTerminalEvents: "subscribeTerminalEvents",
-  subscribeThreadAttention: "subscribeThreadAttention",
+  subscribeThreadStatus: "subscribeThreadStatus",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
@@ -562,22 +566,34 @@ export const WsTerminalGetStatusSnapshotRpc = Rpc.make(WS_METHODS.terminalGetSta
   success: TerminalRuntimeStatusSnapshot,
 });
 
-export const WsThreadAttentionGetSnapshotRpc = Rpc.make(WS_METHODS.threadAttentionGetSnapshot, {
+export const WsThreadStatusGetSnapshotRpc = Rpc.make(WS_METHODS.threadStatusGetSnapshot, {
   payload: Schema.Struct({}),
-  success: ThreadAttentionSnapshot,
-  error: ThreadAttentionError,
+  success: ThreadStatusSnapshot,
+  error: ThreadStatusError,
 });
 
-export const WsThreadAttentionMarkSeenRpc = Rpc.make(WS_METHODS.threadAttentionMarkSeen, {
-  payload: ThreadAttentionMarkSeenInput,
-  success: ThreadAttentionMutationEvent,
-  error: ThreadAttentionError,
+export const WsThreadStatusMarkReadRpc = Rpc.make(WS_METHODS.threadStatusMarkRead, {
+  payload: ThreadStatusMarkReadInput,
+  success: ThreadStatusMutationEvent,
+  error: ThreadStatusError,
 });
 
-export const WsThreadAttentionMarkUnseenRpc = Rpc.make(WS_METHODS.threadAttentionMarkUnseen, {
-  payload: ThreadAttentionMarkUnseenInput,
-  success: ThreadAttentionMutationEvent,
-  error: ThreadAttentionError,
+export const WsThreadStatusMarkUnreadRpc = Rpc.make(WS_METHODS.threadStatusMarkUnread, {
+  payload: ThreadStatusMarkUnreadInput,
+  success: ThreadStatusMutationEvent,
+  error: ThreadStatusError,
+});
+
+export const WsThreadStatusMarkViewedRpc = Rpc.make(WS_METHODS.threadStatusMarkViewed, {
+  payload: ThreadStatusMarkViewedInput,
+  success: ThreadStatusMutationEvent,
+  error: ThreadStatusError,
+});
+
+export const WsThreadStatusSetTerminalOpenRpc = Rpc.make(WS_METHODS.threadStatusSetTerminalOpen, {
+  payload: ThreadStatusSetTerminalOpenInput,
+  success: ThreadStatusMutationEvent,
+  error: ThreadStatusError,
 });
 
 export const WsThreadWorkbenchGetStateRpc = Rpc.make(WS_METHODS.threadWorkbenchGetState, {
@@ -663,10 +679,10 @@ export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTermina
   stream: true,
 });
 
-export const WsSubscribeThreadAttentionRpc = Rpc.make(WS_METHODS.subscribeThreadAttention, {
+export const WsSubscribeThreadStatusRpc = Rpc.make(WS_METHODS.subscribeThreadStatus, {
   payload: Schema.Struct({}),
-  success: ThreadAttentionStreamEvent,
-  error: ThreadAttentionError,
+  success: ThreadStatusStreamEvent,
+  error: ThreadStatusError,
   stream: true,
 });
 
@@ -745,13 +761,15 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
   WsTerminalGetStatusSnapshotRpc,
-  WsThreadAttentionGetSnapshotRpc,
-  WsThreadAttentionMarkSeenRpc,
-  WsThreadAttentionMarkUnseenRpc,
+  WsThreadStatusGetSnapshotRpc,
+  WsThreadStatusMarkReadRpc,
+  WsThreadStatusMarkUnreadRpc,
+  WsThreadStatusMarkViewedRpc,
+  WsThreadStatusSetTerminalOpenRpc,
   WsThreadWorkbenchGetStateRpc,
   WsThreadWorkbenchSetStateRpc,
   WsSubscribeTerminalEventsRpc,
-  WsSubscribeThreadAttentionRpc,
+  WsSubscribeThreadStatusRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,

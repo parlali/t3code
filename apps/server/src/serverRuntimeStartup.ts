@@ -17,6 +17,7 @@ import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import * as Context from "effect/Context";
 import * as Console from "effect/Console";
 import * as Crypto from "effect/Crypto";
@@ -34,6 +35,7 @@ import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper.ts";
+import { ThreadStatusStates } from "./threadStatusState.ts";
 import {
   formatHeadlessServeOutput,
   formatHostForUrl,
@@ -291,6 +293,8 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
   const lifecycleEvents = yield* ServerLifecycleEvents;
   const serverSettings = yield* ServerSettingsService;
   const serverEnvironment = yield* ServerEnvironment;
+  const orchestrationEngine = yield* OrchestrationEngineService;
+  const threadStatusStates = yield* ThreadStatusStates;
 
   const commandGate = yield* makeCommandGate;
   const httpListening = yield* Deferred.make<void>();
@@ -335,6 +339,31 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* orchestrationReactor.start().pipe(Scope.provide(reactorScope));
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
+      }),
+    );
+
+    yield* Effect.logDebug("startup phase: starting thread status runtime");
+    yield* runStartupPhase(
+      "thread-status.start",
+      Effect.gen(function* () {
+        const observedAt = new Date().toISOString();
+        yield* threadStatusStates.reconcile(observedAt);
+
+        yield* orchestrationEngine.streamDomainEvents.pipe(
+          Stream.runForEach((event) =>
+            threadStatusStates.applyOrchestrationEvent(event).pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("failed to update thread status from orchestration event", {
+                  cause,
+                  eventType: event.type,
+                  aggregateId: event.aggregateId,
+                }),
+              ),
+            ),
+          ),
+          Effect.forkScoped,
+          Scope.provide(reactorScope),
+        );
       }),
     );
 

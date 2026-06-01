@@ -49,6 +49,7 @@ import { ProjectionThreadProposedPlan } from "../../persistence/Services/Project
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
 import { RepositoryIdentityResolver } from "../../project/Services/RepositoryIdentityResolver.ts";
+import { CLIENT_VISIBLE_THREAD_ACTIVITY_PAYLOAD_KINDS } from "../threadActivityPayloadVisibility.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   ProjectionSnapshotQuery,
@@ -93,6 +94,7 @@ const ProjectionThreadActivityMetadataDbRowSchema = Schema.Struct({
   tone: ProjectionThreadActivity.fields.tone,
   kind: ProjectionThreadActivity.fields.kind,
   summary: ProjectionThreadActivity.fields.summary,
+  payload: Schema.fromJsonString(Schema.Unknown),
   sequence: Schema.NullOr(NonNegativeInt),
   createdAt: ProjectionThreadActivity.fields.createdAt,
 });
@@ -319,7 +321,7 @@ function mapActivityMetadataRow(
     tone: row.tone,
     kind: row.kind,
     summary: row.summary,
-    payload: null,
+    payload: row.payload,
     turnId: row.turnId,
     createdAt: row.createdAt,
   };
@@ -993,6 +995,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             tone,
             kind,
             summary,
+            CASE
+              WHEN ${sql.in("kind", CLIENT_VISIBLE_THREAD_ACTIVITY_PAYLOAD_KINDS)}
+              THEN payload_json
+              ELSE 'null'
+            END AS "payload",
             sequence,
             created_at AS "createdAt"
           FROM projection_thread_activities

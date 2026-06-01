@@ -37,7 +37,7 @@ import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { TerminalManagerLive } from "./terminal/Layers/Manager.ts";
-import { ThreadAttentionLive } from "./threadAttention.ts";
+import { ThreadStatusStatesLive } from "./threadStatusState.ts";
 import { ThreadWorkbenchStatesLive } from "./threadWorkbenchState.ts";
 import * as GitManager from "./git/GitManager.ts";
 import { KeybindingsLive } from "./keybindings.ts";
@@ -291,7 +291,7 @@ const RuntimeCoreServicesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(TerminalLayerLive),
-  Layer.provideMerge(ThreadAttentionLive),
+  Layer.provideMerge(ThreadStatusStatesLive),
   Layer.provideMerge(ThreadWorkbenchStatesLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),

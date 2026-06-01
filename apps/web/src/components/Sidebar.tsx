@@ -70,7 +70,7 @@ import {
   useStore,
 } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
-import { useThreadAttentionStore } from "../threadAttentionStore";
+import { useThreadStatusStore } from "../threadStatusStore";
 import { useUiStateStore } from "../uiStateStore";
 import {
   resolveShortcutCommand,
@@ -322,14 +322,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
-  const hasUnseenAttention = useThreadAttentionStore(
-    (state) => state.attentionByThreadKey[threadKey] !== undefined,
-  );
+  const persistedThreadStatus = useThreadStatusStore((state) => state.statusByThreadKey[threadKey]);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const hasSelection = useThreadSelectionStore((state) => state.selectedThreadKeys.size > 0);
-  const hasOpenTerminal = useTerminalStateStore(
-    (state) => selectThreadTerminalState(state.terminalStateByThreadKey, threadRef).terminalOpen,
-  );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isRemoteThread =
     primaryEnvironmentId !== null && thread.environmentId !== primaryEnvironmentId;
@@ -359,17 +354,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     cwd: thread.branch != null ? gitCwd : null,
   });
   const isHighlighted = isActive || isSelected;
-  const isThreadRunning =
-    thread.session?.status === "running" && thread.session.activeTurnId != null;
+  const isThreadRunning = persistedThreadStatus?.working === true;
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
-      hasUnseenAttention,
+      threadStatus: persistedThreadStatus,
     },
   });
   const pr = resolveThreadPr(thread.branch, gitStatus.data);
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
-  const terminalStatus = terminalStatusFromOpenState(hasOpenTerminal);
+  const terminalStatus = terminalStatusFromOpenState(persistedThreadStatus?.terminal === true);
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
@@ -1029,48 +1023,49 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   // thread-list change).
   const sidebarThreadByKeyRef = useRef(sidebarThreadByKey);
   sidebarThreadByKeyRef.current = sidebarThreadByKey;
-  const markThreadUnseen = useCallback(
-    (thread: SidebarThreadSummary | null | undefined) => {
-      if (!thread) {
-        return;
-      }
-      const threadRef = scopeThreadRef(thread.environmentId, thread.id);
-      const threadKey = scopedThreadKey(threadRef);
-      const shouldHoldUnread = threadKey === activeRouteThreadKey;
-      const observedAt = new Date().toISOString();
-      if (shouldHoldUnread) {
-        useThreadAttentionStore.getState().holdThreadUnseen(thread.environmentId, thread.id);
-      }
-      void readEnvironmentApi(thread.environmentId)
-        ?.threadAttention.markUnseen({
-          threadId: thread.id,
-          observedAt,
-        })
-        .then((event) => {
-          useThreadAttentionStore.getState().applyStreamEvent(thread.environmentId, event);
-        })
-        .catch((error: unknown) => {
-          if (shouldHoldUnread) {
-            useThreadAttentionStore
-              .getState()
-              .releaseThreadUnseenHold(thread.environmentId, thread.id);
-          }
-          console.warn("Failed to mark thread unread", error);
-        });
-    },
-    [activeRouteThreadKey],
-  );
+  const markThreadRead = useCallback((thread: SidebarThreadSummary | null | undefined) => {
+    if (!thread) {
+      return;
+    }
+    const observedAt = new Date().toISOString();
+    void readEnvironmentApi(thread.environmentId)
+      ?.threadStatus.markRead({
+        threadId: thread.id,
+        observedAt,
+      })
+      .then((event) => {
+        useThreadStatusStore.getState().applyStreamEvent(thread.environmentId, event);
+      })
+      .catch((error: unknown) => {
+        console.warn("Failed to mark thread read", error);
+      });
+  }, []);
+  const markThreadUnseen = useCallback((thread: SidebarThreadSummary | null | undefined) => {
+    if (!thread) {
+      return;
+    }
+    const observedAt = new Date().toISOString();
+    void readEnvironmentApi(thread.environmentId)
+      ?.threadStatus.markUnread({
+        threadId: thread.id,
+        observedAt,
+      })
+      .then((event) => {
+        useThreadStatusStore.getState().applyStreamEvent(thread.environmentId, event);
+      })
+      .catch((error: unknown) => {
+        console.warn("Failed to mark thread unread", error);
+      });
+  }, []);
   const projectThreads = sidebarThreads;
   const projectExpanded = useUiStateStore(
     (state) => state.projectExpandedById[project.projectKey] ?? true,
   );
-  const threadAttentionFlags = useThreadAttentionStore(
+  const threadStatusEntries = useThreadStatusStore(
     useShallow((state) =>
       projectThreads.map(
         (thread) =>
-          state.attentionByThreadKey[
-            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))
-          ] !== undefined,
+          state.statusByThreadKey[scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))],
       ),
     ),
   );
@@ -1116,20 +1111,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   }, [memberProjectByScopedKey, project.memberProjects, projectThreads]);
 
   const { projectStatus, visibleProjectThreads, orderedProjectThreadKeys } = useMemo(() => {
-    const hasAttentionByThreadKey = new Map(
+    const statusByThreadKey = new Map(
       projectThreads.map((thread, index) => [
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        threadAttentionFlags[index] ?? false,
+        threadStatusEntries[index],
       ]),
     );
     const resolveProjectThreadStatus = (thread: SidebarThreadSummary) => {
-      const hasUnseenAttention = hasAttentionByThreadKey.get(
+      const threadStatus = statusByThreadKey.get(
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       );
       return resolveThreadStatusPill({
         thread: {
           ...thread,
-          hasUnseenAttention,
+          threadStatus,
         },
       });
     };
@@ -1147,7 +1142,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       projectStatus,
       visibleProjectThreads,
     };
-  }, [projectThreads, threadAttentionFlags, threadSortOrder]);
+  }, [projectThreads, threadStatusEntries, threadSortOrder]);
 
   const pinnedCollapsedThread = useMemo(() => {
     const activeThreadKey = activeRouteThreadKey ?? undefined;
@@ -1169,20 +1164,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     showEmptyThreadState,
     shouldShowThreadPanel,
   } = useMemo(() => {
-    const hasAttentionByThreadKey = new Map(
+    const statusByThreadKey = new Map(
       projectThreads.map((thread, index) => [
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        threadAttentionFlags[index] ?? false,
+        threadStatusEntries[index],
       ]),
     );
     const resolveProjectThreadStatus = (thread: SidebarThreadSummary) => {
-      const hasUnseenAttention = hasAttentionByThreadKey.get(
+      const threadStatus = statusByThreadKey.get(
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       );
       return resolveThreadStatusPill({
         thread: {
           ...thread,
-          hasUnseenAttention,
+          threadStatus,
         },
       });
     };
@@ -1219,7 +1214,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     pinnedCollapsedThread,
     projectExpanded,
     projectThreads,
-    threadAttentionFlags,
+    threadStatusEntries,
     visibleProjectThreads,
   ]);
 
@@ -1621,11 +1616,21 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
       const clicked = await api.contextMenu.show(
         [
+          { id: "mark-read", label: `Mark read (${count})` },
           { id: "mark-unread", label: `Mark unread (${count})` },
           { id: "delete", label: `Delete (${count})`, destructive: true },
         ],
         position,
       );
+
+      if (clicked === "mark-read") {
+        for (const threadKey of threadKeys) {
+          const thread = sidebarThreadByKeyRef.current.get(threadKey);
+          markThreadRead(thread);
+        }
+        clearSelection();
+        return;
+      }
 
       if (clicked === "mark-unread") {
         for (const threadKey of threadKeys) {
@@ -1662,6 +1667,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       appSettingsConfirmThreadDelete,
       clearSelection,
       deleteThread,
+      markThreadRead,
       markThreadUnseen,
       removeFromSelection,
     ],
@@ -1932,6 +1938,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const clicked = await api.contextMenu.show(
         [
           { id: "rename", label: "Rename thread" },
+          { id: "mark-read", label: "Mark read" },
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
@@ -1947,6 +1954,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
 
+      if (clicked === "mark-read") {
+        markThreadRead(thread);
+        return;
+      }
       if (clicked === "mark-unread") {
         markThreadUnseen(thread);
         return;
@@ -1988,6 +1999,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
+      markThreadRead,
       markThreadUnseen,
       memberProjectByScopedKey,
       project.cwd,

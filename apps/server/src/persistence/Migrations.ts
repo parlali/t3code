@@ -46,6 +46,11 @@ import Migration0030 from "./Migrations/030_ProjectionThreadShellArchiveIndexes.
 import Migration0031 from "./Migrations/031_ThreadReadReceipts.ts";
 import Migration0032 from "./Migrations/032_ThreadWorkbenchState.ts";
 import Migration0033 from "./Migrations/033_ThreadAttention.ts";
+import Migration0034 from "./Migrations/034_ThreadStatusState.ts";
+import Migration0035 from "./Migrations/035_ThreadStatusLifecycleBadges.ts";
+import Migration0036 from "./Migrations/036_ThreadStatusResetCompletedBackfill.ts";
+import Migration0037 from "./Migrations/037_ThreadStatusResetTerminalClientState.ts";
+import Migration0038 from "./Migrations/038_ThreadStatusTerminalObservedAt.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -91,6 +96,11 @@ export const migrationEntries = [
   [31, "ThreadReadReceipts", Migration0031],
   [32, "ThreadWorkbenchState", Migration0032],
   [33, "ThreadAttention", Migration0033],
+  [34, "ThreadStatusState", Migration0034],
+  [35, "ThreadStatusLifecycleBadges", Migration0035],
+  [36, "ThreadStatusResetCompletedBackfill", Migration0036],
+  [37, "ThreadStatusResetTerminalClientState", Migration0037],
+  [38, "ThreadStatusTerminalObservedAt", Migration0038],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

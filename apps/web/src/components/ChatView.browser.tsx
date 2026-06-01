@@ -203,19 +203,45 @@ function createMockEnvironmentApi(input: {
 }): EnvironmentApi {
   return {
     terminal: {} as EnvironmentApi["terminal"],
-    threadAttention: {
+    threadStatus: {
       getSnapshot: async () => ({ states: [], updatedAt: new Date().toISOString() }),
-      markSeen: async (input) => ({
+      markRead: async (input) => ({
         type: "state-cleared" as const,
         threadId: input.threadId,
         updatedAt: input.observedAt ?? new Date().toISOString(),
         revision: 1,
       }),
-      markUnseen: async (input) => ({
+      markUnread: async (input) => ({
         type: "state-cleared" as const,
         threadId: input.threadId,
         updatedAt: input.observedAt ?? new Date().toISOString(),
         revision: 1,
+      }),
+      markViewed: async (input) => ({
+        type: "state-cleared" as const,
+        threadId: input.threadId,
+        updatedAt: input.observedAt ?? new Date().toISOString(),
+        revision: 1,
+      }),
+      setTerminalOpen: async (input) => ({
+        type: "state-updated" as const,
+        state: {
+          threadId: input.threadId,
+          primaryStatus: null,
+          pendingApproval: false,
+          awaitingInput: false,
+          working: false,
+          completed: false,
+          connecting: false,
+          planReady: false,
+          terminal: input.terminal,
+          latestTurnId: null,
+          completedAt: null,
+          readAt: null,
+          manuallyMarkedUnreadAt: null,
+          updatedAt: input.observedAt ?? new Date().toISOString(),
+          revision: 1,
+        },
       }),
       subscribe: () => () => undefined,
     },
@@ -1101,6 +1127,28 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
       exitCode: null,
       exitSignal: null,
       updatedAt: NOW_ISO,
+    };
+  }
+  if (tag === WS_METHODS.threadStatusSetTerminalOpen) {
+    return {
+      type: "state-updated",
+      state: {
+        threadId: typeof body.threadId === "string" ? body.threadId : THREAD_ID,
+        primaryStatus: null,
+        pendingApproval: false,
+        awaitingInput: false,
+        working: false,
+        completed: false,
+        connecting: false,
+        planReady: false,
+        terminal: body.terminal === true,
+        latestTurnId: null,
+        completedAt: null,
+        readAt: null,
+        manuallyMarkedUnreadAt: null,
+        updatedAt: typeof body.observedAt === "string" ? body.observedAt : NOW_ISO,
+        revision: 1,
+      },
     };
   }
   return {};

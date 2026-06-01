@@ -142,13 +142,7 @@ import {
   type TerminalContextSelection,
 } from "../lib/terminalContext";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
-import { logThreadAttention } from "../threadAttentionDebugLog";
-import { markThreadAttentionSeenWithRetry } from "../threadAttentionMarkSeen";
-import {
-  readThreadAttentionReceivedSequence,
-  useThreadAttentionStore,
-} from "../threadAttentionStore";
-import { shouldMarkThreadAttentionSeen } from "../threadAttentionSeenPolicy";
+import { useThreadStatusStore } from "../threadStatusStore";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { PANEL_EXIT_ANIMATION_MS, SNAPPY_TRANSITION_EASING_CLASS } from "./ui/animation";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
@@ -590,6 +584,36 @@ interface PersistentBottomPanelProps {
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
 }
 
+const terminalStatusObservedAtByThreadKey = new Map<string, number>();
+
+function nextThreadTerminalObservedAt(threadRef: ScopedThreadRef): string {
+  const threadKey = scopedThreadKey(threadRef);
+  const previous = terminalStatusObservedAtByThreadKey.get(threadKey) ?? 0;
+  const next = Math.max(Date.now(), previous + 1);
+  terminalStatusObservedAtByThreadKey.set(threadKey, next);
+  return new Date(next).toISOString();
+}
+
+function writeThreadTerminalOpenStatus(threadRef: ScopedThreadRef, terminal: boolean): void {
+  const api = readEnvironmentApi(threadRef.environmentId)?.threadStatus;
+  if (!api) {
+    return;
+  }
+
+  void api
+    .setTerminalOpen({
+      threadId: threadRef.threadId,
+      terminal,
+      observedAt: nextThreadTerminalObservedAt(threadRef),
+    })
+    .then((event) => {
+      useThreadStatusStore.getState().applyStreamEvent(threadRef.environmentId, event);
+    })
+    .catch((error: unknown) => {
+      console.warn("Failed to update thread terminal status", error);
+    });
+}
+
 const PersistentBottomPanel = memo(function PersistentBottomPanel({
   threadRef,
   threadId,
@@ -667,13 +691,19 @@ const PersistentBottomPanel = memo(function PersistentBottomPanel({
 
   const splitTerminal = useCallback(() => {
     storeSplitTerminal(threadRef, `terminal-${randomUUID()}`);
+    if (serverThread) {
+      writeThreadTerminalOpenStatus(threadRef, true);
+    }
     bumpFocusRequestId();
-  }, [bumpFocusRequestId, storeSplitTerminal, threadRef]);
+  }, [bumpFocusRequestId, serverThread, storeSplitTerminal, threadRef]);
 
   const createNewTerminal = useCallback(() => {
     storeNewTerminal(threadRef, `terminal-${randomUUID()}`);
+    if (serverThread) {
+      writeThreadTerminalOpenStatus(threadRef, true);
+    }
     bumpFocusRequestId();
-  }, [bumpFocusRequestId, storeNewTerminal, threadRef]);
+  }, [bumpFocusRequestId, serverThread, storeNewTerminal, threadRef]);
 
   const activateTerminal = useCallback(
     (terminalId: string) => {
@@ -707,9 +737,19 @@ const PersistentBottomPanel = memo(function PersistentBottomPanel({
       }
 
       storeCloseTerminal(threadRef, terminalId);
+      if (serverThread) {
+        writeThreadTerminalOpenStatus(threadRef, !isFinalTerminal);
+      }
       bumpFocusRequestId();
     },
-    [bumpFocusRequestId, storeCloseTerminal, terminalState.terminalIds.length, threadId, threadRef],
+    [
+      bumpFocusRequestId,
+      serverThread,
+      storeCloseTerminal,
+      terminalState.terminalIds.length,
+      threadId,
+      threadRef,
+    ],
   );
 
   const handleAddTerminalContext = useCallback(
@@ -1011,102 +1051,75 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
-  const activeThreadAttention = useThreadAttentionStore((state) =>
-    activeThreadKey ? state.attentionByThreadKey[activeThreadKey] : undefined,
+  const activeThreadStatus = useThreadStatusStore((state) =>
+    activeThreadKey ? state.statusByThreadKey[activeThreadKey] : undefined,
   );
-  const activeThreadUnseenHeld = useThreadAttentionStore((state) =>
-    activeThreadKey ? state.manuallyUnseenThreadKeys[activeThreadKey] === true : false,
-  );
-  const previousActiveThreadRef = useRef<ScopedThreadRef | null>(null);
-  useEffect(() => {
-    const previousActiveThread = previousActiveThreadRef.current;
-    if (
-      previousActiveThread &&
-      (!activeThreadRef ||
-        previousActiveThread.environmentId !== activeThreadRef.environmentId ||
-        previousActiveThread.threadId !== activeThreadRef.threadId)
-    ) {
-      useThreadAttentionStore
-        .getState()
-        .releaseThreadUnseenHold(previousActiveThread.environmentId, previousActiveThread.threadId);
-    }
-    previousActiveThreadRef.current = activeThreadRef;
-  }, [activeThreadRef]);
-  useEffect(
-    () => () => {
-      const previousActiveThread = previousActiveThreadRef.current;
-      if (!previousActiveThread) return;
-      useThreadAttentionStore
-        .getState()
-        .releaseThreadUnseenHold(previousActiveThread.environmentId, previousActiveThread.threadId);
-    },
-    [],
-  );
-  const threadFocusGainedAtRef = useRef<{
+  const routeViewStartedAtRef = useRef<{
     readonly threadKey: string | null;
-    readonly at: string | null;
+    readonly startedAt: string | null;
   }>({
     threadKey: activeThreadKey,
-    at:
-      activeThreadKey && document.hasFocus() && document.visibilityState === "visible"
-        ? new Date().toISOString()
-        : null,
+    startedAt: activeThreadKey ? new Date().toISOString() : null,
   });
-  if (threadFocusGainedAtRef.current.threadKey !== activeThreadKey) {
-    threadFocusGainedAtRef.current = {
+  if (routeViewStartedAtRef.current.threadKey !== activeThreadKey) {
+    routeViewStartedAtRef.current = {
       threadKey: activeThreadKey,
-      at:
+      startedAt: activeThreadKey ? new Date().toISOString() : null,
+    };
+  }
+  const routeViewStartedAt =
+    routeViewStartedAtRef.current.threadKey === activeThreadKey
+      ? routeViewStartedAtRef.current.startedAt
+      : null;
+  const [activeViewStartedAt, setActiveViewStartedAt] = useState<string | null>(() =>
+    activeThreadKey && document.hasFocus() && document.visibilityState === "visible"
+      ? new Date().toISOString()
+      : null,
+  );
+  useEffect(() => {
+    const resetActiveViewStartedAt = () => {
+      setActiveViewStartedAt(
         activeThreadKey && document.hasFocus() && document.visibilityState === "visible"
           ? new Date().toISOString()
           : null,
+      );
     };
-  }
-  const attentionSeenGateRef = useRef<{
-    readonly threadKey: string | null;
-    readonly sequence: number;
-  }>({
-    threadKey: activeThreadKey,
-    sequence: readThreadAttentionReceivedSequence(),
-  });
-  if (attentionSeenGateRef.current.threadKey !== activeThreadKey) {
-    attentionSeenGateRef.current = {
-      threadKey: activeThreadKey,
-      sequence: readThreadAttentionReceivedSequence(),
-    };
-  }
-  const attentionSeenGateSequence = attentionSeenGateRef.current.sequence;
-  const threadFocusGainedAt =
-    threadFocusGainedAtRef.current.threadKey === activeThreadKey
-      ? threadFocusGainedAtRef.current.at
-      : null;
-  const [attentionVisibilityVersion, setAttentionVisibilityVersion] = useState(0);
-  useEffect(() => {
-    const notifyVisibilityChanged = () => {
-      setAttentionVisibilityVersion((version) => version + 1);
-      if (!activeThreadKey) {
-        return;
-      }
-      if (!document.hasFocus() || document.visibilityState !== "visible") {
-        return;
-      }
-      threadFocusGainedAtRef.current = {
-        threadKey: activeThreadKey,
-        at: new Date().toISOString(),
-      };
-    };
-    window.addEventListener("focus", notifyVisibilityChanged);
-    window.addEventListener("blur", notifyVisibilityChanged);
-    document.addEventListener("visibilitychange", notifyVisibilityChanged);
+    resetActiveViewStartedAt();
+    window.addEventListener("focus", resetActiveViewStartedAt);
+    window.addEventListener("blur", resetActiveViewStartedAt);
+    document.addEventListener("visibilitychange", resetActiveViewStartedAt);
     return () => {
-      window.removeEventListener("focus", notifyVisibilityChanged);
-      window.removeEventListener("blur", notifyVisibilityChanged);
-      document.removeEventListener("visibilitychange", notifyVisibilityChanged);
+      window.removeEventListener("focus", resetActiveViewStartedAt);
+      window.removeEventListener("blur", resetActiveViewStartedAt);
+      document.removeEventListener("visibilitychange", resetActiveViewStartedAt);
     };
   }, [activeThreadKey]);
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
   }, [draftThreadKeys, openTerminalThreadKeys, serverThreadKeys]);
+  useEffect(() => {
+    if (!activeThreadRef || !isServerThread) {
+      return;
+    }
+    const terminalOpen = Boolean(terminalState.terminalOpen);
+    if (!terminalOpen && activeThreadStatus?.terminal !== true) {
+      return;
+    }
+    writeThreadTerminalOpenStatus(activeThreadRef, terminalOpen);
+  }, [activeThreadRef, activeThreadStatus?.terminal, isServerThread, terminalState.terminalOpen]);
+  useEffect(() => {
+    const serverThreadKeySet = new Set(serverThreadKeys);
+    for (const openThreadKey of existingOpenTerminalThreadKeys) {
+      if (!serverThreadKeySet.has(openThreadKey)) {
+        continue;
+      }
+      const openThreadRef = parseScopedThreadKey(openThreadKey);
+      if (openThreadRef) {
+        writeThreadTerminalOpenStatus(openThreadRef, true);
+      }
+    }
+  }, [existingOpenTerminalThreadKeys, serverThreadKeys]);
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const threadPlanCatalog = useThreadPlanCatalog(
     useMemo(() => {
@@ -1410,61 +1423,45 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     if (!serverThread?.id) return;
-    if (!activeThreadAttention) return;
-    const shouldMark = shouldMarkThreadAttentionSeen({
-      attentionAt: activeThreadAttention.attentionAt,
-      lastFocusGainedAt: threadFocusGainedAt,
-      receivedSequence: activeThreadAttention.receivedSequence,
-      seenGateSequence: attentionSeenGateSequence,
-      hasFocus: document.hasFocus(),
-      isHeld: activeThreadUnseenHeld,
-      visibilityState: document.visibilityState,
-    });
-    logThreadAttention({
-      source: "chat-view",
-      action: "evaluate-mark-seen",
-      environmentId: serverThread.environmentId,
-      threadId: serverThread.id,
-      threadKey: activeThreadKey ?? undefined,
-      attentionAt: activeThreadAttention.attentionAt,
-      receivedSequence: activeThreadAttention.receivedSequence,
-      seenGateSequence: attentionSeenGateSequence,
-      lastFocusGainedAt: threadFocusGainedAt ?? undefined,
-      hasFocus: document.hasFocus(),
-      isHeld: activeThreadUnseenHeld,
-      visibilityState: document.visibilityState,
-      shouldMarkSeen: shouldMark,
-    });
-    if (!shouldMark) {
-      return;
-    }
-    const observedAt = new Date().toISOString();
-    const api = readEnvironmentApi(serverThread.environmentId)?.threadAttention;
-    if (!api) {
-      return;
-    }
+    if (!activeThreadStatus?.completed) return;
+    if (!activeViewStartedAt || !routeViewStartedAt) return;
+    if (!document.hasFocus() || document.visibilityState !== "visible") return;
 
-    void markThreadAttentionSeenWithRetry({
-      environmentId: serverThread.environmentId,
-      threadId: serverThread.id,
-      observedAt,
-      markSeen: (request) => api.markSeen(request),
-    })
-      .then((event) => {
-        useThreadAttentionStore.getState().applyStreamEvent(serverThread.environmentId, event);
-      })
-      .catch((error: unknown) => {
-        console.warn("Failed to mark thread attention seen", error);
-      });
+    const timeout = window.setTimeout(() => {
+      if (!document.hasFocus() || document.visibilityState !== "visible") {
+        return;
+      }
+      const observedAt = new Date().toISOString();
+      const api = readEnvironmentApi(serverThread.environmentId)?.threadStatus;
+      if (!api) {
+        return;
+      }
+      void api
+        .markViewed({
+          threadId: serverThread.id,
+          viewStartedAt: routeViewStartedAt,
+          observedAt,
+        })
+        .then((event) => {
+          useThreadStatusStore.getState().applyStreamEvent(serverThread.environmentId, event);
+        })
+        .catch((error: unknown) => {
+          console.warn("Failed to mark thread status viewed", error);
+        });
+    }, 1_000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
   }, [
-    activeThreadAttention,
+    activeThreadStatus?.completed,
+    activeThreadStatus?.completedAt,
+    activeThreadStatus?.manuallyMarkedUnreadAt,
     activeThreadKey,
-    activeThreadUnseenHeld,
-    attentionSeenGateSequence,
-    attentionVisibilityVersion,
+    activeViewStartedAt,
+    routeViewStartedAt,
     serverThread?.environmentId,
     serverThread?.id,
-    threadFocusGainedAt,
   ]);
 
   const selectedProviderByThreadId = composerActiveProvider ?? null;
@@ -2190,8 +2187,11 @@ export default function ChatView(props: ChatViewProps) {
     (open: boolean) => {
       if (!activeThreadRef) return;
       storeSetTerminalOpen(activeThreadRef, open);
+      if (isServerThread) {
+        writeThreadTerminalOpenStatus(activeThreadRef, open);
+      }
     },
-    [activeThreadRef, storeSetTerminalOpen],
+    [activeThreadRef, isServerThread, storeSetTerminalOpen],
   );
   const toggleTerminalVisibility = useCallback(() => {
     if (!activeThreadRef) return;
@@ -2201,14 +2201,20 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeThreadRef || hasReachedSplitLimit) return;
     const terminalId = `terminal-${randomUUID()}`;
     storeSplitTerminal(activeThreadRef, terminalId);
+    if (isServerThread) {
+      writeThreadTerminalOpenStatus(activeThreadRef, true);
+    }
     setTerminalFocusRequestId((value) => value + 1);
-  }, [activeThreadRef, hasReachedSplitLimit, storeSplitTerminal]);
+  }, [activeThreadRef, hasReachedSplitLimit, isServerThread, storeSplitTerminal]);
   const createNewTerminal = useCallback(() => {
     if (!activeThreadRef) return;
     const terminalId = `terminal-${randomUUID()}`;
     storeNewTerminal(activeThreadRef, terminalId);
+    if (isServerThread) {
+      writeThreadTerminalOpenStatus(activeThreadRef, true);
+    }
     setTerminalFocusRequestId((value) => value + 1);
-  }, [activeThreadRef, storeNewTerminal]);
+  }, [activeThreadRef, isServerThread, storeNewTerminal]);
   const closeTerminal = useCallback(
     (terminalId: string) => {
       const api = readEnvironmentApi(environmentId);
@@ -2236,6 +2242,9 @@ export default function ChatView(props: ChatViewProps) {
       }
       if (activeThreadRef) {
         storeCloseTerminal(activeThreadRef, terminalId);
+        if (isServerThread) {
+          writeThreadTerminalOpenStatus(activeThreadRef, !isFinalTerminal);
+        }
       }
       setTerminalFocusRequestId((value) => value + 1);
     },
@@ -2243,6 +2252,7 @@ export default function ChatView(props: ChatViewProps) {
       activeThreadId,
       activeThreadRef,
       environmentId,
+      isServerThread,
       storeCloseTerminal,
       terminalState.terminalIds.length,
     ],

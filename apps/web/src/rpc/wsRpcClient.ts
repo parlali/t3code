@@ -77,11 +77,13 @@ export interface WsRpcClient {
     readonly onEvent: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
     readonly onSessionEvent: RpcInputStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
   };
-  readonly threadAttention: {
-    readonly getSnapshot: RpcUnaryNoArgMethod<typeof WS_METHODS.threadAttentionGetSnapshot>;
-    readonly markSeen: RpcUnaryMethod<typeof WS_METHODS.threadAttentionMarkSeen>;
-    readonly markUnseen: RpcUnaryMethod<typeof WS_METHODS.threadAttentionMarkUnseen>;
-    readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeThreadAttention>;
+  readonly threadStatus: {
+    readonly getSnapshot: RpcUnaryNoArgMethod<typeof WS_METHODS.threadStatusGetSnapshot>;
+    readonly markRead: RpcUnaryMethod<typeof WS_METHODS.threadStatusMarkRead>;
+    readonly markUnread: RpcUnaryMethod<typeof WS_METHODS.threadStatusMarkUnread>;
+    readonly markViewed: RpcUnaryMethod<typeof WS_METHODS.threadStatusMarkViewed>;
+    readonly setTerminalOpen: RpcUnaryMethod<typeof WS_METHODS.threadStatusSetTerminalOpen>;
+    readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeThreadStatus>;
   };
   readonly threadWorkbench: {
     readonly getState: RpcUnaryMethod<typeof WS_METHODS.threadWorkbenchGetState>;
@@ -270,20 +272,24 @@ export function createWsRpcClient(
           },
         ),
     },
-    threadAttention: {
+    threadStatus: {
       getSnapshot: () =>
-        transport.request((client) => client[WS_METHODS.threadAttentionGetSnapshot]({})),
-      markSeen: (input) =>
-        transport.request((client) => client[WS_METHODS.threadAttentionMarkSeen](input)),
-      markUnseen: (input) =>
-        transport.request((client) => client[WS_METHODS.threadAttentionMarkUnseen](input)),
+        transport.request((client) => client[WS_METHODS.threadStatusGetSnapshot]({})),
+      markRead: (input) =>
+        transport.request((client) => client[WS_METHODS.threadStatusMarkRead](input)),
+      markUnread: (input) =>
+        transport.request((client) => client[WS_METHODS.threadStatusMarkUnread](input)),
+      markViewed: (input) =>
+        transport.request((client) => client[WS_METHODS.threadStatusMarkViewed](input)),
+      setTerminalOpen: (input) =>
+        transport.request((client) => client[WS_METHODS.threadStatusSetTerminalOpen](input)),
       subscribe: (listener, options) =>
         streamTransport.subscribe(
-          (client) => client[WS_METHODS.subscribeThreadAttention]({}),
+          (client) => client[WS_METHODS.subscribeThreadStatus]({}),
           listener,
           {
             ...options,
-            tag: WS_METHODS.subscribeThreadAttention,
+            tag: WS_METHODS.subscribeThreadStatus,
           },
         ),
     },

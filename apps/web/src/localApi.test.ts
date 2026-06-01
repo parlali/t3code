@@ -54,10 +54,12 @@ const rpcClientMock = {
       registerListener(terminalEventListeners, listener),
     ),
   },
-  threadAttention: {
+  threadStatus: {
     getSnapshot: vi.fn(),
-    markSeen: vi.fn(),
-    markUnseen: vi.fn(),
+    markRead: vi.fn(),
+    markUnread: vi.fn(),
+    markViewed: vi.fn(),
+    setTerminalOpen: vi.fn(),
     subscribe: vi.fn(),
   },
   threadWorkbench: {

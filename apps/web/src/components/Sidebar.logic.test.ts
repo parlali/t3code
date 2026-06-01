@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ProviderDriverKind } from "@t3tools/contracts";
 
 import {
   createThreadJumpHintVisibilityController,
@@ -20,13 +19,7 @@ import {
   sortProjectsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
-import {
-  EnvironmentId,
-  OrchestrationLatestTurn,
-  ProjectId,
-  ProviderInstanceId,
-  ThreadId,
-} from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -35,24 +28,6 @@ import {
 } from "../types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
-
-function makeLatestTurn(overrides?: {
-  completedAt?: string | null;
-  startedAt?: string | null;
-}): OrchestrationLatestTurn {
-  const completedAt =
-    overrides && "completedAt" in overrides ? overrides.completedAt : "2026-03-09T10:05:00.000Z";
-  const startedAt =
-    overrides && "startedAt" in overrides ? overrides.startedAt : "2026-03-09T10:00:00.000Z";
-  return {
-    turnId: "turn-1" as never,
-    state: "completed",
-    assistantMessageId: null,
-    requestedAt: "2026-03-09T10:00:00.000Z",
-    startedAt,
-    completedAt,
-  };
-}
 
 describe("createThreadJumpHintVisibilityController", () => {
   beforeEach(() => {
@@ -461,41 +436,32 @@ describe("isContextMenuPointerDown", () => {
 
 describe("resolveThreadStatusPill", () => {
   const baseThread = {
-    hasActionableProposedPlan: false,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    interactionMode: "plan" as const,
-    latestTurn: null,
-    hasUnseenAttention: false,
-    session: {
-      provider: ProviderDriverKind.make("codex"),
-      status: "running" as const,
-      createdAt: "2026-03-09T10:00:00.000Z",
-      updatedAt: "2026-03-09T10:00:00.000Z",
-      orchestrationStatus: "running" as const,
+    threadStatus: {
+      primaryStatus: "working" as const,
     },
-    createdAt: "2026-03-09T09:55:00.000Z",
-    updatedAt: "2026-03-09T10:00:00.000Z",
   };
 
-  it("shows pending approval before all other statuses", () => {
+  it("shows pending approval from the central status row", () => {
     expect(
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
-          hasPendingApprovals: true,
-          hasPendingUserInput: true,
+          threadStatus: {
+            primaryStatus: "pendingApproval",
+          },
         },
       }),
     ).toMatchObject({ label: "Pending Approval", pulse: false });
   });
 
-  it("shows awaiting input when plan mode is blocked on user answers", () => {
+  it("shows awaiting input from the central status row", () => {
     expect(
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
-          hasPendingUserInput: true,
+          threadStatus: {
+            primaryStatus: "awaitingInput",
+          },
         },
       }),
     ).toMatchObject({ label: "Awaiting Input", pulse: false });
@@ -514,28 +480,21 @@ describe("resolveThreadStatusPill", () => {
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
-          hasActionableProposedPlan: true,
-          latestTurn: makeLatestTurn(),
-          session: {
-            ...baseThread.session,
-            status: "ready",
-            orchestrationStatus: "ready",
+          threadStatus: {
+            primaryStatus: "planReady",
           },
         },
       }),
     ).toMatchObject({ label: "Plan Ready", pulse: false });
   });
 
-  it("does not show plan ready after the proposed plan was implemented elsewhere", () => {
+  it("does not infer a badge when the central status row has no primary status", () => {
     expect(
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
-          latestTurn: makeLatestTurn(),
-          session: {
-            ...baseThread.session,
-            status: "ready",
-            orchestrationStatus: "ready",
+          threadStatus: {
+            primaryStatus: null,
           },
         },
       }),
@@ -547,27 +506,22 @@ describe("resolveThreadStatusPill", () => {
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
-          interactionMode: "default",
-          latestTurn: makeLatestTurn(),
-          hasUnseenAttention: true,
-          session: {
-            ...baseThread.session,
-            status: "ready",
-            orchestrationStatus: "ready",
+          threadStatus: {
+            primaryStatus: "completed",
           },
         },
       }),
     ).toMatchObject({ label: "Completed", pulse: false });
   });
 
-  it("shows working instead of completed when unseen attention exists during a running session", () => {
+  it("shows working from the central status row", () => {
     expect(
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
-          interactionMode: "default",
-          latestTurn: makeLatestTurn(),
-          hasUnseenAttention: true,
+          threadStatus: {
+            primaryStatus: "working",
+          },
         },
       }),
     ).toMatchObject({ label: "Working", pulse: true });
@@ -578,13 +532,25 @@ describe("resolveThreadStatusPill", () => {
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
-          interactionMode: "default",
-          latestTurn: makeLatestTurn(),
-          hasUnseenAttention: false,
-          session: null,
+          threadStatus: {
+            primaryStatus: null,
+          },
         },
       }),
     ).toBeNull();
+  });
+
+  it("shows connecting from the central status row", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          threadStatus: {
+            primaryStatus: "connecting",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Connecting", pulse: true });
   });
 });
 
