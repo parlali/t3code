@@ -137,22 +137,40 @@ async function waitForThread(
   readModel: () => Promise<{
     readonly threads: ReadonlyArray<{
       readonly id: ThreadId;
-      readonly latestTurn: { readonly turnId: string } | null;
-      readonly checkpoints: ReadonlyArray<{ readonly checkpointTurnCount: number }>;
+      readonly latestTurn: { readonly turnId: string; readonly state?: string } | null;
+      readonly checkpoints: ReadonlyArray<{
+        readonly turnId?: string;
+        readonly checkpointTurnCount: number;
+        readonly checkpointRef?: string;
+        readonly status?: string;
+        readonly files?: ReadonlyArray<unknown>;
+      }>;
       readonly activities: ReadonlyArray<{ readonly kind: string }>;
     }>;
   }>,
   predicate: (thread: {
-    latestTurn: { turnId: string } | null;
-    checkpoints: ReadonlyArray<{ checkpointTurnCount: number }>;
+    latestTurn: { turnId: string; state?: string } | null;
+    checkpoints: ReadonlyArray<{
+      turnId?: string;
+      checkpointTurnCount: number;
+      checkpointRef?: string;
+      status?: string;
+      files?: ReadonlyArray<unknown>;
+    }>;
     activities: ReadonlyArray<{ kind: string }>;
   }) => boolean,
   timeoutMs = 15_000,
 ) {
   const deadline = Date.now() + timeoutMs;
   const poll = async (): Promise<{
-    latestTurn: { turnId: string } | null;
-    checkpoints: ReadonlyArray<{ checkpointTurnCount: number }>;
+    latestTurn: { turnId: string; state?: string } | null;
+    checkpoints: ReadonlyArray<{
+      turnId?: string;
+      checkpointTurnCount: number;
+      checkpointRef?: string;
+      status?: string;
+      files?: ReadonlyArray<unknown>;
+    }>;
     activities: ReadonlyArray<{ kind: string }>;
   }> => {
     const snapshot = await readModel();
@@ -490,6 +508,42 @@ describe("CheckpointReactor", () => {
         "README.md",
       ),
     ).toBe("v2\n");
+  });
+
+  it("records a turn-only rollback marker when no git checkpoint cwd is available", async () => {
+    const nonGitCwd = fs.mkdtempSync(path.join(os.tmpdir(), "t3-checkpoint-no-git-"));
+    tempDirs.push(nonGitCwd);
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      providerSessionCwd: nonGitCwd,
+    });
+
+    const createdAt = new Date().toISOString();
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.make("evt-turn-only-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt,
+      threadId: ThreadId.make("thread-1"),
+      turnId: asTurnId("turn-only-1"),
+      payload: { state: "completed" },
+    });
+
+    await waitForEvent(harness.engine, (event) => event.type === "thread.turn-diff-completed");
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.checkpoints.length === 1,
+    );
+
+    expect(thread.checkpoints[0]).toMatchObject({
+      turnId: "turn-only-1",
+      checkpointTurnCount: 1,
+      checkpointRef: "provider-diff:evt-turn-only-completed",
+      status: "ready",
+      files: [],
+    });
+    expect(thread.latestTurn?.turnId).toBe("turn-only-1");
+    expect(thread.latestTurn?.state).toBe("completed");
   });
 
   it("refreshes local git status state on turn completion using the session cwd", async () => {
@@ -870,7 +924,7 @@ describe("CheckpointReactor", () => {
     );
   });
 
-  it("continues processing runtime events after a single checkpoint runtime failure", async () => {
+  it("continues processing runtime events after a turn-only checkpoint marker", async () => {
     const nonRepositorySessionCwd = fs.mkdtempSync(
       path.join(os.tmpdir(), "t3-checkpoint-runtime-non-repo-"),
     );
@@ -921,13 +975,15 @@ describe("CheckpointReactor", () => {
       turnId: asTurnId("turn-after-runtime-failure"),
     });
 
-    await waitForGitRefExists(
-      harness.cwd,
-      checkpointRefForThreadTurn(ThreadId.make("thread-1"), 0),
+    await waitForEvent(harness.engine, (event) => event.type === "thread.turn-diff-completed");
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.checkpoints.some((checkpoint) => checkpoint.turnId === "turn-runtime-failure"),
     );
-    expect(
-      gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 0)),
-    ).toBe(true);
+    expect(thread.checkpoints[0]).toMatchObject({
+      turnId: "turn-runtime-failure",
+      checkpointRef: "provider-diff:evt-runtime-capture-failure",
+      status: "ready",
+    });
   });
 
   it("executes provider revert and emits thread.reverted for checkpoint revert requests", async () => {

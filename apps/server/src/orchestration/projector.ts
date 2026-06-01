@@ -30,6 +30,23 @@ import {
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
+const RUNTIME_SCOPED_ACTIVITY_KINDS = new Set([
+  "approval.requested",
+  "approval.resolved",
+  "runtime.error",
+  "runtime.warning",
+  "turn.plan.updated",
+  "user-input.requested",
+  "user-input.resolved",
+  "task.started",
+  "task.progress",
+  "task.completed",
+  "context-compaction",
+  "context-window.updated",
+  "tool.updated",
+  "tool.completed",
+  "tool.started",
+]);
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
   if (status === "error") return "error" as const;
@@ -123,10 +140,17 @@ function retainThreadMessagesAfterRevert(
 function retainThreadActivitiesAfterRevert(
   activities: ReadonlyArray<OrchestrationThread["activities"][number]>,
   retainedTurnIds: ReadonlySet<string>,
+  retainedThroughCreatedAt: string | null,
 ): ReadonlyArray<OrchestrationThread["activities"][number]> {
-  return activities.filter(
-    (activity) => activity.turnId === null || retainedTurnIds.has(activity.turnId),
-  );
+  return activities.filter((activity) => {
+    if (activity.turnId !== null) {
+      return retainedTurnIds.has(activity.turnId);
+    }
+    if (!RUNTIME_SCOPED_ACTIVITY_KINDS.has(activity.kind)) {
+      return true;
+    }
+    return retainedThroughCreatedAt !== null && activity.createdAt <= retainedThroughCreatedAt;
+  });
 }
 
 function retainThreadProposedPlansAfterRevert(
@@ -589,9 +613,13 @@ export function projectEvent(
             thread.proposedPlans,
             retainedTurnIds,
           ).slice(-200);
-          const activities = retainThreadActivitiesAfterRevert(thread.activities, retainedTurnIds);
 
           const latestCheckpoint = checkpoints.at(-1) ?? null;
+          const activities = retainThreadActivitiesAfterRevert(
+            thread.activities,
+            retainedTurnIds,
+            latestCheckpoint?.completedAt ?? null,
+          );
           const latestTurn =
             latestCheckpoint === null
               ? null

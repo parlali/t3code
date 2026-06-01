@@ -628,6 +628,26 @@ describe("orchestration projector", () => {
       }),
       makeEvent({
         sequence: 10,
+        type: "thread.activity-appended",
+        aggregateKind: "thread",
+        aggregateId: "thread-1",
+        occurredAt: "2026-02-23T10:00:04.800Z",
+        commandId: "cmd-runtime-warning-null-turn",
+        payload: {
+          threadId: "thread-1",
+          activity: {
+            id: "activity-runtime-warning-null-turn",
+            tone: "info",
+            kind: "runtime.warning",
+            summary: "Runtime warning",
+            payload: { message: "stale warning" },
+            turnId: null,
+            createdAt: "2026-02-23T10:00:04.800Z",
+          },
+        },
+      }),
+      makeEvent({
+        sequence: 11,
         type: "thread.reverted",
         aggregateKind: "thread",
         aggregateId: "thread-1",

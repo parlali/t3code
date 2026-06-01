@@ -34,6 +34,7 @@ import {
   type ProviderRuntimeTurnStatus,
   type ProviderSendTurnInput,
   type ProviderSession,
+  type ModelSelection,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
   type RuntimeContentStreamKind,
@@ -109,7 +110,14 @@ interface ClaudeResumeState {
   readonly threadId?: ThreadId;
   readonly resume?: string;
   readonly resumeSessionAt?: string;
+  readonly forkSession?: boolean;
   readonly turnCount?: number;
+}
+
+interface ClaudeThreadTurn {
+  readonly id: TurnId;
+  readonly items: Array<unknown>;
+  readonly assistantUuid?: string;
 }
 
 interface ClaudeTurnState {
@@ -119,6 +127,7 @@ interface ClaudeTurnState {
   readonly assistantTextBlocks: Map<number, AssistantTextBlockState>;
   readonly assistantTextBlockOrder: Array<AssistantTextBlockState>;
   readonly capturedProposedPlanKeys: Set<string>;
+  assistantUuid: string | undefined;
   nextSyntheticAssistantBlockIndex: number;
 }
 
@@ -162,13 +171,11 @@ interface ClaudeSessionContext {
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
   currentApiModelId: string | undefined;
+  modelSelection: ModelSelection | undefined;
   resumeSessionId: string | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
-  readonly turns: Array<{
-    id: TurnId;
-    items: Array<unknown>;
-  }>;
+  readonly turns: Array<ClaudeThreadTurn>;
   readonly inFlightTools: Map<number, ToolInFlight>;
   turnState: ClaudeTurnState | undefined;
   lastKnownContextWindow: number | undefined;
@@ -401,6 +408,7 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     resume?: unknown;
     sessionId?: unknown;
     resumeSessionAt?: unknown;
+    forkSession?: unknown;
     turnCount?: unknown;
   };
 
@@ -418,12 +426,14 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
   const resume = resumeCandidate && isUuid(resumeCandidate) ? resumeCandidate : undefined;
   const resumeSessionAt =
     typeof cursor.resumeSessionAt === "string" ? cursor.resumeSessionAt : undefined;
+  const forkSession = cursor.forkSession === true;
   const turnCountValue = typeof cursor.turnCount === "number" ? cursor.turnCount : undefined;
 
   return {
     ...(threadId ? { threadId } : {}),
     ...(resume ? { resume } : {}),
     ...(resumeSessionAt ? { resumeSessionAt } : {}),
+    ...(forkSession ? { forkSession: true } : {}),
     ...(turnCountValue !== undefined && Number.isInteger(turnCountValue) && turnCountValue >= 0
       ? { turnCount: turnCountValue }
       : {}),
@@ -1568,6 +1578,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     context.turns.push({
       id: turnState.turnId,
       items: [...turnState.items],
+      ...(turnState.assistantUuid ? { assistantUuid: turnState.assistantUuid } : {}),
     });
 
     if (usageSnapshot) {
@@ -1983,6 +1994,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         assistantTextBlocks: new Map(),
         assistantTextBlockOrder: [],
         capturedProposedPlanKeys: new Set(),
+        assistantUuid: undefined,
         nextSyntheticAssistantBlockIndex: -1,
       };
       context.session = {
@@ -2043,6 +2055,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     if (context.turnState) {
       context.turnState.items.push(message.message);
+      context.turnState.assistantUuid = message.uuid;
       yield* backfillAssistantTextBlocksFromSnapshot(context, message);
     }
 
@@ -2563,8 +2576,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const resumeState = readClaudeResumeState(input.resumeCursor);
       const threadId = input.threadId;
       const existingResumeSessionId = resumeState?.resume;
-      const newSessionId = existingResumeSessionId === undefined ? yield* randomUUIDv4 : undefined;
-      const sessionId = existingResumeSessionId ?? newSessionId;
+      const forkResumeSession =
+        existingResumeSessionId !== undefined && resumeState?.forkSession === true;
+      const newSessionId =
+        existingResumeSessionId === undefined || forkResumeSession
+          ? yield* randomUUIDv4
+          : undefined;
+      const sessionId = forkResumeSession
+        ? newSessionId
+        : (existingResumeSessionId ?? newSessionId);
 
       const runtimeContext = yield* Effect.context<never>();
       const runFork = Effect.runForkWith(runtimeContext);
@@ -2942,6 +2962,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           : {}),
         ...(Object.keys(settings).length > 0 ? { settings } : {}),
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
+        ...(forkResumeSession && resumeState?.resumeSessionAt
+          ? { resumeSessionAt: resumeState.resumeSessionAt }
+          : {}),
+        ...(forkResumeSession ? { forkSession: true } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
@@ -2955,8 +2979,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "provider.kind": PROVIDER,
         "provider.thread_id": threadId,
         "provider.runtime_mode": input.runtimeMode,
-        "claude.resume.source":
-          existingResumeSessionId !== undefined ? "resume-session" : "generated-session",
+        "claude.resume.source": forkResumeSession
+          ? "forked-resume-session"
+          : existingResumeSessionId !== undefined
+            ? "resume-session"
+            : "generated-session",
         "claude.resume.thread_id": resumeState?.threadId ?? "",
         "claude.resume.session_id": existingResumeSessionId ?? "",
         "claude.resume.session_at": resumeState?.resumeSessionAt ?? "",
@@ -2967,6 +2994,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.query.permission_mode": permissionMode ?? "",
         "claude.query.allow_dangerously_skip_permissions": permissionMode === "bypassPermissions",
         "claude.query.resume": existingResumeSessionId ?? "",
+        "claude.query.resume_session_at":
+          forkResumeSession && resumeState?.resumeSessionAt ? resumeState.resumeSessionAt : "",
+        "claude.query.fork_session": forkResumeSession,
         "claude.query.session_id": newSessionId ?? "",
         "claude.query.include_partial_messages": true,
         "claude.query.additional_directories": input.cwd ? [input.cwd] : [],
@@ -3019,6 +3049,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         startedAt,
         basePermissionMode: permissionMode,
         currentApiModelId: apiModelId,
+        modelSelection,
         resumeSessionId: sessionId,
         pendingApprovals,
         pendingUserInputs,
@@ -3134,6 +3165,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...context.session,
         model: modelSelection.model,
       };
+      context.modelSelection = modelSelection;
     }
 
     // Apply interaction mode by switching the SDK's permission mode.
@@ -3160,6 +3192,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       assistantTextBlocks: new Map(),
       assistantTextBlockOrder: [],
       capturedProposedPlanKeys: new Set(),
+      assistantUuid: undefined,
       nextSyntheticAssistantBlockIndex: -1,
     };
 
@@ -3224,10 +3257,68 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const rollbackThread: ClaudeAdapterShape["rollbackThread"] = Effect.fn("rollbackThread")(
     function* (threadId, numTurns) {
       const context = yield* requireSession(threadId);
+      if (!Number.isInteger(numTurns) || numTurns < 1) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "rollbackThread",
+          issue: "numTurns must be an integer >= 1.",
+        });
+      }
+
       const nextLength = Math.max(0, context.turns.length - numTurns);
-      context.turns.splice(nextLength);
-      yield* updateResumeCursor(context);
-      return yield* snapshotThread(context);
+      const retainedTurns: Array<ClaudeThreadTurn> = context.turns
+        .slice(0, nextLength)
+        .map((turn) => ({
+          id: turn.id,
+          items: [...turn.items],
+          ...(turn.assistantUuid ? { assistantUuid: turn.assistantUuid } : {}),
+        }));
+      const retainedAssistantUuid = retainedTurns.at(-1)?.assistantUuid;
+
+      if (retainedTurns.length > 0 && !retainedAssistantUuid) {
+        return yield* new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "thread/rollback",
+          detail:
+            "Cannot partially roll back Claude session because the retained turn has no assistant resume checkpoint.",
+        });
+      }
+
+      const sourceResumeSessionId = context.resumeSessionId;
+      if (retainedTurns.length > 0 && !sourceResumeSessionId) {
+        return yield* new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "thread/rollback",
+          detail:
+            "Cannot partially roll back Claude session because no provider session id is available.",
+        });
+      }
+
+      yield* startSession({
+        threadId,
+        provider: PROVIDER,
+        providerInstanceId: boundInstanceId,
+        runtimeMode: context.session.runtimeMode,
+        ...(context.session.cwd ? { cwd: context.session.cwd } : {}),
+        ...(context.modelSelection ? { modelSelection: context.modelSelection } : {}),
+        ...(retainedTurns.length > 0 && sourceResumeSessionId && retainedAssistantUuid
+          ? {
+              resumeCursor: {
+                threadId,
+                resume: sourceResumeSessionId,
+                resumeSessionAt: retainedAssistantUuid,
+                forkSession: true,
+                turnCount: retainedTurns.length,
+              },
+            }
+          : {}),
+      });
+
+      const restartedContext = yield* requireSession(threadId);
+      restartedContext.turns.push(...retainedTurns);
+      restartedContext.lastAssistantUuid = retainedAssistantUuid;
+      yield* updateResumeCursor(restartedContext);
+      return yield* snapshotThread(restartedContext);
     },
   );
 

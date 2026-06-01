@@ -8,6 +8,7 @@ import * as nodePath from "node:path";
 import {
   ApprovalRequestId,
   type CursorSettings,
+  type ModelSelection,
   type ProviderOptionSelection,
   EventId,
   type ProviderApprovalDecision,
@@ -134,6 +135,7 @@ interface CursorSessionContext {
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
+  modelSelection: ModelSelection | undefined;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
   stopped: boolean;
@@ -771,6 +773,7 @@ export function makeCursorAdapter(
             pendingApprovals,
             pendingUserInputs,
             turns: [],
+            modelSelection: cursorModelSelection,
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
             stopped: false,
@@ -998,6 +1001,9 @@ export function makeCursorAdapter(
           updatedAt: yield* nowIso,
           model: resolvedModel,
         };
+        if (turnModelSelection) {
+          ctx.modelSelection = turnModelSelection;
+        }
 
         yield* offerRuntimeEvent({
           type: "turn.completed",
@@ -1085,8 +1091,32 @@ export function makeCursorAdapter(
           });
         }
         const nextLength = Math.max(0, ctx.turns.length - numTurns);
-        ctx.turns.splice(nextLength);
-        return { threadId, turns: ctx.turns };
+        if (nextLength > 0) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "thread/rollback",
+            detail:
+              "Cursor ACP does not expose a provider-visible partial rollback; refusing to keep a stale live provider context.",
+          });
+        }
+        if (!ctx.session.cwd) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "rollbackThread",
+            issue: "Cannot restart Cursor session for rollback because cwd is unavailable.",
+          });
+        }
+
+        yield* startSession({
+          threadId,
+          provider: PROVIDER,
+          providerInstanceId: boundInstanceId,
+          runtimeMode: ctx.session.runtimeMode,
+          cwd: ctx.session.cwd,
+          ...(ctx.modelSelection ? { modelSelection: ctx.modelSelection } : {}),
+        });
+        const restarted = yield* requireSession(threadId);
+        return { threadId, turns: restarted.turns };
       });
 
     const stopSession: CursorAdapterShape["stopSession"] = (threadId) =>

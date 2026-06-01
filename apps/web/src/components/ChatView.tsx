@@ -135,7 +135,6 @@ import {
 } from "../composerDraftStore";
 import {
   appendTerminalContextsToPrompt,
-  deriveDisplayedUserMessageState,
   formatTerminalContextLabel,
   type TerminalContextDraft,
   type TerminalContextSelection,
@@ -3805,11 +3804,7 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
-      const displayedMessage = deriveDisplayedUserMessageState(message.text);
-      const editablePrompt =
-        displayedMessage.visibleText === IMAGE_ONLY_BOOTSTRAP_PROMPT
-          ? ""
-          : displayedMessage.visibleText;
+      const editablePrompt = message.text === IMAGE_ONLY_BOOTSTRAP_PROMPT ? "" : message.text;
       const dispatched = await onRevertToTurnCountRef.current(targetTurnCount, {
         action: "edit",
         beforeDispatch: async () => {

@@ -49,6 +49,16 @@ export function writeTerminalReplayState(replay: TerminalReplayState, data: stri
     terminal.writeSync(data);
     return;
   }
+
+  const core = (terminal as unknown as Record<string, unknown>)["_core"];
+  if (typeof core === "object" && core !== null) {
+    const writeSync = (core as { readonly writeSync?: unknown }).writeSync;
+    if (typeof writeSync === "function") {
+      (writeSync as (data: string) => void).call(core, data);
+      return;
+    }
+  }
+
   replay.terminal.write(data);
 }
 

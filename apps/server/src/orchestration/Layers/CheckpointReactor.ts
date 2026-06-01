@@ -1,6 +1,6 @@
 import {
+  CheckpointRef,
   CommandId,
-  type CheckpointRef,
   EventId,
   MessageId,
   type ProjectId,
@@ -404,6 +404,59 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const dispatchTurnOnlyCheckpoint = Effect.fn("dispatchTurnOnlyCheckpoint")(function* (input: {
+    readonly threadId: ThreadId;
+    readonly turnId: TurnId;
+    readonly thread: {
+      readonly messages: ReadonlyArray<{
+        readonly id: MessageId;
+        readonly role: string;
+        readonly turnId: TurnId | null;
+      }>;
+    };
+    readonly turnCount: number;
+    readonly status: "ready" | "missing" | "error";
+    readonly createdAt: string;
+    readonly sourceEventId: EventId;
+  }) {
+    const assistantMessageId =
+      input.thread.messages
+        .toReversed()
+        .find((entry) => entry.role === "assistant" && entry.turnId === input.turnId)?.id ??
+      MessageId.make(`assistant:${input.turnId}`);
+    const checkpointRef = CheckpointRef.make(`provider-diff:${input.sourceEventId}`);
+
+    yield* orchestrationEngine.dispatch({
+      type: "thread.turn.diff.complete",
+      commandId: yield* serverCommandId("turn-only-checkpoint-complete"),
+      threadId: input.threadId,
+      turnId: input.turnId,
+      completedAt: input.createdAt,
+      checkpointRef,
+      status: input.status,
+      files: [],
+      assistantMessageId,
+      checkpointTurnCount: input.turnCount,
+      createdAt: input.createdAt,
+    });
+    yield* receiptBus.publish({
+      type: "checkpoint.diff.finalized",
+      threadId: input.threadId,
+      turnId: input.turnId,
+      checkpointTurnCount: input.turnCount,
+      checkpointRef,
+      status: input.status,
+      createdAt: input.createdAt,
+    });
+    yield* receiptBus.publish({
+      type: "turn.processing.quiesced",
+      threadId: input.threadId,
+      turnId: input.turnId,
+      checkpointTurnCount: input.turnCount,
+      createdAt: input.createdAt,
+    });
+  });
+
   // Captures a real git checkpoint when a turn completes via a runtime event.
   const captureCheckpointFromTurnCompletion = Effect.fn("captureCheckpointFromTurnCompletion")(
     function* (event: RuntimeTurnFinishedEvent) {
@@ -434,16 +487,6 @@ const make = Effect.gen(function* () {
       }
 
       const projects = yield* resolveThreadProjects(thread.projectId);
-      const checkpointCwd = yield* resolveCheckpointCwd({
-        threadId: thread.id,
-        thread,
-        projects,
-        preferSessionRuntime: true,
-      });
-      if (!checkpointCwd) {
-        return;
-      }
-
       // If a placeholder checkpoint exists for this turn, reuse its turn count
       // instead of incrementing past it.
       const existingPlaceholder = thread.checkpoints.find(
@@ -456,6 +499,27 @@ const make = Effect.gen(function* () {
       const nextTurnCount = existingPlaceholder
         ? existingPlaceholder.checkpointTurnCount
         : currentTurnCount + 1;
+      const checkpointCwd = yield* resolveCheckpointCwd({
+        threadId: thread.id,
+        thread,
+        projects,
+        preferSessionRuntime: true,
+      });
+      if (!checkpointCwd) {
+        yield* dispatchTurnOnlyCheckpoint({
+          threadId: thread.id,
+          turnId,
+          thread,
+          turnCount: nextTurnCount,
+          status:
+            event.type === "turn.aborted"
+              ? "missing"
+              : checkpointStatusFromRuntime(event.payload.state),
+          createdAt: event.createdAt,
+          sourceEventId: event.eventId,
+        });
+        return;
+      }
 
       yield* captureAndDispatchCheckpoint({
         threadId: thread.id,
