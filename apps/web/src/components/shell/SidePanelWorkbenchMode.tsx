@@ -39,6 +39,7 @@ import { Menu, MenuGroup, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { PANE_ICON_BUTTON_CLASS, PANE_RESIZE_RAIL_HORIZONTAL_CLASS } from "../ui/pane-chrome";
 import { startResizeInteraction, type ResizeInteractionHandle } from "../ui/resize-interaction";
 import { ShellHeaderSlotPortal } from "./shellHeaderSlot";
+import { shouldShowPushAction } from "./sourceControlActions";
 import { Textarea } from "../ui/textarea";
 import {
   buildNewEntryRelativePath,
@@ -444,12 +445,7 @@ export function SidePanelWorkbenchMode({
     const showGenerate = Boolean(status?.isRepo) && changedFiles.length > 0 && !gitStatus.isPending;
     const showCommit =
       Boolean(status?.isRepo) && stagedFiles.length > 0 && !gitStatus.isPending && !hasConflicts;
-    const showPush =
-      Boolean(status?.isRepo) &&
-      status?.refName !== null &&
-      status?.hasUpstream !== false &&
-      (status?.aheadCount ?? 0) > 0 &&
-      (status?.behindCount ?? 0) === 0;
+    const showPush = shouldShowPushAction(status, gitStatus.isPending);
     const canPush = showPush && isSourceControlIdle;
     const showOpenPr = status?.pr?.state === "open";
     const showActionMenu = showOpenPr;
