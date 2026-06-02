@@ -4,11 +4,11 @@ This fork may manually port upstream work without creating merge ancestry. GitHu
 
 ## Current Baseline
 
-- Last reviewed upstream: `cf07d063` (`upstream/main`, no release tag)
-- Review date: 2026-05-29
-- Local branch at review: `main` at `22acc0a3` with manual upstream sync edits pending
+- Last reviewed upstream: `e3f14058` (`upstream/main`, no release tag)
+- Review date: 2026-06-02
+- Local branch at review: `main` at `5358f735` with upstream review ledger edits pending
 - Merge strategy: manual integration, no synthetic merge marker
-- Next comparison should start at: `cf07d063..upstream/main`
+- Next comparison should start at: `e3f14058..upstream/main`
 
 ## Manual Alignment Policy
 
@@ -25,7 +25,7 @@ This fork has enough feature drift that a normal upstream merge is usually not v
 
 1. Run `git fetch upstream --prune`.
 2. Read this file before comparing code.
-3. List new upstream work with `git log --oneline cf07d063..upstream/main`.
+3. List new upstream work with `git log --oneline e3f14058..upstream/main`.
 4. Inspect all new commits enough to classify them, then use targeted `git show` and `git diff` commands for likely ports.
 5. After porting or intentionally skipping new upstream work, rewrite this file with the new last reviewed upstream SHA and a fresh summary.
 
@@ -42,6 +42,8 @@ The upstream range `ea20e800..d1e85c4e` was reviewed on 2026-05-16. It contained
 The upstream range `d1e85c4e..4f0f24f0` was reviewed on 2026-05-22. It contained one composer state bug fix for multi-instance provider option persistence; the relevant work was manually ported.
 
 The upstream range `4f0f24f0..cf07d063` was reviewed on 2026-05-29. It contained the Effect beta.73 upgrade, Claude Opus 4.8 support, TSGo migration, collection performance refactors, and web cleanup; relevant work was manually ported and adapted to this fork's server/web architecture.
+
+The upstream range `cf07d063..e3f14058` was reviewed on 2026-06-02. It contained a desktop release workflow fix, the large T3 Code Mobile WIP, and vendored reference-repo sync tooling. The release workflow fix was manually ported; the remaining applicable technical work is classified below for a dedicated port.
 
 Manually ported or aligned:
 
@@ -80,10 +82,19 @@ Manually ported or aligned:
 - Collection performance refactors from upstream commit `31268945`: ported targeted `Array`/`Result` collection updates across server, shared packages, and web state/composer flows.
 - Web cleanup from upstream commit `cf07d063`: aligned active local web surfaces with the upstream cleanup where they still exist in this fork, including workbench/settings/protocol adjustments and context-window/LRU/thread-sort test coverage.
 - Shared utility exports from the reviewed range: restored `@t3tools/shared` semver, observability, workbench media, and schema JSON helpers/tests needed by the upgraded packages and exports.
+- Release workflow Electron runtime guard from upstream commit `e3accd6e`: release metadata now verifies Electron can be required after `bun install --frozen-lockfile`, reruns `apps/desktop/node_modules/electron/install.js` if runtime artifacts are missing, and fails early if Electron still cannot load.
 
 Pending alignment work:
 
-- No technical alignment work is pending through upstream `cf07d063`.
+- Upstream commit `b3e8c033` (`T3 Code Mobile [WIP]`) needs a dedicated, staged port rather than a direct cherry-pick:
+  - `packages/client-runtime`: upstream now extracts substantially more shared client logic, including WebSocket RPC protocol/transport/client code, environment connection bootstrapping, thread detail reducers, shell snapshot state, terminal session state, VCS/git action state, checkpoint/composer/archive state, and reconnect backoff. This fork only has the earlier advertised endpoint, known environment, scoped id, and source-control discovery helpers.
+  - Terminal protocol/runtime: upstream adds `terminal.attach`, `subscribeTerminalMetadata`, terminal summary labels, closed events, explicit client-chosen `term-N` ids, and attach streams with initial snapshots. This fork already has a divergent terminal design with `terminal.getStatusSnapshot`, filtered `subscribeTerminalEvents`, `afterSequence`, `includeOutput`, runtime status snapshots, and existing `"default"` terminal id decoding. Reconcile the models before porting.
+  - Review diff preview: upstream adds `packages/contracts/src/review.ts`, `review.getDiffPreview`, `ReviewService`, Git review diff preview helpers, untracked-file diff handling, and bounded workspace-root checks. This is useful for compact/mobile review surfaces and could also benefit web if adapted to local VCS/workspace constraints.
+  - Shared helpers: evaluate porting `@t3tools/shared/remote`, `composerTrigger`, `orchestrationTiming`, and `terminalLabels`. `remote` currently lives in web-only code here; moving it to shared is likely useful for the central-server/mobile direction.
+  - Source-control discovery: upstream adds invalidation, ref-counted `watch`, stale-time caching, client-change subscriptions, and in-flight replacement handling in `packages/client-runtime/src/sourceControlDiscoveryState.ts`. This likely applies to reconnect-heavy multi-environment flows.
+  - Web adaptation: upstream deletes several web-only React Query/state modules in favor of client-runtime primitives and rewires `ThreadTerminalDrawer`, git controls, diff/review context, and environment runtime service. Port only after choosing the client-runtime and terminal protocol strategy.
+  - Mobile app itself: `apps/mobile` adds 241 files and about 35k lines plus Expo/React Native dependencies, native modules, patches, lockfile churn, CI static analysis, and `bun lint:mobile`. Keep this as a product-level decision; do not pull it into this fork just to satisfy upstream alignment.
+- Upstream commit `e3f14058` (`chore: add vendored reference repo subtree sync tooling`) is pending a repo-policy decision. It adds `scripts/sync-reference-repos.ts`, `scripts/lib/reference-repos.ts`, tests, `sync:repos`, `.repos/**` formatter/linter/editor exclusions, and a large `.repos/effect-smol` vendored subtree. The tooling is useful for agent reference material, but the subtree adds substantial repository weight and has no runtime effect.
 
 Intentionally skipped or not relevant:
 
@@ -93,6 +104,8 @@ Intentionally skipped or not relevant:
 - Upstream commit `b793401a` (`chore(release): prepare v0.0.23`) only bumped package versions from `0.0.22` to `0.0.23` and was superseded by the later `0.0.24` tracking version bump.
 - Upstream commit `e64c19f1` is mostly hosted Vercel release routing and public-domain aliasing. This fork currently keeps `apps/web/vercel.json` and self-hosted central-server direction, so defer unless the hosted channel/router release flow is revived.
 - Upstream-only workspace/package cleanup for surfaces not present in this fork remains skipped where applicable, including the removed `oxlint-plugin-t3code` workspace and web components already deleted locally (`DiffPanel`, `OpenInPicker`, and old keybinding settings logic).
+- The mobile app from upstream `b3e8c033` is not relevant unless this fork chooses to ship or maintain a native mobile surface. Shared runtime/protocol work from that commit remains pending separately.
+- Vendored `.repos/effect-smol` contents from upstream `e3f14058` are not runtime code. Skip unless this fork intentionally accepts vendored reference repositories and their repository-size impact.
 - Upstream ancestry merge marker. The fork is still ancestry-behind upstream by design.
 
 ## Known Divergences
@@ -100,9 +113,20 @@ Intentionally skipped or not relevant:
 - This fork is used as a self-hosted central agent surface with browser clients connecting to a persistent server instance.
 - Local changes may prefer central-server reliability, predictable reconnect behavior, and maintainability over matching upstream desktop-oriented flows exactly.
 - The upstream TSGo migration is adopted, but this fork currently suppresses legacy server Effect environmental diagnostics while keeping real TypeScript errors and stricter non-legacy diagnostics enforced.
+- Local terminal streaming/status behavior diverges from upstream's new mobile-oriented attach/metadata streams. Preserve reconnect/replay correctness while evaluating the upstream terminal changes.
 - GitHub may report the branch as behind upstream even when the useful upstream work in the reviewed range has been manually handled.
 
 ## Verification History
+
+Latest upstream review completed on 2026-06-02 after upstream fetch:
+
+- Ran `git fetch upstream --prune`.
+- Inspected `git log --oneline cf07d063..upstream/main`.
+- New upstream commits reviewed: `e3accd6e`, `b3e8c033`, and `e3f14058`.
+- Inspected targeted upstream patches with `git show` / `git diff`, including release workflow, mobile shared-runtime/server/protocol/web changes, and reference-repo sync tooling.
+- Manually ported upstream commit `e3accd6e` into `.github/workflows/release.yml`.
+- Remaining reviewed work was classified as pending dedicated alignment or skipped unless product/repo policy changes.
+- Verification after ledger update: `bun fmt`, `bun lint`, and `bun typecheck`.
 
 Latest upstream review completed on 2026-05-29 after upstream fetch:
 
