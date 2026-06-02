@@ -286,6 +286,7 @@ export function TerminalViewport({
   const attachRequestIdRef = useRef(0);
   const terminalSessionReadyRef = useRef(false);
   const firstOutputLoggedRef = useRef(false);
+  const lastHandledFocusRequestIdRef = useRef(focusRequestId);
   const handleSessionExited = useEffectEvent(() => {
     onSessionExited();
   });
@@ -897,11 +898,6 @@ export function TerminalViewport({
             },
             applySequencedTerminalEvent,
           );
-          if (autoFocus) {
-            window.requestAnimationFrame(() => {
-              activeTerminal.focus();
-            });
-          }
         } catch (err) {
           if (disposed || requestId !== attachRequestIdRef.current) return;
           writeSystemMessage(
@@ -993,6 +989,10 @@ export function TerminalViewport({
   }, [cwd, environmentId, runtimeEnv, terminalId, threadId]);
 
   useEffect(() => {
+    if (lastHandledFocusRequestIdRef.current === focusRequestId) {
+      return;
+    }
+    lastHandledFocusRequestIdRef.current = focusRequestId;
     if (!autoFocus) return;
     const terminal = terminalRef.current;
     if (!terminal) return;

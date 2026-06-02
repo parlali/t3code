@@ -10,19 +10,19 @@
   "theme_color": "#161616",
   "icons": [
     {
-      "src": "/app-icon-1024.png",
+      "src": "/app-icon-install-1024.png?v=20260602r2",
       "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/app-icon-maskable.svg",
+      "src": "/app-icon-maskable.svg?v=20260602r2",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "maskable"
     },
     {
-      "src": "/apple-touch-icon.png",
+      "src": "/apple-touch-icon.png?v=20260602r2",
       "sizes": "180x180",
       "type": "image/png",
       "purpose": "any"

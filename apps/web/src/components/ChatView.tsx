@@ -127,6 +127,7 @@ import {
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadStatusStore } from "../threadStatusStore";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { focusIfDocumentLacksMeaningfulFocus } from "../lib/focusPolicy";
 import { PANEL_EXIT_ANIMATION_MS, SNAPPY_TRANSITION_EASING_CLASS } from "./ui/animation";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
@@ -164,6 +165,7 @@ import {
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useComposerHandleContext } from "../composerHandleContext";
+import { useWsConnectionStatus } from "../rpc/wsConnectionState";
 
 const preloadBottomPanel = () => {
   const startedAtMs = performance.now();
@@ -1881,6 +1883,21 @@ export default function ChatView(props: ChatViewProps) {
   const focusComposer = useCallback(() => {
     getComposer()?.focusAtEnd();
   }, [getComposer]);
+  const wsConnectionStatus = useWsConnectionStatus();
+  const previousWsConnectionPhaseRef = useRef(wsConnectionStatus.phase);
+  useEffect(() => {
+    const previousPhase = previousWsConnectionPhaseRef.current;
+    previousWsConnectionPhaseRef.current = wsConnectionStatus.phase;
+    if (previousPhase === "connected" || wsConnectionStatus.phase !== "connected") {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      focusIfDocumentLacksMeaningfulFocus(focusComposer);
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [focusComposer, wsConnectionStatus.connectedAt, wsConnectionStatus.phase]);
   const scheduleComposerFocus = useCallback(() => {
     window.requestAnimationFrame(() => {
       focusComposer();
@@ -2468,8 +2485,16 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     if (!activeThreadKey) return;
-    const previous = terminalOpenByThreadRef.current[activeThreadKey] ?? false;
+    const hasObservedThread = Object.prototype.hasOwnProperty.call(
+      terminalOpenByThreadRef.current,
+      activeThreadKey,
+    );
     const current = Boolean(terminalState.terminalOpen);
+    if (!hasObservedThread) {
+      terminalOpenByThreadRef.current[activeThreadKey] = current;
+      return;
+    }
+    const previous = terminalOpenByThreadRef.current[activeThreadKey] ?? false;
 
     if (!previous && current) {
       terminalOpenByThreadRef.current[activeThreadKey] = current;

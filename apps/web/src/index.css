@@ -204,6 +204,7 @@ body {
   padding-top: max(env(safe-area-inset-top), 0px);
 }
 
+/*
 body::after {
   content: "";
   position: fixed;
@@ -214,6 +215,7 @@ body::after {
   background-repeat: repeat;
   background-size: 256px 256px;
 }
+*/
 
 pre,
 code {

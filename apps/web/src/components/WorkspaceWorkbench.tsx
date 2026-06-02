@@ -199,6 +199,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   const saveActiveRef = useRef<() => void>(() => undefined);
   const workbenchSelectionVersionRef = useRef(0);
   const [pendingEditorReveal, setPendingEditorReveal] = useState<PendingEditorReveal | null>(null);
+  const [pendingEditorFocusTabId, setPendingEditorFocusTabId] = useState<string | null>(null);
   const [editorMountVersion, setEditorMountVersion] = useState(0);
 
   const { tabs, activeTabId } = tabState;
@@ -310,7 +311,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   // Opening a different file replaces the current one; if it has unsaved edits
   // we confirm whether to save before switching.
   const openTab = useCallback(
-    (tab: WorkbenchTab, options?: { readonly persist?: boolean }) => {
+    (tab: WorkbenchTab, options?: { readonly focus?: boolean; readonly persist?: boolean }) => {
       const previous = activeTabRef.current;
       if (
         options?.persist !== false &&
@@ -350,6 +351,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
         }
       }
       setTabState({ tabs: [tab], activeTabId: tab.id });
+      setPendingEditorFocusTabId(options?.focus === true ? tab.id : null);
       publishActiveSelection(activeSelectionForTab(tab));
       if (options?.persist !== false) persistWorkspaceRightPanelPatch(rightPanelPatchForTab(tab));
     },
@@ -373,7 +375,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
           } else {
             setPendingEditorReveal(null);
           }
-          openTab(tab);
+          openTab(tab, { focus: request.line === undefined });
           return;
         }
         setPendingEditorReveal(null);
@@ -383,6 +385,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
             relativePath,
             request.source === undefined ? undefined : { source: request.source },
           ),
+          { focus: true },
         );
       }
     });
@@ -410,7 +413,23 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     editor.revealPositionInCenterIfOutsideViewport(position);
     editor.focus();
     setPendingEditorReveal(null);
+    setPendingEditorFocusTabId(null);
   }, [activeFileReady, activeTabId, editorMountVersion, pendingEditorReveal]);
+
+  useEffect(() => {
+    if (!pendingEditorFocusTabId) return;
+    const mountedEditor = editorRef.current;
+    if (
+      !mountedEditor ||
+      mountedEditor.tabId !== pendingEditorFocusTabId ||
+      activeTabId !== pendingEditorFocusTabId ||
+      !activeFileReady
+    ) {
+      return;
+    }
+    mountedEditor.editor.focus();
+    setPendingEditorFocusTabId(null);
+  }, [activeFileReady, activeTabId, editorMountVersion, pendingEditorFocusTabId]);
 
   useEffect(() => {
     if (
@@ -627,7 +646,6 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       editorRef.current = { tabId: tab.id, editor };
     }
     setEditorMountVersion((version) => version + 1);
-    editor.focus();
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       saveActiveRef.current();
     });
@@ -659,6 +677,11 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     },
     [diffQueryModified],
   );
+  const handleDiffAutoFocused = useCallback(() => {
+    const activeTabId = activeTabRef.current?.id ?? null;
+    if (!activeTabId) return;
+    setPendingEditorFocusTabId((current) => (current === activeTabId ? null : current));
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -934,6 +957,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
             <WorkbenchDiffUnavailable mediaType={activePathMediaType.mimeType} />
           ) : activeTab.kind === "diff" ? (
             <WorkbenchDiffEditor
+              autoFocus={pendingEditorFocusTabId === activeTab.id}
               diffLayout={diffLayout}
               id={activeTab.id}
               isMobileLayout={isMobileLayout}
@@ -941,6 +965,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
               lineWrap={lineWrap}
               original={diffQueryOriginal ?? ""}
               modified={diffBuffers[activeTab.id] ?? diffQueryModified ?? ""}
+              onAutoFocused={handleDiffAutoFocused}
               onModifiedChange={handleDiffModifiedChange}
               onSave={() => saveActiveRef.current()}
               path={activeTab.path}

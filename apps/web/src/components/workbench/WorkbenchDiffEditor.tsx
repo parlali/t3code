@@ -20,7 +20,9 @@ interface WorkbenchDiffEditorProps {
   readonly path: string;
   readonly readOnly: boolean;
   readonly resolvedTheme: "dark" | "light";
+  readonly autoFocus?: boolean;
   readonly visible?: boolean;
+  readonly onAutoFocused?: () => void;
   readonly onModifiedChange: (value: string) => void;
   readonly onSave: () => void;
 }
@@ -36,7 +38,9 @@ export const WorkbenchDiffEditor = memo(function WorkbenchDiffEditor({
   path,
   readOnly,
   resolvedTheme,
+  autoFocus = false,
   visible = true,
+  onAutoFocused,
   onModifiedChange,
   onSave,
 }: WorkbenchDiffEditorProps) {
@@ -62,7 +66,10 @@ export const WorkbenchDiffEditor = memo(function WorkbenchDiffEditor({
     (editor, monaco) => {
       diffEditorRef.current = editor;
       const modifiedEditor = editor.getModifiedEditor();
-      modifiedEditor.focus();
+      if (autoFocus) {
+        modifiedEditor.focus();
+        onAutoFocused?.();
+      }
       diffContentDisposableRef.current?.dispose();
       if (readOnly) {
         diffContentDisposableRef.current = null;
@@ -79,8 +86,19 @@ export const WorkbenchDiffEditor = memo(function WorkbenchDiffEditor({
         if (nextValue !== latestModifiedRef.current) onModifiedChange(nextValue);
       });
     },
-    [onModifiedChange, readOnly],
+    [autoFocus, onAutoFocused, onModifiedChange, readOnly],
   );
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    const frame = window.requestAnimationFrame(() => {
+      const editor = diffEditorRef.current;
+      if (!editor) return;
+      editor.getModifiedEditor().focus();
+      onAutoFocused?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [autoFocus, id, onAutoFocused]);
 
   useEffect(() => {
     return () => {
