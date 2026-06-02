@@ -1,13 +1,13 @@
 import { FilePlusIcon, FolderPlusIcon, RefreshCwIcon } from "lucide-react";
-import { memo, type ReactNode } from "react";
+import { memo } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import {
   PANE_HEADER_CLASS,
   PANE_ICON_BUTTON_CLASS,
   PANE_HEADER_PADDING_CLASS,
-  PaneSidebarToggleButton,
 } from "../ui/pane-chrome";
+import { ShellHeaderSlotPortal } from "../shell/shellHeaderSlot";
 import {
   ExplorerTree,
   type CreateEntryKind,
@@ -34,9 +34,11 @@ interface WorkbenchExplorerPanelProps {
   readonly onSubmitCreate?: ((draft: ExplorerCreateDraft, name: string) => void) | undefined;
   readonly onCancelCreate?: (() => void) | undefined;
   readonly onRefresh?: (() => void | Promise<void>) | undefined;
-  readonly showCollapseButton?: boolean;
-  readonly onCollapse?: () => void;
-  readonly headerSlot?: ReactNode;
+  /**
+   * When true, the "Files" title + create/refresh actions are teleported onto
+   * the unified top bar instead of rendering an inline header row.
+   */
+  readonly hoistHeader?: boolean;
 }
 
 export const WorkbenchExplorerPanel = memo(function WorkbenchExplorerPanel({
@@ -54,63 +56,65 @@ export const WorkbenchExplorerPanel = memo(function WorkbenchExplorerPanel({
   onSubmitCreate,
   onCancelCreate,
   onRefresh,
-  showCollapseButton = false,
-  onCollapse,
-  headerSlot,
+  hoistHeader = false,
 }: WorkbenchExplorerPanelProps) {
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className={`${PANE_HEADER_CLASS} ${PANE_HEADER_PADDING_CLASS} gap-2`}>
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">Files</span>
-        {cwd && onStartCreate && (
-          <>
-            <Button
-              size="icon"
-              variant="ghost"
-              className={PANE_ICON_BUTTON_CLASS}
-              aria-label="New file"
-              title="New file"
-              disabled={createDraft?.isSaving}
-              onClick={() => onStartCreate("file", createParentPath)}
-            >
-              <FilePlusIcon className="size-3.5" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className={PANE_ICON_BUTTON_CLASS}
-              aria-label="New folder"
-              title="New folder"
-              disabled={createDraft?.isSaving}
-              onClick={() => onStartCreate("directory", createParentPath)}
-            >
-              <FolderPlusIcon className="size-3.5" />
-            </Button>
-          </>
-        )}
-        {onRefresh && (
+  const headerActions = (
+    <>
+      {cwd && onStartCreate && (
+        <>
           <Button
             size="icon"
             variant="ghost"
             className={PANE_ICON_BUTTON_CLASS}
-            aria-label="Refresh explorer"
-            title="Refresh explorer"
-            disabled={isRefreshing}
-            onClick={() => void onRefresh()}
+            aria-label="New file"
+            title="New file"
+            disabled={createDraft?.isSaving}
+            onClick={() => onStartCreate("file", createParentPath)}
           >
-            <RefreshCwIcon className={cn("size-3.5", isRefreshing && "animate-spin")} />
+            <FilePlusIcon className="size-3.5" />
           </Button>
-        )}
-        {showCollapseButton && onCollapse && (
-          <PaneSidebarToggleButton
-            type="button"
-            expanded
-            label="Collapse file browser"
-            onClick={onCollapse}
-          />
-        )}
-        {headerSlot}
-      </div>
+          <Button
+            size="icon"
+            variant="ghost"
+            className={PANE_ICON_BUTTON_CLASS}
+            aria-label="New folder"
+            title="New folder"
+            disabled={createDraft?.isSaving}
+            onClick={() => onStartCreate("directory", createParentPath)}
+          >
+            <FolderPlusIcon className="size-3.5" />
+          </Button>
+        </>
+      )}
+      {onRefresh && (
+        <Button
+          size="icon"
+          variant="ghost"
+          className={PANE_ICON_BUTTON_CLASS}
+          aria-label="Refresh explorer"
+          title="Refresh explorer"
+          disabled={isRefreshing}
+          onClick={() => void onRefresh()}
+        >
+          <RefreshCwIcon className={cn("size-3.5", isRefreshing && "animate-spin")} />
+        </Button>
+      )}
+    </>
+  );
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {hoistHeader ? (
+        <ShellHeaderSlotPortal order={20}>
+          <span className="shrink-0 text-sm font-medium text-foreground">Files</span>
+          {headerActions}
+        </ShellHeaderSlotPortal>
+      ) : (
+        <div className={`${PANE_HEADER_CLASS} ${PANE_HEADER_PADDING_CLASS} gap-2`}>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">Files</span>
+          {headerActions}
+        </div>
+      )}
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-[4rem] overflow-auto px-1 py-2">
           {!cwd ? (

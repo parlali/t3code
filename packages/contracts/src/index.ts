@@ -5,7 +5,7 @@ export * from "./remoteAccess.ts";
 export * from "./ipc.ts";
 export * from "./terminal.ts";
 export * from "./threadStatus.ts";
-export * from "./threadWorkbenchState.ts";
+export * from "./workspaceRightPanelState.ts";
 export * from "./provider.ts";
 export * from "./providerInstance.ts";
 export * from "./providerUsage.ts";

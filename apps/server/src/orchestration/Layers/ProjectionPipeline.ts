@@ -53,7 +53,15 @@ import {
   parseThreadSegmentFromAttachmentId,
   toSafeThreadAttachmentSegment,
 } from "../../attachmentStore.ts";
-import { normalizePlanExplanation, normalizePlanSteps } from "@t3tools/shared/providerPlan";
+import {
+  normalizePlanExplanation,
+  normalizePlanSteps,
+  settleTaskPlan,
+  taskPlanStepsForStatus,
+  taskPlanTerminalStatusFromCheckpointStatus,
+  taskPlanTerminalStatusFromSessionStatus,
+  taskPlanTerminalStatusFromTurnState,
+} from "@t3tools/shared/providerPlan";
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
@@ -319,34 +327,6 @@ function retainProjectionTaskPlansAfterRevert(
       .flatMap((turn) => (turn.turnId === null ? [] : [turn.turnId])),
   );
   return taskPlans.filter((taskPlan) => retainedTurnIds.has(taskPlan.turnId));
-}
-
-function taskPlanTerminalStatusFromSessionStatus(
-  status: string,
-): ProjectionThreadTaskPlan["status"] | null {
-  switch (status) {
-    case "ready":
-      return "completed";
-    case "interrupted":
-    case "stopped":
-      return "interrupted";
-    case "error":
-      return "failed";
-    default:
-      return null;
-  }
-}
-
-function taskPlanTerminalStatusFromCheckpointStatus(
-  status: "ready" | "missing" | "error",
-): ProjectionThreadTaskPlan["status"] {
-  if (status === "error") return "failed";
-  if (status === "missing") return "interrupted";
-  return "completed";
-}
-
-function maxIso(left: string, right: string): string {
-  return left > right ? left : right;
 }
 
 function collectThreadAttachmentRelativePaths(
@@ -965,7 +945,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const settleThreadTaskPlan = Effect.fn("settleThreadTaskPlan")(function* (input: {
       readonly threadId: ThreadId;
       readonly turnId: ProjectionThreadTaskPlan["turnId"] | null;
-      readonly status: ProjectionThreadTaskPlan["status"];
+      readonly status: ProjectionThreadTaskPlan["status"] | null;
       readonly settledAt: string;
     }) {
       if (input.turnId === null) {
@@ -980,17 +960,73 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         return;
       }
 
-      if (existingRow.value.status !== "active") {
+      const nextPlan = settleTaskPlan(existingRow.value, {
+        turnId: input.turnId,
+        status: input.status,
+        settledAt: input.settledAt,
+      });
+      if (nextPlan === null || nextPlan === existingRow.value) {
         return;
       }
 
-      yield* projectionThreadTaskPlanRepository.upsert({
-        ...existingRow.value,
-        status: input.status,
-        updatedAt: maxIso(existingRow.value.updatedAt, input.settledAt),
-        settledAt: input.settledAt,
-      });
+      yield* projectionThreadTaskPlanRepository.upsert(nextPlan);
     });
+
+    const resolveTaskPlanSettlementForActivity = Effect.fn("resolveTaskPlanSettlementForActivity")(
+      function* (input: {
+        readonly threadId: ThreadId;
+        readonly turnId: ProjectionThreadTaskPlan["turnId"];
+        readonly fallbackSettledAt: string;
+      }) {
+        const sessionRow = yield* projectionThreadSessionRepository.getByThreadId({
+          threadId: input.threadId,
+        });
+        if (
+          Option.isSome(sessionRow) &&
+          sessionRow.value.activeTurnId === input.turnId &&
+          (sessionRow.value.status === "running" || sessionRow.value.status === "starting")
+        ) {
+          return null;
+        }
+
+        const turnRow = yield* projectionTurnRepository.getByTurnId({
+          threadId: input.threadId,
+          turnId: input.turnId,
+        });
+        if (Option.isSome(turnRow)) {
+          const status = taskPlanTerminalStatusFromTurnState(turnRow.value.state);
+          if (status !== null) {
+            return {
+              status,
+              settledAt: turnRow.value.completedAt ?? input.fallbackSettledAt,
+            };
+          }
+        }
+
+        if (Option.isNone(sessionRow) || sessionRow.value.activeTurnId !== null) {
+          return null;
+        }
+
+        const threadRow = yield* projectionThreadRepository.getById({
+          threadId: input.threadId,
+        });
+        const isLatestKnownTurn =
+          Option.isSome(turnRow) ||
+          (Option.isSome(threadRow) && threadRow.value.latestTurnId === input.turnId);
+        if (!isLatestKnownTurn) {
+          return null;
+        }
+
+        const status = taskPlanTerminalStatusFromSessionStatus(sessionRow.value.status);
+        if (status === null) {
+          return null;
+        }
+        return {
+          status,
+          settledAt: sessionRow.value.updatedAt,
+        };
+      },
+    );
 
     const applyThreadTaskPlansProjection: ProjectorDefinition["apply"] = Effect.fn(
       "applyThreadTaskPlansProjection",
@@ -1017,17 +1053,27 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           });
           const previous = Option.getOrNull(existingRow);
           const isSettled = previous !== null && previous.status !== "active";
+          const initialSettlement = isSettled
+            ? null
+            : yield* resolveTaskPlanSettlementForActivity({
+                threadId: event.payload.threadId,
+                turnId: activity.turnId,
+                fallbackSettledAt: activity.createdAt,
+              });
+          const status = isSettled ? previous.status : (initialSettlement?.status ?? "active");
+          const settledAt = isSettled ? previous.settledAt : (initialSettlement?.settledAt ?? null);
 
           yield* projectionThreadTaskPlanRepository.upsert({
             threadId: event.payload.threadId,
             turnId: activity.turnId,
-            status: isSettled ? previous.status : "active",
+            status,
             explanation: normalizePlanExplanation(payload?.explanation),
-            steps,
+            steps: taskPlanStepsForStatus(status, steps),
             sourceActivityId: activity.id,
             createdAt: previous?.createdAt ?? activity.createdAt,
-            updatedAt: activity.createdAt,
-            settledAt: isSettled ? previous.settledAt : null,
+            updatedAt:
+              settledAt !== null && settledAt > activity.createdAt ? settledAt : activity.createdAt,
+            settledAt,
           });
           return;
         }

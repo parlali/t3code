@@ -85,9 +85,9 @@ export interface WsRpcClient {
     readonly setTerminalOpen: RpcUnaryMethod<typeof WS_METHODS.threadStatusSetTerminalOpen>;
     readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeThreadStatus>;
   };
-  readonly threadWorkbench: {
-    readonly getState: RpcUnaryMethod<typeof WS_METHODS.threadWorkbenchGetState>;
-    readonly setState: RpcUnaryMethod<typeof WS_METHODS.threadWorkbenchSetState>;
+  readonly workspaceRightPanel: {
+    readonly getState: RpcUnaryMethod<typeof WS_METHODS.workspaceRightPanelGetState>;
+    readonly setState: RpcUnaryMethod<typeof WS_METHODS.workspaceRightPanelSetState>;
   };
   readonly projects: {
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
@@ -293,11 +293,11 @@ export function createWsRpcClient(
           },
         ),
     },
-    threadWorkbench: {
+    workspaceRightPanel: {
       getState: (input) =>
-        transport.request((client) => client[WS_METHODS.threadWorkbenchGetState](input)),
+        transport.request((client) => client[WS_METHODS.workspaceRightPanelGetState](input)),
       setState: (input) =>
-        transport.request((client) => client[WS_METHODS.threadWorkbenchSetState](input)),
+        transport.request((client) => client[WS_METHODS.workspaceRightPanelSetState](input)),
     },
     projects: {
       searchEntries: (input) =>

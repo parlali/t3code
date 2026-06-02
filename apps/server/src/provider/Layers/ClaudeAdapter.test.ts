@@ -2794,6 +2794,32 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("ignores empty Claude resume cursors that have no durable checkpoint", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const session = yield* adapter.startSession({
+        threadId: RESUME_THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        resumeCursor: {
+          threadId: RESUME_THREAD_ID,
+          resume: "550e8400-e29b-41d4-a716-446655440000",
+          turnCount: 0,
+        },
+        runtimeMode: "full-access",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(session.resumeCursor, null);
+      assert.equal(createInput?.options.resume, undefined);
+      assert.equal(typeof createInput?.options.sessionId, "string");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("preserves durable resume ids across Claude resume hooks", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -2888,6 +2914,10 @@ describe("ClaudeAdapterLive", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
+      const threadStartedFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "thread.started",
+      ).pipe(Stream.runHead, Effect.forkChild);
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
@@ -2896,20 +2926,49 @@ describe("ClaudeAdapterLive", () => {
       });
 
       const createInput = harness.getLastCreateQueryInput();
-      const sessionResumeCursor = session.resumeCursor as {
-        threadId?: string;
-        resume?: string;
-        turnCount?: number;
-      };
-      assert.equal(sessionResumeCursor.threadId, THREAD_ID);
-      assert.equal(typeof sessionResumeCursor.resume, "string");
-      assert.equal(sessionResumeCursor.turnCount, 0);
+      const generatedSessionId = createInput?.options.sessionId;
+      assert.equal(session.resumeCursor, null);
+      assert.equal(createInput?.options.resume, undefined);
+      assert.equal(typeof generatedSessionId, "string");
+      if (typeof generatedSessionId !== "string") {
+        throw new Error("Expected generated Claude session id.");
+      }
       assert.match(
-        sessionResumeCursor.resume ?? "",
+        generatedSessionId,
         /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       );
-      assert.equal(createInput?.options.resume, undefined);
-      assert.equal(createInput?.options.sessionId, sessionResumeCursor.resume);
+
+      harness.query.emit({
+        type: "system",
+        subtype: "init",
+        apiKeySource: "none",
+        claude_code_version: "test",
+        cwd: "/tmp/claude-adapter-test",
+        tools: [],
+        mcp_servers: [],
+        model: "claude-sonnet-4-5",
+        permissionMode: "bypassPermissions",
+        slash_commands: [],
+        output_style: "default",
+        skills: [],
+        plugins: [],
+        session_id: generatedSessionId,
+        uuid: "fresh-session-init",
+      } as unknown as SDKMessage);
+
+      const threadStarted = yield* Fiber.join(threadStartedFiber);
+      assert.equal(threadStarted._tag, "Some");
+      const activeSessions = yield* adapter.listSessions();
+      const activeResumeCursor = activeSessions[0]?.resumeCursor as
+        | {
+            readonly threadId?: string;
+            readonly resume?: string;
+            readonly turnCount?: number;
+          }
+        | undefined;
+      assert.equal(activeResumeCursor?.threadId, THREAD_ID);
+      assert.equal(activeResumeCursor?.resume, generatedSessionId);
+      assert.equal(activeResumeCursor?.turnCount, 0);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -3015,6 +3074,19 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(rollbackCreateInput?.options.forkSession, true);
         assert.equal(typeof rollbackCreateInput?.options.sessionId, "string");
         assert.notEqual(rollbackCreateInput?.options.sessionId, sdkSessionId);
+        const activeSessions = yield* adapter.listSessions();
+        const resumeCursor = activeSessions[0]?.resumeCursor as
+          | {
+              readonly resume?: string;
+              readonly resumeSessionAt?: string;
+              readonly forkSession?: boolean;
+              readonly turnCount?: number;
+            }
+          | undefined;
+        assert.equal(resumeCursor?.resume, sdkSessionId);
+        assert.equal(resumeCursor?.resumeSessionAt, "assistant-first");
+        assert.equal(resumeCursor?.forkSession, true);
+        assert.equal(resumeCursor?.turnCount, 1);
 
         const threadAfterRollback = yield* adapter.readThread(session.threadId);
         assert.equal(threadAfterRollback.turns.length, 1);
@@ -3069,6 +3141,8 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(rollbackCreateInput?.options.resumeSessionAt, undefined);
       assert.equal(rollbackCreateInput?.options.forkSession, undefined);
       assert.equal(typeof rollbackCreateInput?.options.sessionId, "string");
+      const activeSessions = yield* adapter.listSessions();
+      assert.equal(activeSessions[0]?.resumeCursor, null);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

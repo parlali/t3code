@@ -4,66 +4,10 @@ import {
   isChangeSelectionAvailable,
   isFileSelectionAvailable,
   resolveAvailableChangeSource,
-  selectionForTab,
-  tabForSelection,
 } from "./workbenchSelection";
 
 describe("workbenchSelection", () => {
-  it("round-trips file and change selections", () => {
-    expect(selectionForTab({ id: "file:README.md", kind: "file", path: "README.md" })).toEqual({
-      source: "files",
-      relativePath: "README.md",
-    });
-    expect(
-      selectionForTab({
-        id: "diff:working-tree:README.md",
-        kind: "diff",
-        path: "README.md",
-        source: "working-tree",
-      }),
-    ).toEqual({
-      source: "changes",
-      relativePath: "README.md",
-      changeSource: "working-tree",
-    });
-    expect(
-      selectionForTab({
-        id: "diff:staged:README.md",
-        kind: "diff",
-        path: "README.md",
-        source: "staged",
-      }),
-    ).toEqual({
-      source: "changes",
-      relativePath: "README.md",
-      changeSource: "staged",
-    });
-    expect(tabForSelection({ source: "files", relativePath: "src/App.tsx" })).toEqual({
-      id: "file:src/App.tsx",
-      kind: "file",
-      path: "src/App.tsx",
-    });
-    expect(tabForSelection({ source: "changes", relativePath: "src/App.tsx" })).toEqual({
-      id: "diff:working-tree:src/App.tsx",
-      kind: "diff",
-      path: "src/App.tsx",
-      source: "working-tree",
-    });
-    expect(
-      tabForSelection({
-        source: "changes",
-        relativePath: "src/App.tsx",
-        changeSource: "staged",
-      }),
-    ).toEqual({
-      id: "diff:staged:src/App.tsx",
-      kind: "diff",
-      path: "src/App.tsx",
-      source: "staged",
-    });
-  });
-
-  it("checks whether persisted selections still exist", () => {
+  it("checks whether selected paths still exist", () => {
     const entries: ProjectEntry[] = [
       { kind: "directory", path: "src" },
       { kind: "file", path: "src/App.tsx", parentPath: "src" },

@@ -224,6 +224,10 @@ function hasDurableClaudeSessionId(message: SDKMessage): boolean {
   );
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function toMessage(cause: unknown, fallback: string): string {
   if (cause instanceof Error && cause.message.length > 0) {
     return cause.message;
@@ -400,17 +404,10 @@ function asRuntimeRequestId(value: ApprovalRequestId): RuntimeRequestId {
 }
 
 function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undefined {
-  if (!resumeCursor || typeof resumeCursor !== "object") {
+  if (!isRecord(resumeCursor)) {
     return undefined;
   }
-  const cursor = resumeCursor as {
-    threadId?: unknown;
-    resume?: unknown;
-    sessionId?: unknown;
-    resumeSessionAt?: unknown;
-    forkSession?: unknown;
-    turnCount?: unknown;
-  };
+  const cursor = resumeCursor;
 
   const threadIdCandidate = typeof cursor.threadId === "string" ? cursor.threadId : undefined;
   const threadId =
@@ -423,11 +420,15 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
       : typeof cursor.sessionId === "string"
         ? cursor.sessionId
         : undefined;
-  const resume = resumeCandidate && isUuid(resumeCandidate) ? resumeCandidate : undefined;
   const resumeSessionAt =
     typeof cursor.resumeSessionAt === "string" ? cursor.resumeSessionAt : undefined;
   const forkSession = cursor.forkSession === true;
   const turnCountValue = typeof cursor.turnCount === "number" ? cursor.turnCount : undefined;
+  const hasResumeCheckpoint = resumeSessionAt !== undefined || forkSession;
+  const resume =
+    resumeCandidate && isUuid(resumeCandidate) && (turnCountValue !== 0 || hasResumeCheckpoint)
+      ? resumeCandidate
+      : undefined;
 
   return {
     ...(threadId ? { threadId } : {}),
@@ -438,6 +439,41 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
       ? { turnCount: turnCountValue }
       : {}),
   };
+}
+
+function makeClaudeResumeCursor(input: {
+  readonly threadId: ThreadId;
+  readonly resume: string;
+  readonly resumeSessionAt?: string;
+  readonly forkSession?: boolean;
+  readonly turnCount: number;
+}): ClaudeResumeState {
+  return {
+    threadId: input.threadId,
+    resume: input.resume,
+    ...(input.resumeSessionAt ? { resumeSessionAt: input.resumeSessionAt } : {}),
+    ...(input.forkSession ? { forkSession: true } : {}),
+    turnCount: input.turnCount,
+  };
+}
+
+function makeInitialClaudeResumeCursor(input: {
+  readonly threadId: ThreadId;
+  readonly resumeState: ClaudeResumeState | undefined;
+  readonly forkResumeSession: boolean;
+}): ClaudeResumeState | null {
+  if (!input.resumeState?.resume) {
+    return null;
+  }
+  return makeClaudeResumeCursor({
+    threadId: input.threadId,
+    resume: input.resumeState.resume,
+    ...(input.resumeState.resumeSessionAt
+      ? { resumeSessionAt: input.resumeState.resumeSessionAt }
+      : {}),
+    ...(input.forkResumeSession ? { forkSession: true } : {}),
+    turnCount: input.resumeState.turnCount ?? 0,
+  });
 }
 
 function classifyToolItemType(toolName: string): CanonicalItemType {
@@ -1128,12 +1164,27 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     const threadId = context.session.threadId;
     if (!threadId) return;
 
-    const resumeCursor = {
-      threadId,
-      ...(context.resumeSessionId ? { resume: context.resumeSessionId } : {}),
-      ...(context.lastAssistantUuid ? { resumeSessionAt: context.lastAssistantUuid } : {}),
-      turnCount: context.turns.length,
-    };
+    const existingResumeState = readClaudeResumeState(context.session.resumeCursor);
+    const resumeCursor =
+      context.resumeSessionId !== undefined
+        ? makeClaudeResumeCursor({
+            threadId,
+            resume: context.resumeSessionId,
+            ...(context.lastAssistantUuid ? { resumeSessionAt: context.lastAssistantUuid } : {}),
+            turnCount: context.turns.length,
+          })
+        : existingResumeState?.forkSession &&
+            existingResumeState.resume !== undefined &&
+            context.lastAssistantUuid !== undefined &&
+            context.turns.length > 0
+          ? makeClaudeResumeCursor({
+              threadId,
+              resume: existingResumeState.resume,
+              resumeSessionAt: context.lastAssistantUuid,
+              forkSession: true,
+              turnCount: context.turns.length,
+            })
+          : null;
 
     context.session = {
       ...context.session,
@@ -2582,9 +2633,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         existingResumeSessionId === undefined || forkResumeSession
           ? yield* randomUUIDv4
           : undefined;
-      const sessionId = forkResumeSession
-        ? newSessionId
-        : (existingResumeSessionId ?? newSessionId);
+      const initialResumeCursor = makeInitialClaudeResumeCursor({
+        threadId,
+        resumeState,
+        forkResumeSession,
+      });
+      const durableResumeSessionId = forkResumeSession ? undefined : existingResumeSessionId;
 
       const runtimeContext = yield* Effect.context<never>();
       const runFork = Effect.runForkWith(runtimeContext);
@@ -3031,12 +3085,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(modelSelection?.model ? { model: modelSelection.model } : {}),
         ...(threadId ? { threadId } : {}),
-        resumeCursor: {
-          ...(threadId ? { threadId } : {}),
-          ...(sessionId ? { resume: sessionId } : {}),
-          ...(resumeState?.resumeSessionAt ? { resumeSessionAt: resumeState.resumeSessionAt } : {}),
-          turnCount: resumeState?.turnCount ?? 0,
-        },
+        resumeCursor: initialResumeCursor,
         createdAt: startedAt,
         updatedAt: startedAt,
       };
@@ -3050,7 +3099,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         basePermissionMode: permissionMode,
         currentApiModelId: apiModelId,
         modelSelection,
-        resumeSessionId: sessionId,
+        resumeSessionId: durableResumeSessionId,
         pendingApprovals,
         pendingUserInputs,
         turns: [],

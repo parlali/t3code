@@ -67,7 +67,7 @@ import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { ThreadStatusStates } from "./threadStatusState.ts";
-import { ThreadWorkbenchStates } from "./threadWorkbenchState.ts";
+import { WorkspaceRightPanelStates } from "./workspaceRightPanelState.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspaceWatcher } from "./workspace/Services/WorkspaceWatcher.ts";
@@ -229,7 +229,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager;
       const threadStatusStates = yield* ThreadStatusStates;
-      const threadWorkbenchStates = yield* ThreadWorkbenchStates;
+      const workspaceRightPanelStates = yield* WorkspaceRightPanelStates;
       const providerRegistry = yield* ProviderRegistry;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const config = yield* ServerConfig;
@@ -1423,20 +1423,20 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "threadStatus" },
           ),
-        [WS_METHODS.threadWorkbenchGetState]: (input) =>
+        [WS_METHODS.workspaceRightPanelGetState]: (input) =>
           observeRpcEffect(
-            WS_METHODS.threadWorkbenchGetState,
-            threadWorkbenchStates.getState(input),
+            WS_METHODS.workspaceRightPanelGetState,
+            workspaceRightPanelStates.getState(input),
             {
-              "rpc.aggregate": "threadWorkbench",
+              "rpc.aggregate": "workspaceRightPanel",
             },
           ),
-        [WS_METHODS.threadWorkbenchSetState]: (input) =>
+        [WS_METHODS.workspaceRightPanelSetState]: (input) =>
           observeRpcEffect(
-            WS_METHODS.threadWorkbenchSetState,
-            threadWorkbenchStates.setState(input),
+            WS_METHODS.workspaceRightPanelSetState,
+            workspaceRightPanelStates.setState(input),
             {
-              "rpc.aggregate": "threadWorkbench",
+              "rpc.aggregate": "workspaceRightPanel",
             },
           ),
         [WS_METHODS.subscribeTerminalEvents]: (input) =>

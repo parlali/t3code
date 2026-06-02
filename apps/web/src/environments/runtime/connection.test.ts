@@ -127,15 +127,31 @@ function createTestClient() {
       })),
       subscribe: vi.fn(() => () => undefined),
     },
-    threadWorkbench: {
+    workspaceRightPanel: {
       getState: vi.fn(async () => ({
-        threadId: "thread-1",
-        selection: null,
+        projectId: "project-1",
+        workspaceRoot: "/tmp/project",
+        panelOpen: true,
+        activeMode: "files",
+        files: null,
+        changes: null,
+        nestedSidebarOpen: {
+          files: true,
+          changes: true,
+        },
         updatedAt: new Date().toISOString(),
       })),
       setState: vi.fn(async (input: any) => ({
-        threadId: input.threadId,
-        selection: input.selection,
+        projectId: input.projectId,
+        workspaceRoot: input.workspaceRoot,
+        panelOpen: input.patch.panelOpen ?? true,
+        activeMode: input.patch.activeMode ?? "files",
+        files: input.patch.files ?? null,
+        changes: input.patch.changes ?? null,
+        nestedSidebarOpen: {
+          files: input.patch.nestedSidebarOpen?.files ?? true,
+          changes: input.patch.nestedSidebarOpen?.changes ?? true,
+        },
         updatedAt: new Date().toISOString(),
       })),
     },

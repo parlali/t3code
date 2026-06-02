@@ -6,6 +6,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
   TurnId,
@@ -866,8 +867,54 @@ describe("incremental orchestration updates", () => {
       ],
     });
 
-    const completed = applyOrchestrationEvent(
+    const provisional = applyOrchestrationEvent(
       withPlan,
+      makeEvent("thread.turn-diff-completed", {
+        threadId: ThreadId.make("thread-1"),
+        turnId,
+        checkpointTurnCount: 1,
+        checkpointRef: CheckpointRef.make("provider-diff:checkpoint-1"),
+        status: "missing",
+        files: [],
+        assistantMessageId: MessageId.make("assistant-1"),
+        completedAt: "2026-02-27T00:00:03.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    expect(threadsOf(provisional)[0]?.latestTaskPlan).toMatchObject({
+      status: "active",
+      settledAt: null,
+      steps: [
+        { step: "Find source", status: "completed" },
+        { step: "Patch projection", status: "inProgress" },
+      ],
+    });
+
+    const afterReadySession = applyOrchestrationEvent(
+      provisional,
+      makeEvent("thread.session-set", {
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-02-27T00:00:03.500Z",
+        },
+      }),
+      localEnvironmentId,
+    );
+
+    expect(threadsOf(afterReadySession)[0]?.latestTaskPlan).toMatchObject({
+      status: "active",
+      settledAt: null,
+    });
+
+    const completed = applyOrchestrationEvent(
+      afterReadySession,
       makeEvent("thread.turn-diff-completed", {
         threadId: ThreadId.make("thread-1"),
         turnId,
@@ -876,17 +923,72 @@ describe("incremental orchestration updates", () => {
         status: "ready",
         files: [],
         assistantMessageId: MessageId.make("assistant-1"),
-        completedAt: "2026-02-27T00:00:03.000Z",
+        completedAt: "2026-02-27T00:00:04.000Z",
       }),
       localEnvironmentId,
     );
 
     expect(threadsOf(completed)[0]?.latestTaskPlan).toMatchObject({
       status: "completed",
-      settledAt: "2026-02-27T00:00:03.000Z",
+      settledAt: "2026-02-27T00:00:04.000Z",
       steps: [
         { step: "Find source", status: "completed" },
-        { step: "Patch projection", status: "inProgress" },
+        { step: "Patch projection", status: "completed" },
+      ],
+    });
+  });
+
+  it("initializes late task plan activities from settled turn state", () => {
+    const turnId = TurnId.make("turn-1");
+    const state = makeState(
+      makeThread({
+        latestTurn: {
+          turnId,
+          state: "completed",
+          requestedAt: "2026-02-27T00:00:00.000Z",
+          startedAt: "2026-02-27T00:00:01.000Z",
+          completedAt: "2026-02-27T00:00:03.000Z",
+          assistantMessageId: MessageId.make("assistant-1"),
+        },
+        session: {
+          provider: ProviderDriverKind.make("codex"),
+          status: "ready",
+          orchestrationStatus: "ready",
+          createdAt: "2026-02-27T00:00:03.000Z",
+          updatedAt: "2026-02-27T00:00:03.000Z",
+        },
+      }),
+    );
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.activity-appended", {
+        threadId: ThreadId.make("thread-1"),
+        activity: {
+          id: EventId.make("plan-activity-late"),
+          tone: "info",
+          kind: "turn.plan.updated",
+          summary: "Plan updated",
+          payload: {
+            plan: [
+              { content: "Inspect late event", status: "completed" },
+              { content: "Patch late event", status: "in_progress" },
+            ],
+          },
+          turnId,
+          createdAt: "2026-02-27T00:00:02.000Z",
+        },
+      }),
+      localEnvironmentId,
+    );
+
+    expect(threadsOf(next)[0]?.latestTaskPlan).toMatchObject({
+      status: "completed",
+      settledAt: "2026-02-27T00:00:03.000Z",
+      updatedAt: "2026-02-27T00:00:03.000Z",
+      steps: [
+        { step: "Inspect late event", status: "completed" },
+        { step: "Patch late event", status: "completed" },
       ],
     });
   });

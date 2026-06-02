@@ -2690,7 +2690,7 @@ describe("ProviderRuntimeIngestion", () => {
         entry.checkpoints.some(
           (checkpoint: ProviderRuntimeTestCheckpoint) => checkpoint.turnId === "turn-p1",
         ) &&
-        entry.latestTaskPlan?.status === "interrupted",
+        entry.latestTaskPlan?.status === "active",
     );
 
     expect(thread.title).toBe("Renamed by provider");
@@ -2705,7 +2705,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(planActivity?.kind).toBe("turn.plan.updated");
     expect(Array.isArray(planPayload?.plan)).toBe(true);
     expect(thread.latestTaskPlan).toMatchObject({
-      status: "interrupted",
+      status: "active",
       explanation: "Working through the plan",
       steps: [
         { step: "Inspect files", status: "completed" },

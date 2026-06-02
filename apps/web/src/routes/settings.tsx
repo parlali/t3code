@@ -2,6 +2,7 @@ import { RotateCcwIcon } from "lucide-react";
 import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 
+import { SettingsSidebarNav } from "../components/settings/SettingsSidebarNav";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { useShellStore } from "../components/shell/shellStore";
 import { useNavigateToShellWorkspace } from "../components/shell/useShellNavigation";
@@ -28,15 +29,13 @@ function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
 function SettingsContentLayout() {
   const location = useLocation();
   const lastWorkspaceRoute = useShellStore((state) => state.lastWorkspaceRoute);
-  const setActiveMode = useShellStore((state) => state.setActiveMode);
   const navigateToWorkspace = useNavigateToShellWorkspace();
   const [restoreSignal, setRestoreSignal] = useState(0);
   const showRestoreDefaults = location.pathname === "/settings/general";
   const handleRestored = () => setRestoreSignal((value) => value + 1);
   const navigateBackWithinApp = useCallback(() => {
-    setActiveMode("threads");
     void navigateToWorkspace(lastWorkspaceRoute);
-  }, [lastWorkspaceRoute, navigateToWorkspace, setActiveMode]);
+  }, [lastWorkspaceRoute, navigateToWorkspace]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -82,8 +81,13 @@ function SettingsContentLayout() {
           </div>
         )}
 
-        <div key={restoreSignal} className="min-h-0 flex flex-1 flex-col">
-          <Outlet />
+        <div key={restoreSignal} className="min-h-0 flex flex-1">
+          <aside className="hidden w-56 shrink-0 border-r border-border bg-card/35 md:block">
+            <SettingsSidebarNav pathname={location.pathname} />
+          </aside>
+          <div className="min-h-0 min-w-0 flex-1">
+            <Outlet />
+          </div>
         </div>
       </div>
     </SidebarInset>

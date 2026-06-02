@@ -107,4 +107,22 @@ export default Effect.gen(function* () {
       AND turn.turn_id = activity.turn_id
     WHERE activity.rank = 1
   `;
+
+  yield* sql`
+    UPDATE projection_thread_task_plans
+    SET steps_json = (
+      SELECT json_group_array(json(patched_step))
+      FROM (
+        SELECT json_set(step.value, '$.status', 'completed') AS patched_step
+        FROM json_each(projection_thread_task_plans.steps_json) AS step
+        ORDER BY CAST(step.key AS INTEGER)
+      )
+    )
+    WHERE status = 'completed'
+      AND EXISTS (
+        SELECT 1
+        FROM json_each(projection_thread_task_plans.steps_json) AS step
+        WHERE json_extract(step.value, '$.status') <> 'completed'
+      )
+  `;
 });

@@ -14,8 +14,6 @@ export { WorkbenchDiffUnavailable } from "./WorkbenchDiffUnavailable";
 export { WorkbenchMediaViewer } from "./WorkbenchMediaViewer";
 export { WorkbenchTreeIcon } from "./WorkbenchTreeIcon";
 export {
-  selectionForTab,
-  tabForSelection,
   isFileSelectionAvailable,
   isChangeSelectionAvailable,
   resolveAvailableChangeSource,

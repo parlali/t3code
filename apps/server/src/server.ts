@@ -38,7 +38,7 @@ import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { TerminalManagerLive } from "./terminal/Layers/Manager.ts";
 import { ThreadStatusStatesLive } from "./threadStatusState.ts";
-import { ThreadWorkbenchStatesLive } from "./threadWorkbenchState.ts";
+import { WorkspaceRightPanelStatesLive } from "./workspaceRightPanelState.ts";
 import * as GitManager from "./git/GitManager.ts";
 import { KeybindingsLive } from "./keybindings.ts";
 import { ServerRuntimeStartup, ServerRuntimeStartupLive } from "./serverRuntimeStartup.ts";
@@ -292,7 +292,7 @@ const RuntimeCoreServicesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(ThreadStatusStatesLive),
-  Layer.provideMerge(ThreadWorkbenchStatesLive),
+  Layer.provideMerge(WorkspaceRightPanelStatesLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),

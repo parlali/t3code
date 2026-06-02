@@ -1,6 +1,7 @@
 import { memo, useState, useCallback } from "react";
 import type { EnvironmentId, OrchestrationTaskPlan } from "@t3tools/contracts";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
+import { taskPlanStepsForStatus } from "@t3tools/shared/providerPlan";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
@@ -11,7 +12,6 @@ import {
   ChevronRightIcon,
   EllipsisIcon,
   LoaderIcon,
-  PanelRightCloseIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
 import type { LatestProposedPlanState } from "../session-logic";
@@ -24,6 +24,7 @@ import {
   stripDisplayedPlanMarkdown,
 } from "../proposedPlan";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
+import { PANE_ICON_BUTTON_CLASS, PaneHeader, PaneSidebarToggleButton } from "./ui/pane-chrome";
 import { readEnvironmentApi } from "~/environmentApi";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -60,6 +61,19 @@ function stepStatusIcon(
   );
 }
 
+function planStatusLabel(status: OrchestrationTaskPlan["status"]): string {
+  switch (status) {
+    case "active":
+      return "Active";
+    case "completed":
+      return "Completed";
+    case "failed":
+      return "Failed";
+    case "interrupted":
+      return "Interrupted";
+  }
+}
+
 interface PlanSidebarProps {
   activePlan: OrchestrationTaskPlan | null;
   activeProposedPlan: LatestProposedPlanState | null;
@@ -90,6 +104,9 @@ const PlanSidebar = memo(function PlanSidebar({
   const planMarkdown = activeProposedPlan?.planMarkdown ?? null;
   const displayedPlanMarkdown = planMarkdown ? stripDisplayedPlanMarkdown(planMarkdown) : null;
   const planTitle = planMarkdown ? proposedPlanTitle(planMarkdown) : null;
+  const displayedSteps = activePlan
+    ? taskPlanStepsForStatus(activePlan.status, activePlan.steps)
+    : [];
 
   const handleCopyPlan = useCallback(() => {
     if (!planMarkdown) return;
@@ -145,60 +162,75 @@ const PlanSidebar = memo(function PlanSidebar({
       )}
     >
       {/* Header */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/60 px-3">
-        <div className="flex items-center gap-2">
-          <Badge
-            variant="secondary"
-            className="rounded-md bg-blue-500/10 px-1.5 py-0 text-[10px] font-semibold tracking-wide text-blue-400 uppercase"
-          >
-            {label}
-          </Badge>
-          {activePlan ? (
-            <span className="text-[11px] text-muted-foreground/60">
-              {formatTimestamp(activePlan.updatedAt, timestampFormat)}
-            </span>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-1">
-          {planMarkdown ? (
-            <Menu>
-              <MenuTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    className="text-muted-foreground/50 hover:text-foreground/70"
-                    aria-label="Plan actions"
-                  />
-                }
+      <PaneHeader
+        title={
+          <span className="flex min-w-0 items-center gap-2">
+            <Badge
+              variant="secondary"
+              className="shrink-0 rounded-md bg-blue-500/10 px-1.5 py-0 text-[10px] font-semibold tracking-wide text-blue-400 uppercase"
+            >
+              {label}
+            </Badge>
+            {activePlan ? (
+              <span className="shrink-0 text-[11px] text-muted-foreground/60">
+                {formatTimestamp(activePlan.updatedAt, timestampFormat)}
+              </span>
+            ) : null}
+            {activePlan ? (
+              <span
+                className={cn(
+                  "shrink-0 rounded-md px-1.5 py-0 text-[10px] font-medium",
+                  activePlan.status === "active" && "bg-blue-500/10 text-blue-400",
+                  activePlan.status === "completed" && "bg-emerald-500/10 text-emerald-500",
+                  activePlan.status === "failed" && "bg-destructive/10 text-destructive",
+                  activePlan.status === "interrupted" && "bg-muted text-muted-foreground",
+                )}
               >
-                <EllipsisIcon className="size-3.5" />
-              </MenuTrigger>
-              <MenuPopup align="end">
-                <MenuItem onClick={handleCopyPlan}>
-                  {isCopied ? "Copied!" : "Copy to clipboard"}
-                </MenuItem>
-                <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
-                <MenuItem
-                  onClick={handleSaveToWorkspace}
-                  disabled={!workspaceRoot || isSavingToWorkspace}
+                {planStatusLabel(activePlan.status)}
+              </span>
+            ) : null}
+          </span>
+        }
+        actions={
+          <>
+            {planMarkdown ? (
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className={PANE_ICON_BUTTON_CLASS}
+                      aria-label="Plan actions"
+                    />
+                  }
                 >
-                  Save to workspace
-                </MenuItem>
-              </MenuPopup>
-            </Menu>
-          ) : null}
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            onClick={onClose}
-            aria-label={`Close ${label.toLowerCase()} sidebar`}
-            className="text-muted-foreground/50 hover:text-foreground/70"
-          >
-            <PanelRightCloseIcon className="size-3.5" />
-          </Button>
-        </div>
-      </div>
+                  <EllipsisIcon className="size-3.5" />
+                </MenuTrigger>
+                <MenuPopup align="end">
+                  <MenuItem onClick={handleCopyPlan}>
+                    {isCopied ? "Copied!" : "Copy to clipboard"}
+                  </MenuItem>
+                  <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
+                  <MenuItem
+                    onClick={handleSaveToWorkspace}
+                    disabled={!workspaceRoot || isSavingToWorkspace}
+                  >
+                    Save to workspace
+                  </MenuItem>
+                </MenuPopup>
+              </Menu>
+            ) : null}
+            <PaneSidebarToggleButton
+              type="button"
+              side="right"
+              expanded
+              label={`Close ${label.toLowerCase()} sidebar`}
+              onClick={onClose}
+            />
+          </>
+        }
+      />
 
       {/* Content */}
       <ScrollArea className="min-h-0 flex-1">
@@ -211,12 +243,12 @@ const PlanSidebar = memo(function PlanSidebar({
           ) : null}
 
           {/* Plan Steps */}
-          {activePlan && activePlan.steps.length > 0 ? (
+          {activePlan && displayedSteps.length > 0 ? (
             <div className="space-y-1">
               <p className="mb-2 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
                 Steps
               </p>
-              {activePlan.steps.map((step) => (
+              {displayedSteps.map((step) => (
                 <div
                   key={`${step.status}:${step.step}`}
                   className={cn(

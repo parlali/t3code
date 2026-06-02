@@ -62,7 +62,7 @@ const rpcClientMock = {
     setTerminalOpen: vi.fn(),
     subscribe: vi.fn(),
   },
-  threadWorkbench: {
+  workspaceRightPanel: {
     getState: vi.fn(),
     setState: vi.fn(),
   },

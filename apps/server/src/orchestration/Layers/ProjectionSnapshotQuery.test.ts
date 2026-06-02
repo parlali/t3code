@@ -365,7 +365,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             explanation: "Complete the work",
             steps: [
               { step: "Inspect", status: "completed" },
-              { step: "Patch", status: "inProgress" },
+              { step: "Patch", status: "completed" },
             ],
             sourceActivityId: asEventId("activity-plan-1"),
             createdAt: "2026-02-24T00:00:05.700Z",

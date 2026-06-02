@@ -23,7 +23,15 @@ import { isProviderDriverKind, ProviderDriverKind } from "@t3tools/contracts";
 import type { ThreadId, TurnId } from "@t3tools/contracts";
 import { Schema } from "effect";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
-import { normalizePlanExplanation, normalizePlanSteps } from "@t3tools/shared/providerPlan";
+import {
+  normalizePlanExplanation,
+  normalizePlanSteps,
+  settleTaskPlan,
+  taskPlanStepsForStatus,
+  taskPlanTerminalStatusFromCheckpointStatus,
+  taskPlanTerminalStatusFromSessionStatus,
+  taskPlanTerminalStatusFromTurnState,
+} from "@t3tools/shared/providerPlan";
 import { create } from "zustand";
 import {
   type ChatMessage,
@@ -1033,28 +1041,45 @@ function retainThreadTaskPlanAfterRevert(
   return taskPlan !== null && retainedTurnIds.has(taskPlan.turnId) ? taskPlan : null;
 }
 
-function taskPlanTerminalStatusFromSessionStatus(
-  status: OrchestrationSessionStatus,
-): OrchestrationTaskPlan["status"] | null {
-  switch (status) {
-    case "ready":
-      return "completed";
-    case "interrupted":
-    case "stopped":
-      return "interrupted";
-    case "error":
-      return "failed";
-    default:
-      return null;
+function taskPlanSettlementFromThreadState(
+  thread: Thread,
+  turnId: TurnId,
+  fallbackSettledAt: string,
+): { readonly status: OrchestrationTaskPlan["status"]; readonly settledAt: string } | null {
+  if (
+    thread.session?.activeTurnId === turnId &&
+    (thread.session.orchestrationStatus === "running" ||
+      thread.session.orchestrationStatus === "starting")
+  ) {
+    return null;
   }
-}
 
-function taskPlanTerminalStatusFromCheckpointStatus(
-  status: "ready" | "missing" | "error",
-): OrchestrationTaskPlan["status"] {
-  if (status === "error") return "failed";
-  if (status === "missing") return "interrupted";
-  return "completed";
+  if (thread.latestTurn?.turnId === turnId) {
+    const turnStatus = taskPlanTerminalStatusFromTurnState(thread.latestTurn.state);
+    if (turnStatus !== null) {
+      return {
+        status: turnStatus,
+        settledAt: thread.latestTurn.completedAt ?? fallbackSettledAt,
+      };
+    }
+  }
+
+  if (
+    thread.session === null ||
+    thread.session.activeTurnId !== undefined ||
+    thread.latestTurn?.turnId !== turnId
+  ) {
+    return null;
+  }
+
+  const sessionStatus = taskPlanTerminalStatusFromSessionStatus(thread.session.orchestrationStatus);
+  if (sessionStatus === null) {
+    return null;
+  }
+  return {
+    status: sessionStatus,
+    settledAt: thread.session.updatedAt,
+  };
 }
 
 function taskPlanFromActivity(
@@ -1075,37 +1100,32 @@ function taskPlanFromActivity(
 
   const previous = thread.latestTaskPlan?.turnId === activity.turnId ? thread.latestTaskPlan : null;
   const isSettled = previous !== null && previous.status !== "active";
+  const initialSettlement = isSettled
+    ? null
+    : taskPlanSettlementFromThreadState(thread, activity.turnId, activity.createdAt);
+  const status = isSettled ? previous.status : (initialSettlement?.status ?? "active");
+  const settledAt = isSettled ? previous.settledAt : (initialSettlement?.settledAt ?? null);
   return {
     threadId: thread.id,
     turnId: activity.turnId,
-    status: isSettled ? previous.status : "active",
+    status,
     explanation: normalizePlanExplanation(payload?.explanation),
-    steps,
+    steps: taskPlanStepsForStatus(status, steps),
     sourceActivityId: activity.id,
     createdAt: previous?.createdAt ?? activity.createdAt,
-    updatedAt: activity.createdAt,
-    settledAt: isSettled ? previous.settledAt : null,
+    updatedAt:
+      settledAt !== null && settledAt > activity.createdAt ? settledAt : activity.createdAt,
+    settledAt,
   };
 }
 
 function settleThreadTaskPlan(
   taskPlan: OrchestrationTaskPlan | null,
   turnId: TurnId | null,
-  status: OrchestrationTaskPlan["status"],
+  status: OrchestrationTaskPlan["status"] | null,
   settledAt: string,
 ): OrchestrationTaskPlan | null {
-  if (taskPlan === null || turnId === null || taskPlan.turnId !== turnId) {
-    return taskPlan;
-  }
-  if (taskPlan.status !== "active") {
-    return taskPlan;
-  }
-  return {
-    ...taskPlan,
-    status,
-    updatedAt: taskPlan.updatedAt > settledAt ? taskPlan.updatedAt : settledAt,
-    settledAt,
-  };
+  return settleTaskPlan(taskPlan, { turnId, status, settledAt });
 }
 
 function toLegacySessionStatus(

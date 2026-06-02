@@ -91,7 +91,10 @@ import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRu
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
 import { ThreadStatusStates, type ThreadStatusStatesShape } from "./threadStatusState.ts";
-import { ThreadWorkbenchStates, type ThreadWorkbenchStateShape } from "./threadWorkbenchState.ts";
+import {
+  WorkspaceRightPanelStates,
+  type WorkspaceRightPanelStatesShape,
+} from "./workspaceRightPanelState.ts";
 import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
@@ -342,7 +345,7 @@ const buildAppUnderTest = (options?: {
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunnerShape>;
     terminalManager?: Partial<TerminalManagerShape>;
     threadStatusStates?: Partial<ThreadStatusStatesShape>;
-    threadWorkbenchStates?: Partial<ThreadWorkbenchStateShape>;
+    workspaceRightPanelStates?: Partial<WorkspaceRightPanelStatesShape>;
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
@@ -843,20 +846,36 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ThreadWorkbenchStates)({
+        Layer.mock(WorkspaceRightPanelStates)({
           getState: (input) =>
             Effect.succeed({
-              threadId: input.threadId,
-              selection: null,
+              projectId: input.projectId,
+              workspaceRoot: input.workspaceRoot,
+              panelOpen: true,
+              activeMode: "files",
+              files: null,
+              changes: null,
+              nestedSidebarOpen: {
+                files: true,
+                changes: true,
+              },
               updatedAt: "1970-01-01T00:00:00.000Z",
             }),
           setState: (input) =>
             Effect.succeed({
-              threadId: input.threadId,
-              selection: input.selection,
+              projectId: input.projectId,
+              workspaceRoot: input.workspaceRoot,
+              panelOpen: input.patch.panelOpen ?? true,
+              activeMode: input.patch.activeMode ?? "files",
+              files: input.patch.files ?? null,
+              changes: input.patch.changes ?? null,
+              nestedSidebarOpen: {
+                files: input.patch.nestedSidebarOpen?.files ?? true,
+                changes: input.patch.nestedSidebarOpen?.changes ?? true,
+              },
               updatedAt: "1970-01-01T00:00:00.000Z",
             }),
-          ...options?.layers?.threadWorkbenchStates,
+          ...options?.layers?.workspaceRightPanelStates,
         }),
       ),
       Layer.provide(

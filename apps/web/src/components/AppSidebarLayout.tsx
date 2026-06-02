@@ -1,14 +1,17 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, type CSSProperties, type ReactNode } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import {
   clearShortcutModifierState,
   syncShortcutModifierStateFromKeyboardEvent,
 } from "../shortcutModifierState";
-import { ActivityRail } from "./shell/ActivityRail";
-import { SidePanel } from "./shell/SidePanel";
+import { cn } from "../lib/utils";
 import { resolveShellWorkspaceRouteFromPathname, useShellStore } from "./shell/shellStore";
-import { SidebarProvider } from "./ui/sidebar";
+import { ShellHeaderSlotProvider } from "./shell/shellHeaderSlot";
+import { RightWorkspaceShell } from "./shell/RightWorkspaceShell";
+import { ShellTopBar } from "./shell/ShellTopBar";
+import ProjectSidebar from "./Sidebar";
+import { Sidebar, SidebarProvider, useSidebar } from "./ui/sidebar";
 
 function isEditableShortcutTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -18,9 +21,11 @@ function isEditableShortcutTarget(target: EventTarget | null): boolean {
   );
 }
 
-export function AppSidebarLayout({ children }: { children: ReactNode }) {
+function AppShellContent({ children }: { children: ReactNode }) {
+  const { toggleSidebar } = useSidebar();
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
+  const centerHidden = useShellStore((state) => state.centerHidden);
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
@@ -39,7 +44,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       if (key === "b") {
         event.preventDefault();
         event.stopPropagation();
-        useShellStore.getState().togglePanel();
+        toggleSidebar();
       } else if (key === "j") {
         const terminalActions = useShellStore.getState().terminalActions;
         if (!terminalActions?.terminalAvailable) return;
@@ -65,7 +70,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       window.removeEventListener("keyup", onWindowKeyUp, true);
       window.removeEventListener("blur", onWindowBlur);
     };
-  }, []);
+  }, [toggleSidebar]);
 
   useEffect(() => {
     const onMenuAction = window.desktopBridge?.onMenuAction;
@@ -75,7 +80,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
 
     const unsubscribe = onMenuAction((action) => {
       if (action === "open-settings") {
-        useShellStore.getState().setActiveMode("settings");
         void navigate({ to: "/settings/general" });
       }
     });
@@ -86,35 +90,53 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   useEffect(() => {
-    if (pathname.startsWith("/settings")) {
-      const shellStore = useShellStore.getState();
-      if (shellStore.activeMode !== "settings") {
-        shellStore.setActiveMode("settings");
-      }
-      return;
-    }
-
     const workspaceRoute = resolveShellWorkspaceRouteFromPathname(pathname);
     if (!workspaceRoute) {
       return;
     }
 
-    const shellStore = useShellStore.getState();
-    shellStore.setLastWorkspaceRoute(workspaceRoute);
-    if (shellStore.activeMode === "settings") {
-      shellStore.setActiveMode("threads");
-    }
+    useShellStore.getState().setLastWorkspaceRoute(workspaceRoute);
   }, [pathname]);
 
   return (
-    <SidebarProvider className="h-dvh! min-h-0! overflow-hidden" defaultOpen>
-      <div className="flex h-full min-h-0 w-full overflow-hidden bg-background text-foreground">
-        <ActivityRail />
-        <SidePanel />
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col pb-[calc(3rem+env(safe-area-inset-bottom))] md:pb-0">
-          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
+    <ShellHeaderSlotProvider>
+      <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground">
+        <ShellTopBar />
+        <div className="flex min-h-0 w-full flex-1 overflow-hidden">
+          <Sidebar
+            collapsible="offcanvas"
+            resizable={{
+              minWidth: 18 * 16,
+              maxWidth: 28 * 16,
+              storageKey: "t3code:left-project-sidebar-width:v1",
+            }}
+          >
+            <ProjectSidebar />
+          </Sidebar>
+          <div
+            data-resize-freeze
+            className={cn(
+              "flex min-h-0 min-w-0 flex-1 flex-col pb-[calc(3rem+env(safe-area-inset-bottom))] md:pb-0",
+              centerHidden && "hidden",
+            )}
+          >
+            <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
+          </div>
+          <RightWorkspaceShell />
         </div>
       </div>
+    </ShellHeaderSlotProvider>
+  );
+}
+
+export function AppSidebarLayout({ children }: { children: ReactNode }) {
+  return (
+    <SidebarProvider
+      className="h-dvh! min-h-0! overflow-hidden"
+      defaultOpen
+      style={{ "--sidebar-width": "20rem" } as CSSProperties}
+    >
+      <AppShellContent>{children}</AppShellContent>
     </SidebarProvider>
   );
 }

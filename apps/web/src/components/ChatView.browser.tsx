@@ -245,15 +245,31 @@ function createMockEnvironmentApi(input: {
       }),
       subscribe: () => () => undefined,
     },
-    threadWorkbench: {
+    workspaceRightPanel: {
       getState: async (input) => ({
-        threadId: input.threadId,
-        selection: null,
+        projectId: input.projectId,
+        workspaceRoot: input.workspaceRoot,
+        panelOpen: true,
+        activeMode: "files",
+        files: null,
+        changes: null,
+        nestedSidebarOpen: {
+          files: true,
+          changes: true,
+        },
         updatedAt: new Date().toISOString(),
       }),
       setState: async (input) => ({
-        threadId: input.threadId,
-        selection: input.selection,
+        projectId: input.projectId,
+        workspaceRoot: input.workspaceRoot,
+        panelOpen: input.patch.panelOpen ?? true,
+        activeMode: input.patch.activeMode ?? "files",
+        files: input.patch.files ?? null,
+        changes: input.patch.changes ?? null,
+        nestedSidebarOpen: {
+          files: input.patch.nestedSidebarOpen?.files ?? true,
+          changes: input.patch.nestedSidebarOpen?.changes ?? true,
+        },
         updatedAt: new Date().toISOString(),
       }),
     },

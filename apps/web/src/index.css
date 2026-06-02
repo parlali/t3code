@@ -220,6 +220,16 @@ code {
   font-family: "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }
 
+/*
+ * While any pane resize is in progress, skip layout/paint of heavy panes
+ * (marked with data-resize-freeze, e.g. the virtualized chat timeline) so a
+ * width change does not force a synchronous reflow of an expensive subtree on
+ * every pointer move. The pane is restored on pointer release.
+ */
+:root[data-resizing] [data-resize-freeze] {
+  content-visibility: hidden;
+}
+
 /* Window drag region (frameless titlebar) */
 .drag-region {
   -webkit-app-region: drag;

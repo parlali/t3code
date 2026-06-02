@@ -1,6 +1,9 @@
 import type {
+  OrchestrationTaskPlan,
+  OrchestrationTaskPlanStatus,
   OrchestrationTaskPlanStep,
   OrchestrationTaskPlanStepStatus,
+  TurnId,
 } from "@t3tools/contracts";
 import { TrimmedNonEmptyString } from "@t3tools/contracts";
 
@@ -59,4 +62,128 @@ export function normalizePlanExplanation(raw: unknown): typeof TrimmedNonEmptySt
   return typeof raw === "string" && raw.trim().length > 0
     ? TrimmedNonEmptyString.make(raw.trim())
     : null;
+}
+
+export function taskPlanTerminalStatusFromSessionStatus(
+  status: string,
+): OrchestrationTaskPlanStatus | null {
+  switch (status) {
+    case "interrupted":
+    case "stopped":
+      return "interrupted";
+    case "error":
+      return "failed";
+    default:
+      return null;
+  }
+}
+
+export function taskPlanTerminalStatusFromCheckpointStatus(
+  status: "ready" | "missing" | "error",
+): OrchestrationTaskPlanStatus | null {
+  if (status === "ready") return "completed";
+  if (status === "error") return "failed";
+  return null;
+}
+
+export function taskPlanTerminalStatusFromTurnState(
+  state: string,
+): OrchestrationTaskPlanStatus | null {
+  switch (state) {
+    case "completed":
+      return "completed";
+    case "interrupted":
+      return "interrupted";
+    case "error":
+      return "failed";
+    default:
+      return null;
+  }
+}
+
+export function taskPlanStepsForStatus(
+  status: OrchestrationTaskPlanStatus,
+  steps: ReadonlyArray<OrchestrationTaskPlanStep>,
+): OrchestrationTaskPlanStep[] {
+  if (status !== "completed") {
+    return steps as OrchestrationTaskPlanStep[];
+  }
+  let changed = false;
+  const completedSteps = steps.map((step) => {
+    if (step.status === "completed") {
+      return step;
+    }
+    changed = true;
+    return {
+      ...step,
+      status: "completed" as const,
+    };
+  });
+  return changed ? completedSteps : (steps as OrchestrationTaskPlanStep[]);
+}
+
+type TaskPlanStatusOwner = Pick<
+  OrchestrationTaskPlan,
+  "status" | "steps" | "turnId" | "updatedAt" | "settledAt"
+>;
+
+function taskPlanStatusPriority(status: OrchestrationTaskPlanStatus): number {
+  switch (status) {
+    case "active":
+      return 0;
+    case "interrupted":
+      return 1;
+    case "failed":
+      return 2;
+    case "completed":
+      return 3;
+  }
+}
+
+function shouldApplyTaskPlanStatus(
+  current: OrchestrationTaskPlanStatus,
+  next: OrchestrationTaskPlanStatus,
+): boolean {
+  if (current === next) return true;
+  return taskPlanStatusPriority(next) > taskPlanStatusPriority(current);
+}
+
+export function settleTaskPlan<TPlan extends TaskPlanStatusOwner>(
+  taskPlan: TPlan | null,
+  input: {
+    readonly turnId: TurnId | null;
+    readonly status: OrchestrationTaskPlanStatus | null;
+    readonly settledAt: string;
+  },
+): TPlan | null {
+  if (taskPlan === null || input.turnId === null || taskPlan.turnId !== input.turnId) {
+    return taskPlan;
+  }
+  if (input.status === null || !shouldApplyTaskPlanStatus(taskPlan.status, input.status)) {
+    return taskPlan;
+  }
+
+  const steps = taskPlanStepsForStatus(input.status, taskPlan.steps);
+  const updatedAt = taskPlan.updatedAt > input.settledAt ? taskPlan.updatedAt : input.settledAt;
+  const settledAt =
+    taskPlan.settledAt !== null && taskPlan.settledAt > input.settledAt
+      ? taskPlan.settledAt
+      : input.settledAt;
+
+  if (
+    taskPlan.status === input.status &&
+    taskPlan.updatedAt === updatedAt &&
+    taskPlan.settledAt === settledAt &&
+    taskPlan.steps === steps
+  ) {
+    return taskPlan;
+  }
+
+  return {
+    ...taskPlan,
+    status: input.status,
+    steps,
+    updatedAt,
+    settledAt,
+  };
 }

@@ -45,7 +45,7 @@ export const WorkbenchTabBar = memo(function WorkbenchTabBar({
         <div
           key={tab.id}
           className={cn(
-            "flex h-12 max-w-64 shrink-0 items-center gap-2 border-r border-border px-3 text-xs text-muted-foreground",
+            "flex h-full max-w-64 shrink-0 items-center gap-2 border-r border-border px-3 text-xs text-muted-foreground",
             tab.id === activeTabId && "bg-background text-foreground",
           )}
           title={tab.path}

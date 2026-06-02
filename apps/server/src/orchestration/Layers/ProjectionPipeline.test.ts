@@ -415,11 +415,81 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           threadId,
           turnId,
           checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.make("provider-diff:evt-task-plan-4"),
+          status: "missing",
+          files: [],
+          assistantMessageId: MessageId.make("assistant-task-plan"),
+          completedAt: "2026-05-16T11:00:03.000Z",
+        },
+      });
+
+      const provisionalRows = yield* sql<{
+        readonly status: string;
+        readonly settledAt: string | null;
+      }>`
+        SELECT
+          status,
+          settled_at AS "settledAt"
+        FROM projection_thread_task_plans
+        WHERE thread_id = ${threadId} AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(provisionalRows, [{ status: "active", settledAt: null }]);
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-task-plan-5"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-05-16T11:00:03.500Z",
+        commandId: CommandId.make("cmd-task-plan-5"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-task-plan-5"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "ready",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-05-16T11:00:03.500Z",
+          },
+        },
+      });
+
+      const afterReadySessionRows = yield* sql<{
+        readonly status: string;
+        readonly settledAt: string | null;
+      }>`
+        SELECT
+          status,
+          settled_at AS "settledAt"
+        FROM projection_thread_task_plans
+        WHERE thread_id = ${threadId} AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(afterReadySessionRows, [{ status: "active", settledAt: null }]);
+
+      yield* appendAndProject({
+        type: "thread.turn-diff-completed",
+        eventId: EventId.make("evt-task-plan-6"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-05-16T11:00:04.000Z",
+        commandId: CommandId.make("cmd-task-plan-6"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-task-plan-6"),
+        metadata: {},
+        payload: {
+          threadId,
+          turnId,
+          checkpointTurnCount: 1,
           checkpointRef: CheckpointRef.make("checkpoint-task-plan"),
           status: "ready",
           files: [],
           assistantMessageId: MessageId.make("assistant-task-plan"),
-          completedAt: "2026-05-16T11:00:03.000Z",
+          completedAt: "2026-05-16T11:00:04.000Z",
         },
       });
 
@@ -442,8 +512,143 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           status: "completed",
           explanation: "Finish work",
           stepsJson:
-            '[{"step":"Inspect","status":"completed"},{"step":"Patch","status":"inProgress"}]',
-          settledAt: "2026-05-16T11:00:03.000Z",
+            '[{"step":"Inspect","status":"completed"},{"step":"Patch","status":"completed"}]',
+          settledAt: "2026-05-16T11:00:04.000Z",
+        },
+      ]);
+    }),
+  );
+
+  it.effect("initializes late task plan activities from settled turn state", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+      const projectId = ProjectId.make("project-task-plan-late");
+      const threadId = ThreadId.make("thread-task-plan-late");
+      const turnId = TurnId.make("turn-task-plan-late");
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.make("evt-task-plan-late-1"),
+        aggregateKind: "project",
+        aggregateId: projectId,
+        occurredAt: "2026-05-16T12:00:00.000Z",
+        commandId: CommandId.make("cmd-task-plan-late-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-task-plan-late-1"),
+        metadata: {},
+        payload: {
+          projectId,
+          title: "Project Late Task Plan",
+          workspaceRoot: "/tmp/project-task-plan-late",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-05-16T12:00:00.000Z",
+          updatedAt: "2026-05-16T12:00:00.000Z",
+        },
+      });
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.make("evt-task-plan-late-2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-05-16T12:00:01.000Z",
+        commandId: CommandId.make("cmd-task-plan-late-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-task-plan-late-2"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId,
+          title: "Thread Late Task Plan",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-05-16T12:00:01.000Z",
+          updatedAt: "2026-05-16T12:00:01.000Z",
+        },
+      });
+      yield* appendAndProject({
+        type: "thread.turn-diff-completed",
+        eventId: EventId.make("evt-task-plan-late-3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-05-16T12:00:03.000Z",
+        commandId: CommandId.make("cmd-task-plan-late-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-task-plan-late-3"),
+        metadata: {},
+        payload: {
+          threadId,
+          turnId,
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.make("checkpoint-task-plan-late"),
+          status: "ready",
+          files: [],
+          assistantMessageId: MessageId.make("assistant-task-plan-late"),
+          completedAt: "2026-05-16T12:00:03.000Z",
+        },
+      });
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.make("evt-task-plan-late-4"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-05-16T12:00:02.000Z",
+        commandId: CommandId.make("cmd-task-plan-late-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-task-plan-late-4"),
+        metadata: {},
+        payload: {
+          threadId,
+          activity: {
+            id: EventId.make("activity-task-plan-late"),
+            tone: "info",
+            kind: "turn.plan.updated",
+            summary: "Plan updated",
+            payload: {
+              plan: [
+                { content: "Inspect late event", status: "completed" },
+                { content: "Patch late event", status: "in_progress" },
+              ],
+            },
+            turnId,
+            createdAt: "2026-05-16T12:00:02.000Z",
+          },
+        },
+      });
+
+      const rows = yield* sql<{
+        readonly status: string;
+        readonly stepsJson: string;
+        readonly updatedAt: string;
+        readonly settledAt: string | null;
+      }>`
+        SELECT
+          status,
+          steps_json AS "stepsJson",
+          updated_at AS "updatedAt",
+          settled_at AS "settledAt"
+        FROM projection_thread_task_plans
+        WHERE thread_id = ${threadId} AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(rows, [
+        {
+          status: "completed",
+          stepsJson:
+            '[{"step":"Inspect late event","status":"completed"},{"step":"Patch late event","status":"completed"}]',
+          updatedAt: "2026-05-16T12:00:03.000Z",
+          settledAt: "2026-05-16T12:00:03.000Z",
         },
       ]);
     }),

@@ -86,10 +86,10 @@ import type {
   ThreadStatusStreamEvent,
 } from "./threadStatus.ts";
 import type {
-  ThreadWorkbenchGetStateInput,
-  ThreadWorkbenchSetStateInput,
-  ThreadWorkbenchState,
-} from "./threadWorkbenchState.ts";
+  WorkspaceRightPanelGetStateInput,
+  WorkspaceRightPanelSetStateInput,
+  WorkspaceRightPanelState,
+} from "./workspaceRightPanelState.ts";
 import type { ServerUpsertKeybindingInput } from "./server.ts";
 import type {
   ClientOrchestrationCommand,
@@ -402,9 +402,9 @@ export interface EnvironmentApi {
     ) => Promise<ThreadStatusMutationEvent>;
     subscribe: (callback: (event: ThreadStatusStreamEvent) => void) => () => void;
   };
-  threadWorkbench: {
-    getState: (input: ThreadWorkbenchGetStateInput) => Promise<ThreadWorkbenchState>;
-    setState: (input: ThreadWorkbenchSetStateInput) => Promise<ThreadWorkbenchState>;
+  workspaceRightPanel: {
+    getState: (input: WorkspaceRightPanelGetStateInput) => Promise<WorkspaceRightPanelState>;
+    setState: (input: WorkspaceRightPanelSetStateInput) => Promise<WorkspaceRightPanelState>;
   };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;

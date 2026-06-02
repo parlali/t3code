@@ -304,6 +304,7 @@ function Sidebar({
             {children}
           </div>
         </div>
+        {resolvedResizable ? <SidebarRail /> : null}
       </div>
     </SidebarInstanceContext>
   );

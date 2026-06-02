@@ -22,10 +22,12 @@ function setDocumentResizeCursor(cursor: ResizeInteractionCursor | null): void {
 
   if (cursor) {
     document.documentElement.dataset.resizeCursor = cursor;
+    document.documentElement.dataset.resizing = "true";
     return;
   }
 
   delete document.documentElement.dataset.resizeCursor;
+  delete document.documentElement.dataset.resizing;
 }
 
 function removeBrowserSelection(): void {

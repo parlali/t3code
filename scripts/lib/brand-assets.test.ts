@@ -26,6 +26,10 @@ describe("brand-assets", () => {
         sourceRelativePath: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
         targetRelativePath: "dist/client/apple-touch-icon.png",
       },
+      {
+        sourceRelativePath: BRAND_ASSET_PATHS.productionWebMaskableIconSvg,
+        targetRelativePath: "dist/client/app-icon-maskable.svg",
+      },
     ]);
   });
 

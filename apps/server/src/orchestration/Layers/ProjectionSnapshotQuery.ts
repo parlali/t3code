@@ -54,6 +54,7 @@ import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.t
 import { RepositoryIdentityResolver } from "../../project/Services/RepositoryIdentityResolver.ts";
 import { CLIENT_VISIBLE_THREAD_ACTIVITY_PAYLOAD_KINDS } from "../threadActivityPayloadVisibility.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
+import { taskPlanStepsForStatus } from "@t3tools/shared/providerPlan";
 import {
   ProjectionSnapshotQuery,
   type ProjectionFullThreadDiffContext,
@@ -297,7 +298,7 @@ function mapTaskPlanRow(row: ProjectionThreadTaskPlanRow): OrchestrationTaskPlan
     turnId: row.turnId,
     status: row.status,
     explanation: row.explanation,
-    steps: row.steps,
+    steps: taskPlanStepsForStatus(row.status, row.steps),
     sourceActivityId: row.sourceActivityId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

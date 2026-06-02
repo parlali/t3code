@@ -27,9 +27,9 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       setTerminalOpen: (input) => rpcClient.threadStatus.setTerminalOpen(input),
       subscribe: (callback) => rpcClient.threadStatus.subscribe(callback),
     },
-    threadWorkbench: {
-      getState: rpcClient.threadWorkbench.getState,
-      setState: rpcClient.threadWorkbench.setState,
+    workspaceRightPanel: {
+      getState: rpcClient.workspaceRightPanel.getState,
+      setState: rpcClient.workspaceRightPanel.setState,
     },
     projects: {
       searchEntries: rpcClient.projects.searchEntries,

@@ -31,13 +31,14 @@ import {
 } from "../../lib/vcsWorktreeState";
 import { refreshWorkspaceTarget, useProjectEntriesSubscription } from "../../lib/workspaceRefresh";
 import { readLocalApi } from "../../localApi";
-import { requestWorkbenchOpen, useWorkbenchSelection } from "../../workbenchEvents";
+import { requestWorkbenchOpen } from "../../workbenchEvents";
 import { getLocalStorageItem, setLocalStorageItem } from "../../hooks/useLocalStorage";
 import { Button } from "../ui/button";
 import { Group, GroupSeparator } from "../ui/group";
 import { Menu, MenuGroup, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
-import { PANE_RESIZE_RAIL_HORIZONTAL_CLASS } from "../ui/pane-chrome";
+import { PANE_ICON_BUTTON_CLASS, PANE_RESIZE_RAIL_HORIZONTAL_CLASS } from "../ui/pane-chrome";
 import { startResizeInteraction, type ResizeInteractionHandle } from "../ui/resize-interaction";
+import { ShellHeaderSlotPortal } from "./shellHeaderSlot";
 import { Textarea } from "../ui/textarea";
 import {
   buildNewEntryRelativePath,
@@ -71,11 +72,24 @@ function changeTree(files: readonly VcsChangeFile[], sectionId: VcsChangeSection
   );
 }
 
-export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "changes" }) {
+export function SidePanelWorkbenchMode({
+  mode,
+  selectedPath = null,
+  selectedChangeSource = null,
+  onOpenFile,
+}: {
+  readonly mode: "files" | "changes";
+  readonly selectedPath?: string | null;
+  readonly selectedChangeSource?: "working-tree" | "staged" | null;
+  readonly onOpenFile?: (input: {
+    readonly mode: "files" | "changes";
+    readonly path: string;
+    readonly source?: "working-tree" | "staged";
+  }) => void;
+}) {
   const queryClient = useQueryClient();
   const { activeThread, cwd, routeThreadRef } = useActiveShellContext();
   const environmentId = activeThread?.environmentId ?? routeThreadRef?.environmentId ?? null;
-  const workbenchSelection = useWorkbenchSelection(routeThreadRef);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [collapsedChangeDirectories, setCollapsedChangeDirectories] = useState<Set<string>>(
     () => new Set(),
@@ -303,7 +317,11 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
           expandCreateParent(createdParentPath);
           await refreshWorkspace();
           if (result.kind === "file") {
-            requestWorkbenchOpen({ mode: "files", path: result.relativePath });
+            if (onOpenFile) {
+              onOpenFile({ mode: "files", path: result.relativePath });
+            } else {
+              requestWorkbenchOpen({ mode: "files", path: result.relativePath });
+            }
           }
         } catch (error) {
           setCreateDraft((current) =>
@@ -314,7 +332,7 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
         }
       })();
     },
-    [cwd, environmentId, expandCreateParent, refreshWorkspace],
+    [cwd, environmentId, expandCreateParent, onOpenFile, refreshWorkspace],
   );
 
   const stagePaths = useCallback(
@@ -442,19 +460,19 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
 
     return (
       <div ref={changesSplitRef} className="flex h-full min-h-0 flex-col">
-        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2">
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">Changes</span>
+        <ShellHeaderSlotPortal order={20}>
+          <span className="shrink-0 text-sm font-medium text-foreground">Changes</span>
           <Button
             size="icon"
             variant="ghost"
-            className="size-7 cursor-pointer"
+            className={cn(PANE_ICON_BUTTON_CLASS, "cursor-pointer")}
             aria-label="Refresh changes"
             disabled={actionsDisabled}
             onClick={() => void refreshWorktree()}
           >
             <RefreshCwIcon className={cn("size-3.5", gitStatus.isPending && "animate-spin")} />
           </Button>
-        </div>
+        </ShellHeaderSlotPortal>
         <div className="shrink-0 space-y-2 border-b border-border p-2">
           <div className="relative">
             <Textarea
@@ -628,10 +646,7 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
               const sectionId = section.id;
               const sectionSource = sectionId === "staged" ? "staged" : "working-tree";
               const selectedChangePath =
-                workbenchSelection?.mode === "changes" &&
-                (workbenchSelection.changeSource ?? "working-tree") === sectionSource
-                  ? workbenchSelection.path
-                  : null;
+                selectedChangeSource === sectionSource ? selectedPath : null;
               const sectionPaths = section.files.map((file) => file.path);
               const statusByPath = new Map(
                 section.files.map((file) => [file.path, statusLabelForSection(file, sectionId)]),
@@ -715,11 +730,17 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
                         })
                       }
                       onOpenFile={(path) =>
-                        requestWorkbenchOpen({
-                          mode: "changes",
-                          path,
-                          source: section.id === "staged" ? "staged" : "working-tree",
-                        })
+                        onOpenFile
+                          ? onOpenFile({
+                              mode: "changes",
+                              path,
+                              source: section.id === "staged" ? "staged" : "working-tree",
+                            })
+                          : requestWorkbenchOpen({
+                              mode: "changes",
+                              path,
+                              source: section.id === "staged" ? "staged" : "working-tree",
+                            })
                       }
                       onStageFile={section.action === "stage" ? stageFile : undefined}
                       onUnstageFile={section.action === "unstage" ? unstageFile : undefined}
@@ -775,7 +796,7 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
           cwd={cwd}
           tree={tree}
           expanded={expanded}
-          selectedPath={workbenchSelection?.mode === "files" ? workbenchSelection.path : null}
+          selectedPath={mode === "files" ? selectedPath : null}
           listError={listQuery.error ?? null}
           isRefreshing={listQuery.isFetching}
           createDraft={createDraft}
@@ -788,11 +809,16 @@ export function SidePanelWorkbenchMode({ mode }: { readonly mode: "files" | "cha
               return next;
             })
           }
-          onOpenFile={(path) => requestWorkbenchOpen({ mode: "files", path })}
+          onOpenFile={(path) =>
+            onOpenFile
+              ? onOpenFile({ mode: "files", path })
+              : requestWorkbenchOpen({ mode: "files", path })
+          }
           onStartCreate={startCreateEntry}
           onSubmitCreate={submitCreateEntry}
           onCancelCreate={() => setCreateDraft(null)}
           onRefresh={refreshWorkspace}
+          hoistHeader
         />
       </div>
     </div>

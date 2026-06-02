@@ -18,11 +18,9 @@ export const WorkbenchBreadcrumbs = memo(function WorkbenchBreadcrumbs({
   let segmentPath = "";
 
   return (
-    <div className="flex min-w-0 flex-1 items-center overflow-hidden text-xs text-muted-foreground">
+    <div className="flex min-w-0 items-center overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
       {workspaceName && (
-        <span className="max-w-32 shrink-0 truncate font-medium text-foreground/80">
-          {workspaceName}
-        </span>
+        <span className="shrink-0 truncate font-medium text-foreground/80">{workspaceName}</span>
       )}
       {workspaceName && segments.length > 0 && <BreadcrumbSeparator />}
       {segments.map((segment, index) => {
@@ -31,15 +29,7 @@ export const WorkbenchBreadcrumbs = memo(function WorkbenchBreadcrumbs({
         return (
           <span key={segmentPath} className="flex min-w-0 items-center">
             {isLast && <FileCodeIcon className="mr-1 size-3 shrink-0 opacity-70" />}
-            <span
-              className={
-                isLast
-                  ? "min-w-0 truncate text-foreground/90"
-                  : "max-w-36 shrink-0 truncate text-muted-foreground"
-              }
-            >
-              {segment}
-            </span>
+            <span className={isLast ? "truncate text-foreground/90" : "truncate"}>{segment}</span>
             {!isLast && <BreadcrumbSeparator />}
           </span>
         );

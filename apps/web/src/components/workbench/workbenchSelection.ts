@@ -1,22 +1,4 @@
-import type { ProjectEntry, ThreadWorkbenchSelection, VcsStatusResult } from "@t3tools/contracts";
-import type { WorkbenchTab } from "./WorkbenchTabBar";
-import { tabFor } from "./workbenchUtils";
-
-export function selectionForTab(tab: WorkbenchTab): ThreadWorkbenchSelection {
-  return {
-    source: tab.kind === "file" ? "files" : "changes",
-    relativePath: tab.path,
-    ...(tab.kind === "diff" ? { changeSource: tab.source } : {}),
-  };
-}
-
-export function tabForSelection(selection: ThreadWorkbenchSelection): WorkbenchTab {
-  return tabFor(
-    selection.source === "files" ? "file" : "diff",
-    selection.relativePath,
-    selection.changeSource ? { source: selection.changeSource } : undefined,
-  );
-}
+import type { ProjectEntry, VcsStatusResult } from "@t3tools/contracts";
 
 export function isFileSelectionAvailable(
   entries: ReadonlyArray<ProjectEntry>,

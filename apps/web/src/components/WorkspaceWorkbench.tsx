@@ -3,13 +3,21 @@ import type {
   EnvironmentId,
   ProjectEntriesStreamEvent,
   ProjectEntry,
-  ThreadWorkbenchSelection,
   ThreadId,
+  WorkspaceRightPanelState,
+  WorkspaceRightPanelStatePatch,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { getWorkbenchMediaTypeByPath } from "@t3tools/shared/workbenchMedia";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Columns2Icon, MessageSquareIcon, Rows3Icon, SaveIcon, WrapTextIcon } from "lucide-react";
+import {
+  Columns2Icon,
+  MessageSquareIcon,
+  Rows3Icon,
+  SaveIcon,
+  WrapTextIcon,
+  XIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { ensureEnvironmentApi } from "../environmentApi";
@@ -26,6 +34,11 @@ import { refreshWorkspaceTarget, useProjectEntriesSubscription } from "../lib/wo
 import { useStore } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
 import {
+  applyWorkspaceRightPanelPatch,
+  defaultWorkspaceRightPanelState,
+  workspaceRightPanelQueryKey,
+} from "../workspaceRightPanelState";
+import {
   publishWorkbenchSelection,
   subscribeWorkbenchOpen,
   type WorkbenchActiveSelection,
@@ -36,8 +49,8 @@ import {
   PANE_HEADER_PADDING_CLASS,
   PANE_ICON_BUTTON_CLASS,
 } from "./ui/pane-chrome";
+import { ShellHeaderSlotPortal } from "./shell/shellHeaderSlot";
 import {
-  WorkbenchTabBar,
   WorkbenchBreadcrumbs,
   WorkbenchDiffEditor,
   WorkbenchDiffUnavailable,
@@ -51,8 +64,6 @@ import {
   configureWorkbenchMonaco,
   isFileSelectionAvailable,
   resolveAvailableChangeSource,
-  selectionForTab,
-  tabForSelection,
   workbenchCodeEditorOptions,
   workbenchEditorTheme,
   MOBILE_LAYOUT_MEDIA_QUERY,
@@ -96,6 +107,41 @@ function activeSelectionForTab(tab: WorkbenchTab): WorkbenchActiveSelection {
     return { mode: "files", path: tab.path };
   }
   return { mode: "changes", path: tab.path, changeSource: tab.source };
+}
+
+function rightPanelPatchForTab(tab: WorkbenchTab): WorkspaceRightPanelStatePatch {
+  if (tab.kind === "file") {
+    return {
+      activeMode: "files",
+      panelOpen: true,
+      files: { relativePath: tab.path },
+    };
+  }
+  return {
+    activeMode: "changes",
+    panelOpen: true,
+    changes: {
+      relativePath: tab.path,
+      changeSource: tab.source,
+    },
+  };
+}
+
+function tabForRightPanelState(state: WorkspaceRightPanelState): WorkbenchTab | null {
+  if (state.activeMode === "files" && state.files) {
+    return tabFor("file", state.files.relativePath);
+  }
+  if (state.activeMode === "changes" && state.changes) {
+    return tabFor("diff", state.changes.relativePath, {
+      source: state.changes.changeSource ?? "working-tree",
+    });
+  }
+  return null;
+}
+
+function clearPatchForTab(tab: WorkbenchTab | null): WorkspaceRightPanelStatePatch {
+  if (!tab) return {};
+  return tab.kind === "file" ? { files: null } : { changes: null };
 }
 
 export interface WorkspaceWorkbenchProps {
@@ -159,6 +205,8 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const activeTabRef = useRef<WorkbenchTab | null>(activeTab);
   activeTabRef.current = activeTab;
+  const dirtyTabsRef = useRef(dirtyTabs);
+  dirtyTabsRef.current = dirtyTabs;
   const activePath = activeTab?.path ?? null;
   const activeKind = activeTab?.kind ?? null;
   const activePathMediaType = useMemo(
@@ -208,22 +256,42 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     activePath !== null &&
     (fileBuffers[activePath] !== undefined || fileQueryContents !== undefined);
 
-  const persistWorkbenchSelection = useCallback(
-    (selection: ThreadWorkbenchSelection | null) => {
+  const persistWorkspaceRightPanelPatch = useCallback(
+    (patch: WorkspaceRightPanelStatePatch) => {
+      if (!activeProjectId || !cwd) return;
       workbenchSelectionVersionRef.current += 1;
+      const queryKey = workspaceRightPanelQueryKey({
+        environmentId: props.environmentId,
+        projectId: activeProjectId,
+        workspaceRoot: cwd,
+      });
+      queryClient.setQueryData<WorkspaceRightPanelState>(queryKey, (current) =>
+        applyWorkspaceRightPanelPatch(
+          current ??
+            defaultWorkspaceRightPanelState({
+              projectId: activeProjectId,
+              workspaceRoot: cwd,
+            }),
+          patch,
+        ),
+      );
       try {
         const api = ensureEnvironmentApi(props.environmentId);
-        void api.threadWorkbench
+        void api.workspaceRightPanel
           .setState({
-            threadId: props.threadId,
-            selection,
+            projectId: activeProjectId,
+            workspaceRoot: cwd,
+            patch,
+          })
+          .then((state) => {
+            queryClient.setQueryData(queryKey, state);
           })
           .catch(() => undefined);
       } catch {
         // Selection persistence should never block local workbench navigation.
       }
     },
-    [props.environmentId, props.threadId],
+    [activeProjectId, cwd, props.environmentId, queryClient],
   );
   const publishActiveSelection = useCallback(
     (selection: WorkbenchActiveSelection | null) => {
@@ -238,18 +306,54 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     [props.environmentId, props.threadId],
   );
 
+  // The workbench shows a single document (the current selection) — no tabs.
+  // Opening a different file replaces the current one; if it has unsaved edits
+  // we confirm whether to save before switching.
   const openTab = useCallback(
     (tab: WorkbenchTab, options?: { readonly persist?: boolean }) => {
-      setTabState((current) => ({
-        tabs: current.tabs.some((entry) => entry.id === tab.id)
-          ? current.tabs
-          : [...current.tabs, tab],
-        activeTabId: tab.id,
-      }));
+      const previous = activeTabRef.current;
+      if (
+        options?.persist !== false &&
+        previous &&
+        previous.id !== tab.id &&
+        dirtyTabsRef.current.has(previous.id)
+      ) {
+        const shouldSave = window.confirm(
+          `Save changes to ${basename(previous.path)} before opening ${basename(tab.path)}?`,
+        );
+        if (shouldSave) {
+          saveActiveRef.current();
+        } else {
+          setDirtyTabs((current) => {
+            if (!current.has(previous.id)) return current;
+            const next = new Set(current);
+            next.delete(previous.id);
+            return next;
+          });
+          if (previous.kind === "file") {
+            setFileBuffers((current) => {
+              if (current[previous.path] === undefined) return current;
+              const next = { ...current };
+              delete next[previous.path];
+              fileBuffersRef.current = next;
+              return next;
+            });
+          } else {
+            setDiffBuffers((current) => {
+              if (current[previous.id] === undefined) return current;
+              const next = { ...current };
+              delete next[previous.id];
+              diffBuffersRef.current = next;
+              return next;
+            });
+          }
+        }
+      }
+      setTabState({ tabs: [tab], activeTabId: tab.id });
       publishActiveSelection(activeSelectionForTab(tab));
-      if (options?.persist !== false) persistWorkbenchSelection(selectionForTab(tab));
+      if (options?.persist !== false) persistWorkspaceRightPanelPatch(rightPanelPatchForTab(tab));
     },
-    [persistWorkbenchSelection, publishActiveSelection],
+    [persistWorkspaceRightPanelPatch, publishActiveSelection],
   );
 
   useEffect(() => {
@@ -350,23 +454,12 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       if (activeTabId === tabId) {
         const nextActiveTab = nextTabs.find((tab) => tab.id === nextActiveTabId) ?? null;
         publishActiveSelection(nextActiveTab ? activeSelectionForTab(nextActiveTab) : null);
-        persistWorkbenchSelection(nextActiveTab ? selectionForTab(nextActiveTab) : null);
+        persistWorkspaceRightPanelPatch(
+          nextActiveTab ? rightPanelPatchForTab(nextActiveTab) : clearPatchForTab(activeTab),
+        );
       }
     },
-    [activeTabId, persistWorkbenchSelection, publishActiveSelection, tabs],
-  );
-
-  const selectTab = useCallback(
-    (tabId: string) => {
-      const tab = tabs.find((tab) => tab.id === tabId);
-      if (!tab) return;
-      setTabState((current) =>
-        current.activeTabId === tabId ? current : { ...current, activeTabId: tabId },
-      );
-      publishActiveSelection(activeSelectionForTab(tab));
-      persistWorkbenchSelection(selectionForTab(tab));
-    },
-    [persistWorkbenchSelection, publishActiveSelection, tabs],
+    [activeTab, activeTabId, persistWorkspaceRightPanelPatch, publishActiveSelection, tabs],
   );
 
   const replaceTab = useCallback(
@@ -400,9 +493,9 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
         return next;
       });
       publishActiveSelection(activeSelectionForTab(nextTab));
-      persistWorkbenchSelection(selectionForTab(nextTab));
+      persistWorkspaceRightPanelPatch(rightPanelPatchForTab(nextTab));
     },
-    [persistWorkbenchSelection, publishActiveSelection],
+    [persistWorkspaceRightPanelPatch, publishActiveSelection],
   );
 
   useEffect(() => {
@@ -416,22 +509,28 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     setDiffBuffers({});
     setDirtyTabs(new Set());
 
-    if (!cwd) return;
+    if (!activeProjectId || !cwd) return;
 
     let cancelled = false;
+    const queryKey = workspaceRightPanelQueryKey({
+      environmentId: props.environmentId,
+      projectId: activeProjectId,
+      workspaceRoot: cwd,
+    });
     try {
       const api = ensureEnvironmentApi(props.environmentId);
-      void api.threadWorkbench
-        .getState({ threadId: props.threadId })
+      void api.workspaceRightPanel
+        .getState({
+          projectId: activeProjectId,
+          workspaceRoot: cwd,
+        })
         .then((state) => {
-          if (
-            cancelled ||
-            workbenchSelectionVersionRef.current !== restoreVersion ||
-            state.selection === null
-          ) {
+          queryClient.setQueryData(queryKey, state);
+          if (cancelled || workbenchSelectionVersionRef.current !== restoreVersion) {
             return;
           }
-          openTab(tabForSelection(state.selection), { persist: false });
+          const tab = tabForRightPanelState(state);
+          if (tab) openTab(tab, { persist: false });
         })
         .catch(() => undefined);
     } catch {
@@ -441,7 +540,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     return () => {
       cancelled = true;
     };
-  }, [cwd, openTab, props.environmentId, props.threadId, publishActiveSelection]);
+  }, [activeProjectId, cwd, openTab, props.environmentId, publishActiveSelection, queryClient]);
 
   const refreshWorkspace = useCallback(
     () =>
@@ -592,9 +691,10 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
         return next;
       });
       publishActiveSelection(null);
-      persistWorkbenchSelection(null);
+      const removedTab = tabs.find((tab) => tab.id === tabId) ?? null;
+      persistWorkspaceRightPanelPatch(clearPatchForTab(removedTab));
     },
-    [persistWorkbenchSelection, publishActiveSelection],
+    [persistWorkspaceRightPanelPatch, publishActiveSelection, tabs],
   );
 
   useEffect(() => {
@@ -724,25 +824,39 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     </div>
   );
 
-  const desktopHeader = (
-    <>
-      <div className={`${PANE_HEADER_CLASS} items-stretch overflow-x-auto`}>
-        <WorkbenchTabBar
-          tabs={tabs}
-          activeTabId={activeTabId}
-          dirtyTabs={dirtyTabs}
-          onSelectTab={selectTab}
-          onCloseTab={closeTab}
-        />
-      </div>
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
-        <WorkbenchBreadcrumbs cwd={cwd} path={activeTab?.path ?? null} />
-        {lineWrapControl}
-        {diffLayoutControl}
-        {saveButton}
-      </div>
-    </>
-  );
+  // The workbench is a single-document viewer: the file's identity (breadcrumb
+  // + unsaved marker), its controls, and a close button all live on the unified
+  // top bar. The editor itself has no header row.
+  const desktopHeaderControls =
+    embedded && !isMobileLayout && activeTab ? (
+      <ShellHeaderSlotPortal order={10}>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <WorkbenchBreadcrumbs cwd={cwd} path={activeTab.path} />
+          {activeTabDirty ? (
+            <span
+              className="size-1.5 shrink-0 rounded-full bg-foreground/70"
+              aria-label="Unsaved changes"
+              title="Unsaved changes"
+            />
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {lineWrapControl}
+          {diffLayoutControl}
+          {saveButton}
+          <Button
+            size="icon"
+            variant="ghost"
+            className={PANE_ICON_BUTTON_CLASS}
+            aria-label="Close file"
+            title="Close file"
+            onClick={() => closeTab(activeTab.id)}
+          >
+            <XIcon className="size-3.5" />
+          </Button>
+        </div>
+      </ShellHeaderSlotPortal>
+    ) : null;
 
   const embeddedMobileBar = embedded && isMobileLayout && (
     <div className={`${PANE_HEADER_CLASS} ${PANE_HEADER_PADDING_CLASS} gap-1.5`}>
@@ -769,7 +883,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
       <div className="flex min-w-0 flex-1 flex-col">
         {showStandaloneToolbar && mobileToolbar}
         {embeddedMobileBar}
-        {!isMobileLayout && desktopHeader}
+        {desktopHeaderControls}
         <div className="relative min-h-0 flex-1">
           {!activeTab ? (
             <WorkbenchMessage>Open a file or change from the explorer.</WorkbenchMessage>

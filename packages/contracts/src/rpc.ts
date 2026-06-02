@@ -109,11 +109,11 @@ import {
   ThreadStatusStreamEvent,
 } from "./threadStatus.ts";
 import {
-  ThreadWorkbenchGetStateInput,
-  ThreadWorkbenchSetStateInput,
-  ThreadWorkbenchState,
-  ThreadWorkbenchStateError,
-} from "./threadWorkbenchState.ts";
+  WorkspaceRightPanelGetStateInput,
+  WorkspaceRightPanelSetStateInput,
+  WorkspaceRightPanelState,
+  WorkspaceRightPanelStateError,
+} from "./workspaceRightPanelState.ts";
 import {
   ServerConfigStreamEvent,
   ServerConfig,
@@ -204,9 +204,9 @@ export const WS_METHODS = {
   threadStatusMarkViewed: "threadStatus.markViewed",
   threadStatusSetTerminalOpen: "threadStatus.setTerminalOpen",
 
-  // Thread workbench state methods
-  threadWorkbenchGetState: "threadWorkbench.getState",
-  threadWorkbenchSetState: "threadWorkbench.setState",
+  // Workspace right panel state methods
+  workspaceRightPanelGetState: "workspaceRightPanel.getState",
+  workspaceRightPanelSetState: "workspaceRightPanel.setState",
 
   // Server meta
   serverGetConfig: "server.getConfig",
@@ -602,16 +602,16 @@ export const WsThreadStatusSetTerminalOpenRpc = Rpc.make(WS_METHODS.threadStatus
   error: ThreadStatusError,
 });
 
-export const WsThreadWorkbenchGetStateRpc = Rpc.make(WS_METHODS.threadWorkbenchGetState, {
-  payload: ThreadWorkbenchGetStateInput,
-  success: ThreadWorkbenchState,
-  error: ThreadWorkbenchStateError,
+export const WsWorkspaceRightPanelGetStateRpc = Rpc.make(WS_METHODS.workspaceRightPanelGetState, {
+  payload: WorkspaceRightPanelGetStateInput,
+  success: WorkspaceRightPanelState,
+  error: WorkspaceRightPanelStateError,
 });
 
-export const WsThreadWorkbenchSetStateRpc = Rpc.make(WS_METHODS.threadWorkbenchSetState, {
-  payload: ThreadWorkbenchSetStateInput,
-  success: ThreadWorkbenchState,
-  error: ThreadWorkbenchStateError,
+export const WsWorkspaceRightPanelSetStateRpc = Rpc.make(WS_METHODS.workspaceRightPanelSetState, {
+  payload: WorkspaceRightPanelSetStateInput,
+  success: WorkspaceRightPanelState,
+  error: WorkspaceRightPanelStateError,
 });
 
 export const WsOrchestrationDispatchCommandRpc = Rpc.make(
@@ -772,8 +772,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadStatusMarkUnreadRpc,
   WsThreadStatusMarkViewedRpc,
   WsThreadStatusSetTerminalOpenRpc,
-  WsThreadWorkbenchGetStateRpc,
-  WsThreadWorkbenchSetStateRpc,
+  WsWorkspaceRightPanelGetStateRpc,
+  WsWorkspaceRightPanelSetStateRpc,
   WsSubscribeTerminalEventsRpc,
   WsSubscribeThreadStatusRpc,
   WsSubscribeServerConfigRpc,
