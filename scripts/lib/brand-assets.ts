@@ -5,6 +5,7 @@ export const BRAND_ASSET_PATHS = {
   productionWebFaviconIco: "assets/prod/t3-black-web-favicon.ico",
   productionWebFavicon16Png: "assets/prod/t3-black-web-favicon-16x16.png",
   productionWebFavicon32Png: "assets/prod/t3-black-web-favicon-32x32.png",
+  productionWebInstallIconPng: "assets/prod/black-universal-1024.png",
   productionWebAppleTouchIconPng: "assets/prod/t3-black-web-apple-touch-180.png",
   productionWebMaskableIconSvg: "assets/prod/t3-black-web-maskable.svg",
 
@@ -17,6 +18,7 @@ export const BRAND_ASSET_PATHS = {
   developmentWebFaviconIco: "assets/prod/t3-black-web-favicon.ico",
   developmentWebFavicon16Png: "assets/prod/t3-black-web-favicon-16x16.png",
   developmentWebFavicon32Png: "assets/prod/t3-black-web-favicon-32x32.png",
+  developmentWebInstallIconPng: "assets/prod/black-universal-1024.png",
   developmentWebAppleTouchIconPng: "assets/prod/t3-black-web-apple-touch-180.png",
   developmentWebMaskableIconSvg: "assets/prod/t3-black-web-maskable.svg",
 } as const;
@@ -32,6 +34,7 @@ const WEB_ICON_TARGET_FILENAMES = {
   faviconIco: "favicon.ico",
   favicon16Png: "favicon-16x16.png",
   favicon32Png: "favicon-32x32.png",
+  installIconPng: "app-icon-1024.png",
   appleTouchIconPng: "apple-touch-icon.png",
   maskableIconSvg: "app-icon-maskable.svg",
 } as const;
@@ -41,6 +44,7 @@ const WEB_ICON_SOURCE_PATHS_BY_BRAND = {
     faviconIco: BRAND_ASSET_PATHS.developmentWebFaviconIco,
     favicon16Png: BRAND_ASSET_PATHS.developmentWebFavicon16Png,
     favicon32Png: BRAND_ASSET_PATHS.developmentWebFavicon32Png,
+    installIconPng: BRAND_ASSET_PATHS.developmentWebInstallIconPng,
     appleTouchIconPng: BRAND_ASSET_PATHS.developmentWebAppleTouchIconPng,
     maskableIconSvg: BRAND_ASSET_PATHS.developmentWebMaskableIconSvg,
   },
@@ -48,6 +52,7 @@ const WEB_ICON_SOURCE_PATHS_BY_BRAND = {
     faviconIco: BRAND_ASSET_PATHS.productionWebFaviconIco,
     favicon16Png: BRAND_ASSET_PATHS.productionWebFavicon16Png,
     favicon32Png: BRAND_ASSET_PATHS.productionWebFavicon32Png,
+    installIconPng: BRAND_ASSET_PATHS.productionWebInstallIconPng,
     appleTouchIconPng: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
     maskableIconSvg: BRAND_ASSET_PATHS.productionWebMaskableIconSvg,
   },
@@ -70,6 +75,10 @@ export function resolveWebIconOverrides(
     {
       sourceRelativePath: sourcePaths.favicon32Png,
       targetRelativePath: `${targetDirectory}/${WEB_ICON_TARGET_FILENAMES.favicon32Png}`,
+    },
+    {
+      sourceRelativePath: sourcePaths.installIconPng,
+      targetRelativePath: `${targetDirectory}/${WEB_ICON_TARGET_FILENAMES.installIconPng}`,
     },
     {
       sourceRelativePath: sourcePaths.appleTouchIconPng,

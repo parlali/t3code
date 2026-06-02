@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createEnvironmentConnection } from "./connection";
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
 
-function createTestClient() {
+function createTestClient(options?: { readonly reconnectTriggersShellResubscribe?: boolean }) {
   const lifecycleListeners = new Set<(event: any) => void>();
   const configListeners = new Set<(event: any) => void>();
   const terminalListeners = new Set<(event: any) => void>();
@@ -15,7 +15,9 @@ function createTestClient() {
     dispose: vi.fn(async () => undefined),
     isConnectionOpen: vi.fn(() => true),
     reconnect: vi.fn(async () => {
-      shellResubscribe?.();
+      if (options?.reconnectTriggersShellResubscribe !== false) {
+        shellResubscribe?.();
+      }
     }),
     server: {
       getConfig: vi.fn(async () => ({
@@ -208,6 +210,9 @@ function createTestClient() {
         });
       }
     },
+    emitShellResubscribe: () => {
+      shellResubscribe?.();
+    },
   };
 }
 
@@ -312,6 +317,84 @@ describe("createEnvironmentConnection", () => {
       expect.objectContaining({ snapshotSequence: 2 }),
       environmentId,
     );
+
+    await connection.dispose();
+  });
+
+  it("does not strand reconnect waiters when shell resubscribe starts after reconnect returns", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client, emitShellResubscribe, emitShellSnapshot } = createTestClient({
+      reconnectTriggersShellResubscribe: false,
+    });
+    const syncShellSnapshot = vi.fn();
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot,
+      applyTerminalEvent: vi.fn(),
+    });
+
+    await connection.ensureBootstrapped();
+
+    const reconnectPromise = connection.reconnect();
+    await Promise.resolve();
+
+    emitShellResubscribe();
+    emitShellSnapshot(2);
+
+    await expect(reconnectPromise).resolves.toBeUndefined();
+    expect(syncShellSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({ snapshotSequence: 2 }),
+      environmentId,
+    );
+
+    await connection.dispose();
+  });
+
+  it("refreshes terminal status snapshots after reconnect", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client, emitShellSnapshot } = createTestClient();
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot: vi.fn(),
+      applyTerminalEvent: vi.fn(),
+      syncTerminalStatusSnapshot: vi.fn(),
+    });
+
+    await connection.ensureBootstrapped();
+    expect(client.terminal.getStatusSnapshot).toHaveBeenCalledTimes(1);
+
+    const reconnectPromise = connection.reconnect();
+    await Promise.resolve();
+    emitShellSnapshot(2);
+    await reconnectPromise;
+
+    expect(client.terminal.getStatusSnapshot).toHaveBeenCalledTimes(2);
 
     await connection.dispose();
   });

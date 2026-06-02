@@ -2,9 +2,7 @@ import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "rea
 
 import { type SlowRpcAckRequest, useSlowRpcAckRequests } from "../rpc/requestLatencyState";
 import {
-  getWsConnectionStatus,
   getWsConnectionUiState,
-  setBrowserOnlineStatus,
   type WsConnectionStatus,
   type WsConnectionUiState,
   useWsConnectionStatus,
@@ -111,18 +109,6 @@ function SlowRpcAckRequestDetails({ requests }: { requests: ReadonlyArray<SlowRp
   );
 }
 
-export function shouldRestartStalledReconnect(
-  status: WsConnectionStatus,
-  expectedNextRetryAt: string,
-): boolean {
-  return (
-    status.reconnectPhase === "waiting" &&
-    status.nextRetryAt === expectedNextRetryAt &&
-    status.online &&
-    status.hasConnected
-  );
-}
-
 export function shouldShowRecoveredToast(
   previousDisconnectedAt: string | null,
   connectedAt: string | null,
@@ -180,26 +166,9 @@ export function WebSocketConnectionCoordinator() {
       );
     });
   });
-  const syncBrowserOnlineStatus = useEffectEvent(() => {
-    setBrowserOnlineStatus(navigator.onLine !== false);
-  });
   const triggerManualReconnect = useEffectEvent(() => {
     runReconnect(true);
   });
-
-  useEffect(() => {
-    const handleOnline = () => {
-      setBrowserOnlineStatus(true);
-    };
-
-    syncBrowserOnlineStatus();
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", syncBrowserOnlineStatus);
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", syncBrowserOnlineStatus);
-    };
-  }, []);
 
   useEffect(() => {
     if (status.reconnectPhase !== "waiting" || status.nextRetryAt === null) {
@@ -215,38 +184,6 @@ export function WebSocketConnectionCoordinator() {
       window.clearInterval(intervalId);
     };
   }, [status.nextRetryAt, status.reconnectPhase]);
-
-  useEffect(() => {
-    if (
-      status.reconnectPhase !== "waiting" ||
-      status.nextRetryAt === null ||
-      !status.online ||
-      !status.hasConnected
-    ) {
-      return;
-    }
-
-    const nextRetryAt = status.nextRetryAt;
-    const timeoutMs = Math.max(0, new Date(nextRetryAt).getTime() - Date.now()) + 1_500;
-    const timeoutId = window.setTimeout(() => {
-      const currentStatus = getWsConnectionStatus();
-      if (!shouldRestartStalledReconnect(currentStatus, nextRetryAt)) {
-        return;
-      }
-
-      runReconnect(false);
-    }, timeoutMs);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [
-    status.hasConnected,
-    status.nextRetryAt,
-    status.online,
-    status.reconnectAttemptCount,
-    status.reconnectPhase,
-  ]);
 
   useEffect(() => {
     const uiState = getWsConnectionUiState(status);

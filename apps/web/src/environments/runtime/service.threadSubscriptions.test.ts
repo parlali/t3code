@@ -444,7 +444,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("keeps healthy environment streams connected when the browser resumes from the background", async () => {
+  it("refreshes healthy environment streams when the browser resumes from the background", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -472,7 +472,7 @@ describe("retainThreadDetailSubscription", () => {
 
     visibilityState = "visible";
     documentTarget.dispatchEvent(new Event("visibilitychange"));
-    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
 
     stop();
     await resetEnvironmentServiceForTests();
@@ -660,7 +660,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("does not reconnect healthy environment streams when the browser resumes", async () => {
+  it("forces a reconnect when the browser resumes even if streams still look healthy", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     vi.stubGlobal("document", {
@@ -700,7 +700,7 @@ describe("retainThreadDetailSubscription", () => {
     visibilityState = "visible";
     documentTarget.dispatchEvent(new Event("visibilitychange"));
 
-    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
 
     stop();
     await resetEnvironmentServiceForTests();

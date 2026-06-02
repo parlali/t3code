@@ -271,7 +271,11 @@ function RightActivityRail({
 }: {
   readonly disabled: boolean;
   readonly state: WorkspaceRightPanelState | null;
-  readonly nestedToggle: { readonly open: boolean; readonly label: string; readonly onToggle: () => void } | null;
+  readonly nestedToggle: {
+    readonly open: boolean;
+    readonly label: string;
+    readonly onToggle: () => void;
+  } | null;
   readonly onPatch: (patch: WorkspaceRightPanelStatePatch) => void;
 }) {
   const terminalActions = useShellStore((store) => store.terminalActions);

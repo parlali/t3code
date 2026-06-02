@@ -68,9 +68,16 @@ import { useTerminalRuntimeStatusStore } from "~/terminalRuntimeStatusStore";
 import { useThreadStatusStore } from "~/threadStatusStore";
 import { useUiStateStore } from "~/uiStateStore";
 import type { WsProtocolCloseContext, WsProtocolLifecycleHandlers } from "../../rpc/protocol";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { getServerConfig } from "../../rpc/serverState";
 import { WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
+import {
+  getWsConnectionStatus,
+  setBrowserOnlineStatus,
+  wsConnectionStatusAtom,
+  type WsConnectionStatus,
+} from "../../rpc/wsConnectionState";
 import { appendVersionMismatchHint, resolveServerConfigVersionMismatch } from "../../versionSkew";
 import {
   deriveLogicalProjectKeyFromSettings,
@@ -94,6 +101,8 @@ type ThreadDetailSubscriptionEntry = {
   lastAccessedAt: number;
   evictionTimeoutId: ReturnType<typeof setTimeout> | null;
 };
+
+type EnvironmentReconnectSelection = "all" | "stale";
 
 const environmentConnections = new Map<EnvironmentId, EnvironmentConnection>();
 class SavedEnvironmentConnectionCancelledError extends Error {
@@ -130,7 +139,7 @@ const lastAppliedProjectionVersionByEnvironment = new Map<
 
 let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
-let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
+let lastBrowserReconnectRequestAt = Number.NEGATIVE_INFINITY;
 
 // Thread detail subscription cache policy:
 // - Active consumers keep a subscription retained via refCount.
@@ -141,7 +150,7 @@ let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
 // - Capacity eviction only targets idle cached subscriptions.
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
-const BROWSER_RESUME_RECONNECT_COOLDOWN_MS = 2_000;
+const BROWSER_RECONNECT_REQUEST_COOLDOWN_MS = 2_000;
 const BROWSER_CONNECTION_HEALTH_CHECK_INTERVAL_MS = 30_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
 const NOOP = () => undefined;
@@ -247,7 +256,7 @@ export function shouldApplyProjectionSnapshot(input: {
     return true;
   }
 
-  return compareAppliedProjectionVersion(input.current, toAppliedProjectionVersion(input.next)) < 0;
+  return input.next.snapshotSequence >= input.current.sequence;
 }
 
 export function shouldApplyProjectionEvent(input: {
@@ -1510,7 +1519,7 @@ function stopActiveService() {
 
 async function reconnectEnvironmentConnections(input?: {
   readonly reason?: string;
-  readonly onlyStale?: boolean;
+  readonly selection?: EnvironmentReconnectSelection;
 }): Promise<void> {
   const connections = [...environmentConnections.values()];
   if (connections.length === 0) {
@@ -1520,7 +1529,9 @@ async function reconnectEnvironmentConnections(input?: {
     }
   }
 
-  const targets = input?.onlyStale ? connections.filter(isEnvironmentConnectionStale) : connections;
+  const selection = input?.selection ?? "all";
+  const targets =
+    selection === "stale" ? connections.filter(isEnvironmentConnectionStale) : connections;
   if (targets.length === 0) {
     return;
   }
@@ -1555,21 +1566,100 @@ function isEnvironmentConnectionStale(connection: EnvironmentConnection): boolea
 }
 
 export async function reconnectStaleEnvironmentConnections(reason = "manual"): Promise<void> {
-  await reconnectEnvironmentConnections({ onlyStale: true, reason });
+  await reconnectEnvironmentConnections({ reason, selection: "stale" });
 }
 
-function requestStaleEnvironmentReconnect(reason: string): void {
+function hasEnvironmentReconnectTarget(selection: EnvironmentReconnectSelection): boolean {
+  const connections = [...environmentConnections.values()];
+  if (connections.length === 0) {
+    return maybeCreatePrimaryEnvironmentConnection() !== null;
+  }
+
+  return selection === "all" || connections.some(isEnvironmentConnectionStale);
+}
+
+function requestEnvironmentReconnect(input: {
+  readonly reason: string;
+  readonly selection: EnvironmentReconnectSelection;
+}): void {
   const now = Date.now();
-  if (now - lastBrowserResumeReconnectAt < BROWSER_RESUME_RECONNECT_COOLDOWN_MS) {
+  if (now - lastBrowserReconnectRequestAt < BROWSER_RECONNECT_REQUEST_COOLDOWN_MS) {
     return;
   }
 
-  if (![...environmentConnections.values()].some(isEnvironmentConnectionStale)) {
+  if (!hasEnvironmentReconnectTarget(input.selection)) {
     return;
   }
 
-  lastBrowserResumeReconnectAt = now;
-  void reconnectStaleEnvironmentConnections(reason).catch(() => undefined);
+  lastBrowserReconnectRequestAt = now;
+  void reconnectEnvironmentConnections({
+    reason: input.reason,
+    selection: input.selection,
+  }).catch(() => undefined);
+}
+
+function isDocumentVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState !== "hidden";
+}
+
+export function shouldRestartStalledReconnect(
+  status: WsConnectionStatus,
+  expectedNextRetryAt: string,
+): boolean {
+  return (
+    status.reconnectPhase === "waiting" &&
+    status.nextRetryAt === expectedNextRetryAt &&
+    status.online &&
+    status.hasConnected
+  );
+}
+
+function subscribeStalledReconnectRequests(): () => void {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const clearReconnectTimeout = () => {
+    if (timeoutId === null) {
+      return;
+    }
+    clearTimeout(timeoutId);
+    timeoutId = null;
+  };
+
+  const scheduleReconnectTimeout = (status: WsConnectionStatus) => {
+    clearReconnectTimeout();
+    if (
+      status.reconnectPhase !== "waiting" ||
+      status.nextRetryAt === null ||
+      !status.online ||
+      !status.hasConnected
+    ) {
+      return;
+    }
+
+    const nextRetryAt = status.nextRetryAt;
+    const timeoutMs = Math.max(0, new Date(nextRetryAt).getTime() - Date.now()) + 1_500;
+    timeoutId = setTimeout(() => {
+      timeoutId = null;
+      const currentStatus = getWsConnectionStatus();
+      if (!shouldRestartStalledReconnect(currentStatus, nextRetryAt)) {
+        return;
+      }
+
+      requestEnvironmentReconnect({
+        reason: "ws-retry-deadline",
+        selection: "all",
+      });
+    }, timeoutMs);
+  };
+
+  const unsubscribe = appAtomRegistry.subscribe(wsConnectionStatusAtom, scheduleReconnectTimeout, {
+    immediate: true,
+  });
+
+  return () => {
+    clearReconnectTimeout();
+    unsubscribe();
+  };
 }
 
 function subscribeBrowserResumeReconnects(): () => void {
@@ -1577,44 +1667,77 @@ function subscribeBrowserResumeReconnects(): () => void {
     return NOOP;
   }
 
+  const syncBrowserOnlineStatus = () => {
+    setBrowserOnlineStatus(typeof navigator === "undefined" ? true : navigator.onLine !== false);
+  };
+
   const handleVisibilityChange = () => {
     if (document.visibilityState === "hidden") {
       return;
     }
     if (document.visibilityState === "visible") {
-      requestStaleEnvironmentReconnect("visibilitychange");
+      requestEnvironmentReconnect({
+        reason: "visibilitychange",
+        selection: "all",
+      });
     }
   };
 
   const handlePageShow = () => {
-    requestStaleEnvironmentReconnect("pageshow");
+    if (!isDocumentVisible()) {
+      return;
+    }
+    requestEnvironmentReconnect({
+      reason: "pageshow",
+      selection: "all",
+    });
   };
 
   const handleFocus = () => {
-    requestStaleEnvironmentReconnect("focus");
+    if (!isDocumentVisible()) {
+      return;
+    }
+    requestEnvironmentReconnect({
+      reason: "focus",
+      selection: "all",
+    });
   };
 
   const handleOnline = () => {
-    requestStaleEnvironmentReconnect("online");
+    setBrowserOnlineStatus(true);
+    requestEnvironmentReconnect({
+      reason: "online",
+      selection: "all",
+    });
+  };
+
+  const handleOffline = () => {
+    setBrowserOnlineStatus(false);
   };
 
   const healthCheckIntervalId = globalThis.setInterval(() => {
     if (document.visibilityState === "hidden") {
       return;
     }
-    requestStaleEnvironmentReconnect("visible-healthcheck");
+    requestEnvironmentReconnect({
+      reason: "visible-healthcheck",
+      selection: "stale",
+    });
   }, BROWSER_CONNECTION_HEALTH_CHECK_INTERVAL_MS);
 
+  syncBrowserOnlineStatus();
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("pageshow", handlePageShow);
   window.addEventListener("focus", handleFocus);
   window.addEventListener("online", handleOnline);
+  window.addEventListener("offline", handleOffline);
   return () => {
     globalThis.clearInterval(healthCheckIntervalId);
     document.removeEventListener("visibilitychange", handleVisibilityChange);
     window.removeEventListener("pageshow", handlePageShow);
     window.removeEventListener("focus", handleFocus);
     window.removeEventListener("online", handleOnline);
+    window.removeEventListener("offline", handleOffline);
   };
 }
 
@@ -1648,7 +1771,7 @@ export function getPrimaryEnvironmentConnection(): EnvironmentConnection {
 }
 
 export async function reconnectAllEnvironmentConnections(reason = "manual"): Promise<void> {
-  await reconnectEnvironmentConnections({ reason });
+  await reconnectEnvironmentConnections({ reason, selection: "all" });
 }
 
 export async function disconnectSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
@@ -1879,6 +2002,7 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
     .catch(() => undefined);
 
   const unsubscribeBrowserResumeReconnects = subscribeBrowserResumeReconnects();
+  const unsubscribeStalledReconnectRequests = subscribeStalledReconnectRequests();
 
   activeService = {
     queryClient,
@@ -1887,6 +2011,7 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
     stop: () => {
       unsubscribeSavedEnvironments();
       unsubscribeBrowserResumeReconnects();
+      unsubscribeStalledReconnectRequests();
       queryInvalidationThrottler.cancel();
     },
   };
@@ -1904,7 +2029,7 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
 
 export async function resetEnvironmentServiceForTests(): Promise<void> {
   stopActiveService();
-  lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
+  lastBrowserReconnectRequestAt = Number.NEGATIVE_INFINITY;
   lastAppliedProjectionVersionByEnvironment.clear();
   pendingSavedEnvironmentConnections.clear();
   for (const key of Array.from(threadDetailSubscriptions.keys())) {

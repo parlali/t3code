@@ -1,64 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import type { WsConnectionStatus } from "../rpc/wsConnectionState";
-import {
-  shouldRestartStalledReconnect,
-  shouldShowRecoveredToast,
-} from "./WebSocketConnectionSurface";
-
-function makeStatus(overrides: Partial<WsConnectionStatus> = {}): WsConnectionStatus {
-  return {
-    attemptCount: 0,
-    closeCode: null,
-    closeReason: null,
-    connectionLabel: null,
-    connectedAt: null,
-    disconnectedAt: null,
-    hasConnected: false,
-    lastError: null,
-    lastErrorAt: null,
-    nextRetryAt: null,
-    online: true,
-    phase: "idle",
-    reconnectAttemptCount: 0,
-    reconnectMaxAttempts: 8,
-    reconnectPhase: "idle",
-    socketUrl: null,
-    ...overrides,
-  };
-}
+import { shouldShowRecoveredToast } from "./WebSocketConnectionSurface";
 
 describe("WebSocketConnectionSurface.logic", () => {
-  it("restarts a stalled reconnect window after the scheduled retry time passes", () => {
-    expect(
-      shouldRestartStalledReconnect(
-        makeStatus({
-          hasConnected: true,
-          nextRetryAt: "2026-04-03T20:00:01.000Z",
-          online: true,
-          phase: "disconnected",
-          reconnectAttemptCount: 3,
-          reconnectPhase: "waiting",
-        }),
-        "2026-04-03T20:00:01.000Z",
-      ),
-    ).toBe(true);
-
-    expect(
-      shouldRestartStalledReconnect(
-        makeStatus({
-          hasConnected: true,
-          nextRetryAt: "2026-04-03T20:00:01.000Z",
-          online: true,
-          phase: "disconnected",
-          reconnectAttemptCount: 3,
-          reconnectPhase: "attempting",
-        }),
-        "2026-04-03T20:00:01.000Z",
-      ),
-    ).toBe(false);
-  });
-
   it("suppresses recovered toasts for short reconnect blips", () => {
     expect(
       shouldShowRecoveredToast(

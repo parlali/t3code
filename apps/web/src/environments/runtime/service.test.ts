@@ -1,10 +1,34 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  shouldRestartStalledReconnect,
   shouldApplyProjectionEvent,
   shouldApplyProjectionSnapshot,
   shouldApplyTerminalEvent,
 } from "./service";
+import type { WsConnectionStatus } from "../../rpc/wsConnectionState";
+
+function makeStatus(overrides: Partial<WsConnectionStatus> = {}): WsConnectionStatus {
+  return {
+    attemptCount: 0,
+    closeCode: null,
+    closeReason: null,
+    connectionLabel: null,
+    connectedAt: null,
+    disconnectedAt: null,
+    hasConnected: false,
+    lastError: null,
+    lastErrorAt: null,
+    nextRetryAt: null,
+    online: true,
+    phase: "idle",
+    reconnectAttemptCount: 0,
+    reconnectMaxAttempts: 8,
+    reconnectPhase: "idle",
+    socketUrl: null,
+    ...overrides,
+  };
+}
 
 describe("shouldApplyTerminalEvent", () => {
   it("applies terminal events for draft-only threads", () => {
@@ -44,6 +68,38 @@ describe("shouldApplyTerminalEvent", () => {
   });
 });
 
+describe("shouldRestartStalledReconnect", () => {
+  it("restarts a stalled reconnect window after the scheduled retry time passes", () => {
+    expect(
+      shouldRestartStalledReconnect(
+        makeStatus({
+          hasConnected: true,
+          nextRetryAt: "2026-04-03T20:00:01.000Z",
+          online: true,
+          phase: "disconnected",
+          reconnectAttemptCount: 3,
+          reconnectPhase: "waiting",
+        }),
+        "2026-04-03T20:00:01.000Z",
+      ),
+    ).toBe(true);
+
+    expect(
+      shouldRestartStalledReconnect(
+        makeStatus({
+          hasConnected: true,
+          nextRetryAt: "2026-04-03T20:00:01.000Z",
+          online: true,
+          phase: "disconnected",
+          reconnectAttemptCount: 3,
+          reconnectPhase: "attempting",
+        }),
+        "2026-04-03T20:00:01.000Z",
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("shouldApplyProjectionSnapshot", () => {
   it("accepts the first snapshot for an environment", () => {
     expect(
@@ -72,7 +128,7 @@ describe("shouldApplyProjectionSnapshot", () => {
     ).toBe(false);
   });
 
-  it("drops snapshots with the same sequence and older timestamp", () => {
+  it("accepts snapshots with the same sequence for reconnect recovery", () => {
     expect(
       shouldApplyProjectionSnapshot({
         current: {
@@ -84,10 +140,10 @@ describe("shouldApplyProjectionSnapshot", () => {
           updatedAt: "2026-04-22T10:04:59.000Z",
         },
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it("accepts snapshots with the same sequence and a newer timestamp", () => {
+  it("accepts snapshots with a newer sequence", () => {
     expect(
       shouldApplyProjectionSnapshot({
         current: {
@@ -95,8 +151,8 @@ describe("shouldApplyProjectionSnapshot", () => {
           updatedAt: "2026-04-22T10:05:00.000Z",
         },
         next: {
-          snapshotSequence: 5,
-          updatedAt: "2026-04-22T10:05:01.000Z",
+          snapshotSequence: 6,
+          updatedAt: "2026-04-22T10:04:59.000Z",
         },
       }),
     ).toBe(true);
