@@ -11,13 +11,14 @@ import {
   useState,
   Suspense,
   type ReactNode,
+  type TouchEvent,
+  type WheelEvent,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
 import {
   BotIcon,
   CheckIcon,
-  ChevronUpIcon,
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
@@ -173,6 +174,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const rows = useStableRows(rawRows);
   const allowStartReachedLoadRef = useRef(false);
+  const touchStartYRef = useRef<number | null>(null);
+
+  const requestOlderMessages = useCallback(() => {
+    if (!hasOlderMessages || isLoadingOlderMessages) {
+      return;
+    }
+    onLoadOlderMessages();
+  }, [hasOlderMessages, isLoadingOlderMessages, onLoadOlderMessages]);
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -187,11 +196,39 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     if (!allowStartReachedLoadRef.current) {
       return;
     }
-    if (!hasOlderMessages || isLoadingOlderMessages) {
-      return;
+    requestOlderMessages();
+  }, [requestOlderMessages]);
+  const handleUpwardScrollIntent = useCallback(() => {
+    allowStartReachedLoadRef.current = true;
+    const state = listRef.current?.getState?.();
+    if (state?.isAtStart) {
+      requestOlderMessages();
     }
-    onLoadOlderMessages();
-  }, [hasOlderMessages, isLoadingOlderMessages, onLoadOlderMessages]);
+  }, [listRef, requestOlderMessages]);
+  const handleWheel = useCallback(
+    (event: WheelEvent<HTMLDivElement>) => {
+      if (event.deltaY < 0) {
+        handleUpwardScrollIntent();
+      }
+    },
+    [handleUpwardScrollIntent],
+  );
+  const handleTouchStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    touchStartYRef.current = event.touches[0]?.clientY ?? null;
+  }, []);
+  const handleTouchMove = useCallback(
+    (event: TouchEvent<HTMLDivElement>) => {
+      const touchStartY = touchStartYRef.current;
+      const currentY = event.touches[0]?.clientY;
+      if (touchStartY === null || currentY === undefined) {
+        return;
+      }
+      if (currentY - touchStartY > 16) {
+        handleUpwardScrollIntent();
+      }
+    },
+    [handleUpwardScrollIntent],
+  );
 
   const previousRowCountRef = useRef(rows.length);
   useEffect(() => {
@@ -274,13 +311,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         onStartReached={handleStartReached}
         onStartReachedThreshold={0.25}
         onScroll={handleScroll}
+        onTouchMove={handleTouchMove}
+        onTouchStart={handleTouchStart}
+        onWheel={handleWheel}
         className="h-full overflow-x-hidden overscroll-y-contain px-3 [touch-action:pan-y] [-webkit-overflow-scrolling:touch] sm:px-5"
         ListHeaderComponent={
-          <TimelineListHeader
-            hasOlderMessages={hasOlderMessages}
-            isLoadingOlderMessages={isLoadingOlderMessages}
-            onLoadOlderMessages={onLoadOlderMessages}
-          />
+          isLoadingOlderMessages ? <TimelineLoadingOlderHeader /> : TIMELINE_LIST_HEADER
         }
         ListFooterComponent={TIMELINE_LIST_FOOTER}
       />
@@ -290,31 +326,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
 function keyExtractor(item: MessagesTimelineRow) {
   return item.id;
-}
-
-function TimelineListHeader({
-  hasOlderMessages,
-  isLoadingOlderMessages,
-  onLoadOlderMessages,
-}: {
-  hasOlderMessages: boolean;
-  isLoadingOlderMessages: boolean;
-  onLoadOlderMessages: () => void;
-}) {
-  if (isLoadingOlderMessages) {
-    return <TimelineLoadingOlderHeader />;
-  }
-  if (!hasOlderMessages) {
-    return TIMELINE_LIST_HEADER;
-  }
-  return (
-    <div className="flex h-10 items-center justify-center">
-      <Button size="xs" variant="outline" onClick={onLoadOlderMessages}>
-        <ChevronUpIcon />
-        Load earlier
-      </Button>
-    </div>
-  );
 }
 
 function TimelineLoadingOlderHeader() {

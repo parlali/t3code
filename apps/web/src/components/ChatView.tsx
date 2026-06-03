@@ -736,6 +736,7 @@ export default function ChatView(props: ChatViewProps) {
   const [loadingOlderMessagesThreadKey, setLoadingOlderMessagesThreadKey] = useState<string | null>(
     null,
   );
+  const loadingOlderMessagesThreadKeyRef = useRef<string | null>(null);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
@@ -1894,7 +1895,7 @@ export default function ChatView(props: ChatViewProps) {
     if (routeKind !== "server") {
       return;
     }
-    if (!activeThreadKey || loadingOlderMessagesThreadKey === activeThreadKey) {
+    if (!activeThreadKey || loadingOlderMessagesThreadKeyRef.current !== null) {
       return;
     }
     if (!activeThreadMessagePageInfo?.hasOlderMessages) {
@@ -1909,6 +1910,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
 
+    loadingOlderMessagesThreadKeyRef.current = activeThreadKey;
     setLoadingOlderMessagesThreadKey(activeThreadKey);
     void api.orchestration
       .getThreadMessagesPage({
@@ -1926,6 +1928,9 @@ export default function ChatView(props: ChatViewProps) {
         );
       })
       .finally(() => {
+        if (loadingOlderMessagesThreadKeyRef.current === activeThreadKey) {
+          loadingOlderMessagesThreadKeyRef.current = null;
+        }
         setLoadingOlderMessagesThreadKey((currentThreadKey) =>
           currentThreadKey === activeThreadKey ? null : currentThreadKey,
         );
@@ -1934,7 +1939,6 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadKey,
     activeThreadMessagePageInfo,
     environmentId,
-    loadingOlderMessagesThreadKey,
     routeKind,
     setThreadError,
     threadId,
