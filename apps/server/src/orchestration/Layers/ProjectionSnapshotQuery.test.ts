@@ -654,11 +654,18 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.equal(snapshot._tag, "Some");
       if (snapshot._tag === "Some") {
         assert.deepEqual(
-          snapshot.value.messages.map((message) => message.id),
+          snapshot.value.thread.messages.map((message) => message.id),
           [asMessageId("message-2"), asMessageId("message-3")],
         );
+        assert.deepEqual(snapshot.value.messagePageInfo, {
+          oldestCursor: {
+            createdAt: "2026-04-10T00:00:02.000Z",
+            messageId: asMessageId("message-2"),
+          },
+          hasOlderMessages: true,
+        });
         assert.deepEqual(
-          snapshot.value.activities.map((activity) => ({
+          snapshot.value.thread.activities.map((activity) => ({
             id: activity.id,
             payload: activity.payload,
           })),
@@ -668,10 +675,30 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           ],
         );
         assert.deepEqual(
-          snapshot.value.checkpoints.map((checkpoint) => checkpoint.checkpointTurnCount),
+          snapshot.value.thread.checkpoints.map((checkpoint) => checkpoint.checkpointTurnCount),
           [2, 3],
         );
       }
+
+      const olderPage = yield* snapshotQuery.getThreadMessagesPage({
+        threadId: ThreadId.make("thread-subscription-snapshot"),
+        before: {
+          createdAt: "2026-04-10T00:00:02.000Z",
+          messageId: asMessageId("message-2"),
+        },
+        limit: 1,
+      });
+      assert.deepEqual(
+        olderPage.messages.map((message) => message.id),
+        [asMessageId("message-1")],
+      );
+      assert.deepEqual(olderPage.pageInfo, {
+        oldestCursor: {
+          createdAt: "2026-04-10T00:00:01.000Z",
+          messageId: asMessageId("message-1"),
+        },
+        hasOlderMessages: false,
+      });
     }),
   );
 
@@ -815,7 +842,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.equal(snapshot._tag, "Some");
       if (snapshot._tag === "Some") {
         assert.deepEqual(
-          snapshot.value.activities.map((activity) => ({
+          snapshot.value.thread.activities.map((activity) => ({
             id: activity.id,
             payload: activity.payload,
           })),

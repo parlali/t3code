@@ -97,6 +97,8 @@ import type {
   OrchestrationGetCheckpointFileRestoreAvailabilityInput,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationGetThreadMessagesPageInput,
+  OrchestrationGetThreadMessagesPageResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationShellSnapshot,
@@ -480,6 +482,9 @@ export interface EnvironmentApi {
     getCheckpointFileRestoreAvailability: (
       input: OrchestrationGetCheckpointFileRestoreAvailabilityInput,
     ) => Promise<OrchestrationCheckpointFileRestoreAvailability>;
+    getThreadMessagesPage: (
+      input: OrchestrationGetThreadMessagesPageInput,
+    ) => Promise<OrchestrationGetThreadMessagesPageResult>;
     getArchivedShellSnapshot: () => Promise<OrchestrationShellSnapshot>;
     subscribeShell: (
       callback: (event: OrchestrationShellStreamItem) => void,

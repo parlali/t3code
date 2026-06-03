@@ -17,6 +17,7 @@ import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
 import {
   BotIcon,
   CheckIcon,
+  ChevronUpIcon,
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
@@ -115,6 +116,9 @@ interface MessagesTimelineProps {
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  hasOlderMessages: boolean;
+  isLoadingOlderMessages: boolean;
+  onLoadOlderMessages: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +144,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   timestampFormat,
   workspaceRoot,
   onIsAtEndChange,
+  hasOlderMessages,
+  isLoadingOlderMessages,
+  onLoadOlderMessages,
 }: MessagesTimelineProps) {
   const rawRows = useMemo(
     () =>
@@ -165,13 +172,26 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+  const allowStartReachedLoadRef = useRef(false);
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
     if (state) {
+      if (!state.isAtEnd) {
+        allowStartReachedLoadRef.current = true;
+      }
       onIsAtEndChange(state.isAtEnd);
     }
   }, [listRef, onIsAtEndChange]);
+  const handleStartReached = useCallback(() => {
+    if (!allowStartReachedLoadRef.current) {
+      return;
+    }
+    if (!hasOlderMessages || isLoadingOlderMessages) {
+      return;
+    }
+    onLoadOlderMessages();
+  }, [hasOlderMessages, isLoadingOlderMessages, onLoadOlderMessages]);
 
   const previousRowCountRef = useRef(rows.length);
   useEffect(() => {
@@ -251,9 +271,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         maintainScrollAtEnd
         maintainScrollAtEndThreshold={0.1}
         maintainVisibleContentPosition
+        onStartReached={handleStartReached}
+        onStartReachedThreshold={0.25}
         onScroll={handleScroll}
         className="h-full overflow-x-hidden overscroll-y-contain px-3 [touch-action:pan-y] [-webkit-overflow-scrolling:touch] sm:px-5"
-        ListHeaderComponent={TIMELINE_LIST_HEADER}
+        ListHeaderComponent={
+          <TimelineListHeader
+            hasOlderMessages={hasOlderMessages}
+            isLoadingOlderMessages={isLoadingOlderMessages}
+            onLoadOlderMessages={onLoadOlderMessages}
+          />
+        }
         ListFooterComponent={TIMELINE_LIST_FOOTER}
       />
     </TimelineRowCtx>
@@ -262,6 +290,39 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
 function keyExtractor(item: MessagesTimelineRow) {
   return item.id;
+}
+
+function TimelineListHeader({
+  hasOlderMessages,
+  isLoadingOlderMessages,
+  onLoadOlderMessages,
+}: {
+  hasOlderMessages: boolean;
+  isLoadingOlderMessages: boolean;
+  onLoadOlderMessages: () => void;
+}) {
+  if (isLoadingOlderMessages) {
+    return <TimelineLoadingOlderHeader />;
+  }
+  if (!hasOlderMessages) {
+    return TIMELINE_LIST_HEADER;
+  }
+  return (
+    <div className="flex h-10 items-center justify-center">
+      <Button size="xs" variant="outline" onClick={onLoadOlderMessages}>
+        <ChevronUpIcon />
+        Load earlier
+      </Button>
+    </div>
+  );
+}
+
+function TimelineLoadingOlderHeader() {
+  return (
+    <div className="flex h-9 items-center justify-center" aria-hidden="true">
+      <div className="size-3 rounded-full border border-muted-foreground/20 border-t-muted-foreground/60 motion-safe:animate-spin" />
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------

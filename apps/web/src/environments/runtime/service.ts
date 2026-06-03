@@ -150,6 +150,7 @@ let lastBrowserReconnectRequestAt = Number.NEGATIVE_INFINITY;
 // - Capacity eviction only targets idle cached subscriptions.
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
+const THREAD_DETAIL_INITIAL_MESSAGE_LIMIT = 6;
 const BROWSER_RECONNECT_REQUEST_COOLDOWN_MS = 2_000;
 const BROWSER_CONNECTION_HEALTH_CHECK_INTERVAL_MS = 30_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
@@ -385,10 +386,16 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
   }
 
   entry.unsubscribe = connection.client.orchestration.subscribeThread(
-    { threadId: entry.threadId },
+    { threadId: entry.threadId, initialMessageLimit: THREAD_DETAIL_INITIAL_MESSAGE_LIMIT },
     (item) => {
       if (item.kind === "snapshot") {
-        useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
+        useStore
+          .getState()
+          .syncServerThreadDetail(
+            item.snapshot.thread,
+            entry.environmentId,
+            item.snapshot.messagePageInfo,
+          );
         return;
       }
       applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);

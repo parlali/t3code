@@ -80,6 +80,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
       getCheckpointFileRestoreAvailability:
         rpcClient.orchestration.getCheckpointFileRestoreAvailability,
+      getThreadMessagesPage: rpcClient.orchestration.getThreadMessagesPage,
       getArchivedShellSnapshot: rpcClient.orchestration.getArchivedShellSnapshot,
       subscribeShell: (callback, options) =>
         rpcClient.orchestration.subscribeShell(callback, options),

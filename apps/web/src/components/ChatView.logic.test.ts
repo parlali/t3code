@@ -534,6 +534,20 @@ function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) 
         Object.fromEntries(thread.messages.map((message) => [message.id, message])),
       ]),
     ),
+    messagePageInfoByThreadId: Object.fromEntries(
+      threads.map((thread) => [
+        thread.id,
+        {
+          oldestCursor: thread.messages[0]
+            ? {
+                createdAt: thread.messages[0].createdAt,
+                messageId: thread.messages[0].id,
+              }
+            : null,
+          hasOlderMessages: false,
+        },
+      ]),
+    ),
     activityIdsByThreadId: Object.fromEntries(
       threads.map((thread) => [thread.id, thread.activities.map((activity) => activity.id)]),
     ),

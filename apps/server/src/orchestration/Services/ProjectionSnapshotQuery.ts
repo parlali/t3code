@@ -9,6 +9,8 @@
 import type {
   CheckpointRef,
   OrchestrationCheckpointSummary,
+  OrchestrationGetThreadMessagesPageInput,
+  OrchestrationGetThreadMessagesPageResult,
   OrchestrationProject,
   OrchestrationProjectShell,
   OrchestrationReadModel,
@@ -45,6 +47,11 @@ export interface ProjectionThreadDetailSubscriptionSnapshotOptions {
   readonly messageLimit: number;
   readonly activityLimit: number;
   readonly checkpointLimit: number;
+}
+
+export interface ProjectionThreadDetailSubscriptionSnapshot {
+  readonly thread: OrchestrationThread;
+  readonly messagePageInfo: OrchestrationGetThreadMessagesPageResult["pageInfo"];
 }
 
 export interface ProjectionFullThreadDiffContext {
@@ -172,7 +179,19 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadDetailSubscriptionSnapshotById: (
     threadId: ThreadId,
     options: ProjectionThreadDetailSubscriptionSnapshotOptions,
-  ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>;
+  ) => Effect.Effect<
+    Option.Option<ProjectionThreadDetailSubscriptionSnapshot>,
+    ProjectionRepositoryError
+  >;
+
+  /**
+   * Read a browser-facing page of thread messages. This deliberately does not
+   * replace getThreadDetailById; provider/backend processing continues to use
+   * the full-detail read path.
+   */
+  readonly getThreadMessagesPage: (
+    input: OrchestrationGetThreadMessagesPageInput,
+  ) => Effect.Effect<OrchestrationGetThreadMessagesPageResult, ProjectionRepositoryError>;
 }
 
 /**

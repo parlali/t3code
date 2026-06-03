@@ -127,7 +127,9 @@ const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 const SERVER_STREAM_KEEPALIVE_INTERVAL = Duration.seconds(20);
 const THREAD_DETAIL_ACTIVITY_SNAPSHOT_LIMIT = 500;
 const THREAD_DETAIL_CHECKPOINT_SNAPSHOT_LIMIT = 500;
-const THREAD_DETAIL_MESSAGE_SNAPSHOT_LIMIT = 2_000;
+const THREAD_DETAIL_INITIAL_MESSAGE_SNAPSHOT_LIMIT = 6;
+const THREAD_DETAIL_MESSAGE_PAGE_DEFAULT_LIMIT = 50;
+const THREAD_DETAIL_MESSAGE_PAGE_MAX_LIMIT = 100;
 
 function makeServerStreamKeepalive() {
   return Stream.fromEffectRepeat(
@@ -149,10 +151,22 @@ function sanitizeThreadActivity(
   return redactThreadActivityPayloadForDetail(activity);
 }
 
-function sanitizeThreadDetailSnapshot(thread: OrchestrationThread): OrchestrationThread {
+function normalizeThreadDetailMessageLimit(value: number | undefined, fallback: number): number {
+  return Math.trunc(
+    clamp(value ?? fallback, {
+      minimum: 1,
+      maximum: THREAD_DETAIL_MESSAGE_PAGE_MAX_LIMIT,
+    }),
+  );
+}
+
+function sanitizeThreadDetailSnapshot(
+  thread: OrchestrationThread,
+  messageLimit: number,
+): OrchestrationThread {
   return {
     ...thread,
-    messages: thread.messages.slice(-THREAD_DETAIL_MESSAGE_SNAPSHOT_LIMIT),
+    messages: thread.messages.slice(-messageLimit),
     activities: thread.activities
       .slice(-THREAD_DETAIL_ACTIVITY_SNAPSHOT_LIMIT)
       .map(sanitizeThreadActivity),
@@ -788,6 +802,28 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.getThreadMessagesPage]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getThreadMessagesPage,
+            projectionSnapshotQuery
+              .getThreadMessagesPage({
+                ...input,
+                limit: normalizeThreadDetailMessageLimit(
+                  input.limit,
+                  THREAD_DETAIL_MESSAGE_PAGE_DEFAULT_LIMIT,
+                ),
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: `Failed to load messages for thread ${input.threadId}`,
+                      cause,
+                    }),
+                ),
+              ),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [ORCHESTRATION_WS_METHODS.replayEvents]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.replayEvents,
@@ -866,12 +902,16 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeThread,
             Effect.gen(function* () {
+              const messageLimit = normalizeThreadDetailMessageLimit(
+                input.initialMessageLimit,
+                THREAD_DETAIL_INITIAL_MESSAGE_SNAPSHOT_LIMIT,
+              );
               const [threadDetail, snapshotSequence] = yield* Effect.all([
                 projectionSnapshotQuery
                   .getThreadDetailSubscriptionSnapshotById(input.threadId, {
                     activityLimit: THREAD_DETAIL_ACTIVITY_SNAPSHOT_LIMIT,
                     checkpointLimit: THREAD_DETAIL_CHECKPOINT_SNAPSHOT_LIMIT,
-                    messageLimit: THREAD_DETAIL_MESSAGE_SNAPSHOT_LIMIT,
+                    messageLimit,
                   })
                   .pipe(
                     Effect.mapError(
@@ -919,7 +959,8 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                   kind: "snapshot" as const,
                   snapshot: {
                     snapshotSequence,
-                    thread: sanitizeThreadDetailSnapshot(threadDetail.value),
+                    thread: sanitizeThreadDetailSnapshot(threadDetail.value.thread, messageLimit),
+                    messagePageInfo: threadDetail.value.messagePageInfo,
                   },
                 }),
                 liveStream,

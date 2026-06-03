@@ -647,6 +647,15 @@ export const WsOrchestrationGetCheckpointFileRestoreAvailabilityRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationGetThreadMessagesPageRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getThreadMessagesPage,
+  {
+    payload: OrchestrationRpcSchemas.getThreadMessagesPage.input,
+    success: OrchestrationRpcSchemas.getThreadMessagesPage.output,
+    error: OrchestrationGetSnapshotError,
+  },
+);
+
 export const WsOrchestrationReplayEventsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.replayEvents, {
   payload: OrchestrationReplayEventsInput,
   success: OrchestrationRpcSchemas.replayEvents.output,
@@ -783,6 +792,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationGetCheckpointFileRestoreAvailabilityRpc,
+  WsOrchestrationGetThreadMessagesPageRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
   WsOrchestrationSubscribeShellRpc,

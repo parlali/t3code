@@ -11,6 +11,7 @@ import { ShellHeaderSlotProvider } from "./shell/shellHeaderSlot";
 import { RightWorkspaceShell } from "./shell/RightWorkspaceShell";
 import { ShellTopBar } from "./shell/ShellTopBar";
 import ProjectSidebar from "./Sidebar";
+import { SettingsSidebarPanel } from "./settings/SettingsSidebarNav";
 import { Sidebar, SidebarProvider, useSidebar } from "./ui/sidebar";
 
 function isEditableShortcutTarget(target: EventTarget | null): boolean {
@@ -26,6 +27,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
   const centerHidden = useShellStore((state) => state.centerHidden);
+  const settingsRouteOpen = pathname.startsWith("/settings");
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
@@ -111,7 +113,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
               storageKey: "t3code:left-project-sidebar-width:v1",
             }}
           >
-            <ProjectSidebar />
+            {settingsRouteOpen ? <SettingsSidebarPanel pathname={pathname} /> : <ProjectSidebar />}
           </Sidebar>
           <div
             data-resize-freeze

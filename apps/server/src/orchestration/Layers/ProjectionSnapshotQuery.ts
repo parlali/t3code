@@ -5,6 +5,8 @@ import {
   MessageId,
   NonNegativeInt,
   OrchestrationCheckpointFile,
+  type OrchestrationGetThreadMessagesPageInput,
+  type OrchestrationGetThreadMessagesPageResult,
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
@@ -60,6 +62,7 @@ import {
   type ProjectionFullThreadDiffContext,
   type ProjectionSnapshotCounts,
   type ProjectionThreadCheckpointContext,
+  type ProjectionThreadDetailSubscriptionSnapshot,
   type ProjectionThreadDetailSubscriptionSnapshotOptions,
   type ProjectionSnapshotQueryShape,
 } from "../Services/ProjectionSnapshotQuery.ts";
@@ -140,6 +143,12 @@ const ThreadIdLookupInput = Schema.Struct({
 });
 const ThreadDetailLimitedLookupInput = Schema.Struct({
   threadId: ThreadId,
+  limit: NonNegativeInt,
+});
+const ThreadMessagesBeforeCursorLookupInput = Schema.Struct({
+  threadId: ThreadId,
+  beforeCreatedAt: IsoDateTime,
+  beforeMessageId: MessageId,
   limit: NonNegativeInt,
 });
 const ProjectionProjectLookupRowSchema = ProjectionProjectDbRowSchema;
@@ -327,6 +336,34 @@ function mapMessageRow(row: ProjectionThreadMessageRow): OrchestrationMessage {
     return Object.assign(message, { attachments: row.attachments });
   }
   return message;
+}
+
+function messageCursorFromRow(
+  row: ProjectionThreadMessageRow | undefined,
+): OrchestrationGetThreadMessagesPageResult["pageInfo"]["oldestCursor"] {
+  return row
+    ? {
+        createdAt: row.createdAt,
+        messageId: row.messageId,
+      }
+    : null;
+}
+
+function sliceMessagePageRows(input: {
+  readonly rows: ReadonlyArray<ProjectionThreadMessageRow>;
+  readonly limit: number;
+}): {
+  readonly rows: ReadonlyArray<ProjectionThreadMessageRow>;
+  readonly pageInfo: OrchestrationGetThreadMessagesPageResult["pageInfo"];
+} {
+  const rows = input.limit === 0 ? [] : input.rows.slice(-input.limit);
+  return {
+    rows,
+    pageInfo: {
+      oldestCursor: messageCursorFromRow(rows[0]),
+      hasOlderMessages: input.rows.length > rows.length,
+    },
+  };
 }
 
 function mapActivityRow(row: ProjectionThreadActivityRow): OrchestrationThreadActivity {
@@ -984,6 +1021,36 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             updated_at AS "updatedAt"
           FROM projection_thread_messages
           WHERE thread_id = ${threadId}
+          ORDER BY created_at DESC, message_id DESC
+          LIMIT ${limit}
+        )
+        ORDER BY "createdAt" ASC, "messageId" ASC
+      `,
+  });
+
+  const listThreadMessageRowsBeforeCursorByThread = SqlSchema.findAll({
+    Request: ThreadMessagesBeforeCursorLookupInput,
+    Result: ProjectionThreadMessageDbRowSchema,
+    execute: ({ threadId, beforeCreatedAt, beforeMessageId, limit }) =>
+      sql`
+        SELECT *
+        FROM (
+          SELECT
+            message_id AS "messageId",
+            thread_id AS "threadId",
+            turn_id AS "turnId",
+            role,
+            text,
+            attachments_json AS "attachments",
+            is_streaming AS "isStreaming",
+            created_at AS "createdAt",
+            updated_at AS "updatedAt"
+          FROM projection_thread_messages
+          WHERE thread_id = ${threadId}
+            AND (
+              created_at < ${beforeCreatedAt}
+              OR (created_at = ${beforeCreatedAt} AND message_id < ${beforeMessageId})
+            )
           ORDER BY created_at DESC, message_id DESC
           LIMIT ${limit}
         )
@@ -2334,11 +2401,55 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       );
     });
 
+  const getThreadMessagesPage: ProjectionSnapshotQueryShape["getThreadMessagesPage"] = (
+    input: OrchestrationGetThreadMessagesPageInput,
+  ): Effect.Effect<OrchestrationGetThreadMessagesPageResult, ProjectionRepositoryError> =>
+    Effect.gen(function* () {
+      const queryLimit = input.limit + 1;
+      const before = input.before ?? null;
+      const rows =
+        before === null
+          ? yield* listLatestThreadMessageRowsByThread({
+              threadId: input.threadId,
+              limit: queryLimit,
+            }).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getThreadMessagesPage:listLatestMessages:query",
+                  "ProjectionSnapshotQuery.getThreadMessagesPage:listLatestMessages:decodeRows",
+                ),
+              ),
+            )
+          : yield* listThreadMessageRowsBeforeCursorByThread({
+              threadId: input.threadId,
+              beforeCreatedAt: before.createdAt,
+              beforeMessageId: before.messageId,
+              limit: queryLimit,
+            }).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getThreadMessagesPage:listMessagesBeforeCursor:query",
+                  "ProjectionSnapshotQuery.getThreadMessagesPage:listMessagesBeforeCursor:decodeRows",
+                ),
+              ),
+            );
+      const page = sliceMessagePageRows({ rows, limit: input.limit });
+
+      return {
+        threadId: input.threadId,
+        messages: page.rows.map(mapMessageRow),
+        pageInfo: page.pageInfo,
+      };
+    });
+
   const getThreadDetailSubscriptionSnapshotById: ProjectionSnapshotQueryShape["getThreadDetailSubscriptionSnapshotById"] =
     (
       threadId: ThreadId,
       options: ProjectionThreadDetailSubscriptionSnapshotOptions,
-    ): Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError> =>
+    ): Effect.Effect<
+      Option.Option<ProjectionThreadDetailSubscriptionSnapshot>,
+      ProjectionRepositoryError
+    > =>
       Effect.gen(function* () {
         const [
           threadRow,
@@ -2360,7 +2471,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           ),
           listLatestThreadMessageRowsByThread({
             threadId,
-            limit: options.messageLimit,
+            limit: options.messageLimit + 1,
           }).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -2426,12 +2537,17 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ]);
 
         if (Option.isNone(threadRow)) {
-          return Option.none<OrchestrationThread>();
+          return Option.none();
         }
+
+        const messagePage = sliceMessagePageRows({
+          rows: messageRows,
+          limit: options.messageLimit,
+        });
 
         const thread = buildThreadDetail({
           threadRow: threadRow.value,
-          messages: messageRows.map(mapMessageRow),
+          messages: messagePage.rows.map(mapMessageRow),
           proposedPlans: proposedPlanRows.map(mapProposedPlanRow),
           latestTaskPlan: latestTaskPlanFromRows(taskPlanRows),
           activities: activityRows.map(mapActivityMetadataRow),
@@ -2440,15 +2556,18 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           sessionRow,
         });
 
-        return Option.some(
-          yield* decodeThread(thread).pipe(
-            Effect.mapError(
-              toPersistenceDecodeError(
-                "ProjectionSnapshotQuery.getThreadDetailSubscriptionSnapshotById:decodeThread",
-              ),
+        const decodedThread = yield* decodeThread(thread).pipe(
+          Effect.mapError(
+            toPersistenceDecodeError(
+              "ProjectionSnapshotQuery.getThreadDetailSubscriptionSnapshotById:decodeThread",
             ),
           ),
         );
+
+        return Option.some({
+          thread: decodedThread,
+          messagePageInfo: messagePage.pageInfo,
+        });
       });
 
   return {
@@ -2466,6 +2585,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getThreadShellById,
     getThreadDetailById,
     getThreadDetailSubscriptionSnapshotById,
+    getThreadMessagesPage,
   } satisfies ProjectionSnapshotQueryShape;
 });
 

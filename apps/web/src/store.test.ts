@@ -17,8 +17,10 @@ import { describe, expect, it } from "vitest";
 import {
   applyOrchestrationEvent,
   applyOrchestrationEvents,
+  prependServerThreadMessagesPage,
   removeEnvironmentState,
   selectEnvironmentState,
+  selectThreadMessagePageInfoByRef,
   selectProjectsAcrossEnvironments,
   selectThreadByRef,
   selectThreadExistsByRef,
@@ -151,6 +153,17 @@ function makeState(thread: Thread): AppState {
         thread.messages.map((message) => [message.id, message] as const),
       ) as EnvironmentState["messageByThreadId"][ThreadId],
     },
+    messagePageInfoByThreadId: {
+      [thread.id]: {
+        oldestCursor: thread.messages[0]
+          ? {
+              createdAt: thread.messages[0].createdAt,
+              messageId: thread.messages[0].id,
+            }
+          : null,
+        hasOlderMessages: false,
+      },
+    },
     activityIdsByThreadId: {
       [thread.id]: thread.activities.map((activity) => activity.id),
     },
@@ -197,6 +210,7 @@ function makeEmptyState(overrides: Partial<AppState & EnvironmentState> = {}): A
     threadTurnStateById: {},
     messageIdsByThreadId: {},
     messageByThreadId: {},
+    messagePageInfoByThreadId: {},
     activityIdsByThreadId: {},
     activityByThreadId: {},
     proposedPlanIdsByThreadId: {},
@@ -390,6 +404,60 @@ describe("thread selection memoization", () => {
     expect(second).not.toBe(first);
     expect(second?.messages).toHaveLength(1);
     expect(second?.messages[0]?.text).toBe("new");
+  });
+
+  it("prepends paginated thread messages and updates the loaded-window cursor", () => {
+    const thread = makeThread({
+      messages: [
+        {
+          id: MessageId.make("message-2"),
+          role: "assistant",
+          text: "latest",
+          createdAt: "2026-02-13T00:02:00.000Z",
+          streaming: false,
+        },
+      ],
+    });
+    const ref = scopeThreadRef(thread.environmentId, thread.id);
+    const state = makeState(thread);
+
+    const next = prependServerThreadMessagesPage(
+      state,
+      {
+        threadId: thread.id,
+        messages: [
+          {
+            id: MessageId.make("message-1"),
+            role: "user",
+            text: "older",
+            turnId: null,
+            streaming: false,
+            createdAt: "2026-02-13T00:01:00.000Z",
+            updatedAt: "2026-02-13T00:01:00.000Z",
+          },
+        ],
+        pageInfo: {
+          oldestCursor: {
+            createdAt: "2026-02-13T00:01:00.000Z",
+            messageId: MessageId.make("message-1"),
+          },
+          hasOlderMessages: true,
+        },
+      },
+      thread.environmentId,
+    );
+
+    expect(selectThreadByRef(next, ref)?.messages.map((message) => message.id)).toEqual([
+      MessageId.make("message-1"),
+      MessageId.make("message-2"),
+    ]);
+    expect(selectThreadMessagePageInfoByRef(next, ref)).toEqual({
+      oldestCursor: {
+        createdAt: "2026-02-13T00:01:00.000Z",
+        messageId: MessageId.make("message-1"),
+      },
+      hasOlderMessages: true,
+    });
   });
 
   it("checks thread existence without materializing the full thread", () => {

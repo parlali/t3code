@@ -65,6 +65,9 @@ function buildProps() {
     timestampFormat: "24-hour" as const,
     workspaceRoot: undefined,
     onIsAtEndChange: vi.fn(),
+    hasOlderMessages: false,
+    isLoadingOlderMessages: false,
+    onLoadOlderMessages: vi.fn(),
   };
 }
 

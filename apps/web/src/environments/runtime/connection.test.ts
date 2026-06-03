@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import { createEnvironmentConnection } from "./connection";
@@ -45,6 +45,14 @@ function createTestClient(options?: { readonly reconnectTriggersShellResubscribe
       getTurnDiff: vi.fn(async () => undefined),
       getFullThreadDiff: vi.fn(async () => undefined),
       getCheckpointFileRestoreAvailability: vi.fn(async () => undefined),
+      getThreadMessagesPage: vi.fn(async () => ({
+        threadId: ThreadId.make("thread-messages-page-unused"),
+        messages: [],
+        pageInfo: {
+          oldestCursor: null,
+          hasOlderMessages: false,
+        },
+      })),
       subscribeShell: vi.fn(
         (listener: (event: any) => void, options?: { onResubscribe?: () => void }) => {
           shellListeners.add(listener);

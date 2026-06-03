@@ -61,7 +61,6 @@ const RIGHT_PANEL_WIDTH_STORAGE_KEY = "t3code:right-workspace-panel-width:v1";
 const NESTED_PANEL_WIDTH_STORAGE_KEY = "t3code:right-workspace-nested-width:v1";
 const RIGHT_PANEL_DEFAULT_WIDTH = 56 * 16;
 const RIGHT_PANEL_MIN_WIDTH = 28 * 16;
-const RIGHT_PANEL_MAX_WIDTH = 72 * 16;
 const NESTED_PANEL_DEFAULT_WIDTH = 20 * 16;
 const NESTED_PANEL_MIN_WIDTH = 16 * 16;
 const NESTED_PANEL_MAX_WIDTH = 30 * 16;
@@ -78,12 +77,8 @@ const RIGHT_RAIL_ITEMS: readonly RightRailItem[] = [
   { mode: "tasks", label: "Tasks", icon: ListTodoIcon },
 ];
 
-function clampPanelWidth(width: number): number {
-  const viewportMaximum =
-    typeof window === "undefined"
-      ? RIGHT_PANEL_MAX_WIDTH
-      : Math.min(RIGHT_PANEL_MAX_WIDTH, Math.max(RIGHT_PANEL_MIN_WIDTH, window.innerWidth - 240));
-  return Math.min(Math.max(width, RIGHT_PANEL_MIN_WIDTH), viewportMaximum);
+function normalizePanelWidth(width: number): number {
+  return Math.max(width, RIGHT_PANEL_MIN_WIDTH);
 }
 
 function clampNestedPanelWidth(width: number): number {
@@ -512,7 +507,7 @@ export function RightWorkspaceShell() {
   const activeSession = activeThread?.session ?? null;
   const autoOpenedPlanTurnRef = useRef<string | null>(null);
   const [panelWidth, setPanelWidth] = useState(() =>
-    readStoredNumber(RIGHT_PANEL_WIDTH_STORAGE_KEY, RIGHT_PANEL_DEFAULT_WIDTH, clampPanelWidth),
+    readStoredNumber(RIGHT_PANEL_WIDTH_STORAGE_KEY, RIGHT_PANEL_DEFAULT_WIDTH, normalizePanelWidth),
   );
   const [nestedPanelWidth, setNestedPanelWidth] = useState(() =>
     readStoredNumber(
@@ -542,9 +537,10 @@ export function RightWorkspaceShell() {
   // center can shrink to zero, at which point the chat is hidden — see below).
   const clampPanelWidthForViewport = useCallback((width: number) => {
     const v = viewportRef.current;
-    const maxByViewport = v.width > 0 ? v.width - v.sidebar - RAIL_WIDTH : RIGHT_PANEL_MAX_WIDTH;
-    const upper = Math.max(RIGHT_PANEL_MIN_WIDTH, Math.min(RIGHT_PANEL_MAX_WIDTH, maxByViewport));
-    return Math.min(Math.max(width, RIGHT_PANEL_MIN_WIDTH), upper);
+    const lower = Math.max(width, RIGHT_PANEL_MIN_WIDTH);
+    if (v.width <= 0) return lower;
+    const upper = Math.max(RIGHT_PANEL_MIN_WIDTH, v.width - v.sidebar - RAIL_WIDTH);
+    return Math.min(lower, upper);
   }, []);
 
   const patchState = useCallback(

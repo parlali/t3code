@@ -89,6 +89,9 @@ function buildProps() {
     timestampFormat: "locale" as const,
     workspaceRoot: undefined,
     onIsAtEndChange: () => {},
+    hasOlderMessages: false,
+    isLoadingOlderMessages: false,
+    onLoadOlderMessages: () => {},
   };
 }
 

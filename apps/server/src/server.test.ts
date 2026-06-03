@@ -678,6 +678,15 @@ const buildAppUnderTest = (options?: {
           getThreadShellById: () => Effect.succeed(Option.none()),
           getThreadDetailById: () => Effect.succeed(Option.none()),
           getThreadDetailSubscriptionSnapshotById: () => Effect.succeed(Option.none()),
+          getThreadMessagesPage: () =>
+            Effect.succeed({
+              threadId: ThreadId.make("thread-messages-page-unused"),
+              messages: [],
+              pageInfo: {
+                oldestCursor: null,
+                hasOlderMessages: false,
+              },
+            }),
           getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
           getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
@@ -3273,9 +3282,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       yield* buildAppUnderTest({
         layers: {
-          projectionSnapshotQuery: {
-            getSnapshot: () => Effect.succeed(snapshot),
-          },
           orchestrationEngine: {
             dispatch: () => Effect.succeed({ sequence: 7 }),
             readEvents: () => Stream.empty,
@@ -3294,6 +3300,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 fromTurnCount: 0,
                 toTurnCount: 1,
                 diff: "full-diff",
+              }),
+          },
+          projectionSnapshotQuery: {
+            getSnapshot: () => Effect.succeed(snapshot),
+            getThreadMessagesPage: (input) =>
+              Effect.succeed({
+                threadId: input.threadId,
+                messages: [],
+                pageInfo: {
+                  oldestCursor: null,
+                  hasOlderMessages: false,
+                },
               }),
           },
         },
@@ -3332,6 +3350,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
       assert.equal(fullDiffResult.diff, "full-diff");
+
+      const messagesPageResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.getThreadMessagesPage]({
+            threadId: ThreadId.make("thread-1"),
+            limit: 50,
+          }),
+        ),
+      );
+      assert.equal(messagesPageResult.threadId, ThreadId.make("thread-1"));
+      assert.equal(messagesPageResult.pageInfo.hasOlderMessages, false);
 
       const replayResult = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>

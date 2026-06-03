@@ -67,6 +67,7 @@ import {
 } from "../pendingUserInput";
 import {
   selectProjectsAcrossEnvironments,
+  selectThreadMessagePageInfoByRef,
   selectThreadsAcrossEnvironments,
   useStore,
 } from "../store";
@@ -237,6 +238,7 @@ const IMAGE_ONLY_BOOTSTRAP_PROMPT =
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const THREAD_MESSAGES_PAGE_SIZE = 50;
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -731,6 +733,9 @@ export default function ChatView(props: ChatViewProps) {
   const getComposer = useCallback(() => composerRef.current, [composerRef]);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollToBottomMounted = useDelayedUnmount(showScrollToBottom, 120);
+  const [loadingOlderMessagesThreadKey, setLoadingOlderMessagesThreadKey] = useState<string | null>(
+    null,
+  );
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
@@ -875,6 +880,12 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const activeThreadMessagePageInfo = useStore((state) =>
+    selectThreadMessagePageInfoByRef(state, activeThreadRef),
+  );
+  const hasOlderMessages = activeThreadMessagePageInfo?.hasOlderMessages === true;
+  const isLoadingOlderMessages =
+    activeThreadKey !== null && loadingOlderMessagesThreadKey === activeThreadKey;
   const activeThreadStatus = useThreadStatusStore((state) =>
     activeThreadKey ? state.statusByThreadKey[activeThreadKey] : undefined,
   );
@@ -1879,6 +1890,55 @@ export default function ChatView(props: ChatViewProps) {
     },
     [draftId, routeThreadRef, serverThread, setStoreThreadError],
   );
+  const loadOlderMessages = useCallback(() => {
+    if (routeKind !== "server") {
+      return;
+    }
+    if (!activeThreadKey || loadingOlderMessagesThreadKey === activeThreadKey) {
+      return;
+    }
+    if (!activeThreadMessagePageInfo?.hasOlderMessages) {
+      return;
+    }
+    const before = activeThreadMessagePageInfo.oldestCursor;
+    if (!before) {
+      return;
+    }
+    const api = readEnvironmentApi(environmentId);
+    if (!api) {
+      return;
+    }
+
+    setLoadingOlderMessagesThreadKey(activeThreadKey);
+    void api.orchestration
+      .getThreadMessagesPage({
+        threadId,
+        before,
+        limit: THREAD_MESSAGES_PAGE_SIZE,
+      })
+      .then((page) => {
+        useStore.getState().prependServerThreadMessagesPage(page, environmentId);
+      })
+      .catch((error) => {
+        setThreadError(
+          threadId,
+          error instanceof Error ? error.message : "Failed to load earlier messages.",
+        );
+      })
+      .finally(() => {
+        setLoadingOlderMessagesThreadKey((currentThreadKey) =>
+          currentThreadKey === activeThreadKey ? null : currentThreadKey,
+        );
+      });
+  }, [
+    activeThreadKey,
+    activeThreadMessagePageInfo,
+    environmentId,
+    loadingOlderMessagesThreadKey,
+    routeKind,
+    setThreadError,
+    threadId,
+  ]);
 
   const focusComposer = useCallback(() => {
     getComposer()?.focusAtEnd();
@@ -3682,6 +3742,9 @@ export default function ChatView(props: ChatViewProps) {
               timestampFormat={timestampFormat}
               workspaceRoot={activeWorkspaceRoot}
               onIsAtEndChange={onIsAtEndChange}
+              hasOlderMessages={hasOlderMessages}
+              isLoadingOlderMessages={isLoadingOlderMessages}
+              onLoadOlderMessages={loadOlderMessages}
             />
 
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}

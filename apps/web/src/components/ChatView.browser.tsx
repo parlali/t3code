@@ -295,6 +295,14 @@ function createMockEnvironmentApi(input: {
         checkpointRef: null,
         reason: "Not implemented in browser test.",
       })) as EnvironmentApi["orchestration"]["getCheckpointFileRestoreAvailability"],
+      getThreadMessagesPage: (async (input) => ({
+        threadId: input.threadId,
+        messages: [],
+        pageInfo: {
+          oldestCursor: null,
+          hasOlderMessages: false,
+        },
+      })) as EnvironmentApi["orchestration"]["getThreadMessagesPage"],
       getArchivedShellSnapshot: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getArchivedShellSnapshot"],

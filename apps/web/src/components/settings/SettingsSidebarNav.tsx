@@ -2,6 +2,7 @@ import { useCallback, type ComponentType } from "react";
 import {
   ArchiveIcon,
   ActivityIcon,
+  ArrowLeftIcon,
   GaugeIcon,
   GitBranchIcon,
   Link2Icon,
@@ -10,12 +11,17 @@ import {
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 
+import { useShellStore } from "../shell/shellStore";
+import { useNavigateToShellWorkspace } from "../shell/useShellNavigation";
 import {
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
+  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarSeparator,
   useSidebar,
 } from "../ui/sidebar";
 
@@ -89,5 +95,39 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         </SidebarMenu>
       </SidebarGroup>
     </SidebarContent>
+  );
+}
+
+export function SettingsSidebarPanel({ pathname }: { pathname: string }) {
+  const lastWorkspaceRoute = useShellStore((state) => state.lastWorkspaceRoute);
+  const navigateToWorkspace = useNavigateToShellWorkspace();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const handleBackClick = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    void navigateToWorkspace(lastWorkspaceRoute);
+  }, [isMobile, lastWorkspaceRoute, navigateToWorkspace, setOpenMobile]);
+
+  return (
+    <>
+      <SidebarHeader className="px-2 pt-3 pb-1">
+        <div className="px-2 text-[10px] font-medium tracking-wider text-muted-foreground/60 uppercase">
+          Settings
+        </div>
+      </SidebarHeader>
+      <SettingsSidebarNav pathname={pathname} />
+      <SidebarSeparator />
+      <SidebarFooter className="p-2">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton tooltip="Back to workspace" onClick={handleBackClick}>
+              <ArrowLeftIcon />
+              <span>Back</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+    </>
   );
 }

@@ -22,6 +22,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   getCheckpointFileRestoreAvailability: "orchestration.getCheckpointFileRestoreAvailability",
+  getThreadMessagesPage: "orchestration.getThreadMessagesPage",
   replayEvents: "orchestration.replayEvents",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
@@ -220,6 +221,18 @@ export const OrchestrationMessage = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type OrchestrationMessage = typeof OrchestrationMessage.Type;
+
+export const OrchestrationThreadMessageCursor = Schema.Struct({
+  createdAt: IsoDateTime,
+  messageId: MessageId,
+});
+export type OrchestrationThreadMessageCursor = typeof OrchestrationThreadMessageCursor.Type;
+
+export const OrchestrationThreadMessagePageInfo = Schema.Struct({
+  oldestCursor: Schema.NullOr(OrchestrationThreadMessageCursor),
+  hasOlderMessages: Schema.Boolean,
+});
+export type OrchestrationThreadMessagePageInfo = typeof OrchestrationThreadMessagePageInfo.Type;
 
 export const OrchestrationProposedPlanId = TrimmedNonEmptyString;
 export type OrchestrationProposedPlanId = typeof OrchestrationProposedPlanId.Type;
@@ -473,12 +486,14 @@ export type OrchestrationShellStreamItem = typeof OrchestrationShellStreamItem.T
 
 export const OrchestrationSubscribeThreadInput = Schema.Struct({
   threadId: ThreadId,
+  initialMessageLimit: Schema.optionalKey(NonNegativeInt),
 });
 export type OrchestrationSubscribeThreadInput = typeof OrchestrationSubscribeThreadInput.Type;
 
 export const OrchestrationThreadDetailSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   thread: OrchestrationThread,
+  messagePageInfo: Schema.optionalKey(OrchestrationThreadMessagePageInfo),
 });
 export type OrchestrationThreadDetailSnapshot = typeof OrchestrationThreadDetailSnapshot.Type;
 
@@ -1252,6 +1267,22 @@ export const OrchestrationCheckpointFileRestoreAvailability = Schema.Struct({
 export type OrchestrationCheckpointFileRestoreAvailability =
   typeof OrchestrationCheckpointFileRestoreAvailability.Type;
 
+export const OrchestrationGetThreadMessagesPageInput = Schema.Struct({
+  threadId: ThreadId,
+  before: Schema.optionalKey(Schema.NullOr(OrchestrationThreadMessageCursor)),
+  limit: NonNegativeInt,
+});
+export type OrchestrationGetThreadMessagesPageInput =
+  typeof OrchestrationGetThreadMessagesPageInput.Type;
+
+export const OrchestrationGetThreadMessagesPageResult = Schema.Struct({
+  threadId: ThreadId,
+  messages: Schema.Array(OrchestrationMessage),
+  pageInfo: OrchestrationThreadMessagePageInfo,
+});
+export type OrchestrationGetThreadMessagesPageResult =
+  typeof OrchestrationGetThreadMessagesPageResult.Type;
+
 export const OrchestrationReplayEventsInput = Schema.Struct({
   fromSequenceExclusive: NonNegativeInt,
 });
@@ -1276,6 +1307,10 @@ export const OrchestrationRpcSchemas = {
   getCheckpointFileRestoreAvailability: {
     input: OrchestrationGetCheckpointFileRestoreAvailabilityInput,
     output: OrchestrationCheckpointFileRestoreAvailability,
+  },
+  getThreadMessagesPage: {
+    input: OrchestrationGetThreadMessagesPageInput,
+    output: OrchestrationGetThreadMessagesPageResult,
   },
   replayEvents: {
     input: OrchestrationReplayEventsInput,

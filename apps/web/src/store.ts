@@ -3,6 +3,7 @@ import type {
   MessageId,
   OrchestrationCheckpointSummary,
   OrchestrationEvent,
+  OrchestrationGetThreadMessagesPageResult,
   OrchestrationLatestTurn,
   OrchestrationMessage,
   OrchestrationProposedPlan,
@@ -14,6 +15,7 @@ import type {
   OrchestrationTaskPlan,
   OrchestrationThread,
   OrchestrationThreadShell,
+  OrchestrationThreadMessagePageInfo,
   OrchestrationThreadActivity,
   ProjectId,
   ScopedProjectRef,
@@ -80,6 +82,7 @@ export interface EnvironmentState {
   // ---------------------------------------------------------------------------
   messageIdsByThreadId: Record<ThreadId, MessageId[]>;
   messageByThreadId: Record<ThreadId, Record<MessageId, ChatMessage>>;
+  messagePageInfoByThreadId: Record<ThreadId, OrchestrationThreadMessagePageInfo>;
   activityIdsByThreadId: Record<ThreadId, string[]>;
   activityByThreadId: Record<ThreadId, Record<string, OrchestrationThreadActivity>>;
   proposedPlanIdsByThreadId: Record<ThreadId, string[]>;
@@ -115,6 +118,7 @@ const initialEnvironmentState: EnvironmentState = {
   threadTurnStateById: {},
   messageIdsByThreadId: {},
   messageByThreadId: {},
+  messagePageInfoByThreadId: {},
   activityIdsByThreadId: {},
   activityByThreadId: {},
   proposedPlanIdsByThreadId: {},
@@ -490,6 +494,40 @@ function buildMessageSlice(thread: Thread): {
   };
 }
 
+function compareMessages(left: ChatMessage, right: ChatMessage): number {
+  return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+}
+
+function mergeThreadMessages(
+  currentMessages: ReadonlyArray<ChatMessage>,
+  nextMessages: ReadonlyArray<ChatMessage>,
+): ChatMessage[] {
+  const byId = new Map<MessageId, ChatMessage>();
+  for (const message of currentMessages) {
+    byId.set(message.id, message);
+  }
+  for (const message of nextMessages) {
+    byId.set(message.id, message);
+  }
+  return [...byId.values()].toSorted(compareMessages);
+}
+
+function messagePageInfoForLoadedMessages(input: {
+  messages: ReadonlyArray<ChatMessage>;
+  hasOlderMessages: boolean;
+}): OrchestrationThreadMessagePageInfo {
+  const oldest = input.messages[0];
+  return {
+    oldestCursor: oldest
+      ? {
+          createdAt: oldest.createdAt,
+          messageId: oldest.id,
+        }
+      : null,
+    hasOlderMessages: input.hasOlderMessages,
+  };
+}
+
 function buildActivitySlice(thread: Thread): {
   ids: string[];
   byId: Record<string, OrchestrationThreadActivity>;
@@ -654,6 +692,7 @@ function writeThreadState(
 
   if (previousThread?.messages !== nextThread.messages) {
     const nextMessageSlice = buildMessageSlice(nextThread);
+    const currentPageInfo = nextState.messagePageInfoByThreadId[nextThread.id];
     nextState = {
       ...nextState,
       messageIdsByThreadId: {
@@ -664,6 +703,17 @@ function writeThreadState(
         ...nextState.messageByThreadId,
         [nextThread.id]: nextMessageSlice.byId,
       },
+      ...(currentPageInfo
+        ? {
+            messagePageInfoByThreadId: {
+              ...nextState.messagePageInfoByThreadId,
+              [nextThread.id]: messagePageInfoForLoadedMessages({
+                messages: nextThread.messages,
+                hasOlderMessages: currentPageInfo.hasOlderMessages,
+              }),
+            },
+          }
+        : {}),
     };
   }
 
@@ -842,6 +892,8 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
   const { [threadId]: _removedTurnState, ...threadTurnStateById } = state.threadTurnStateById;
   const { [threadId]: _removedMessageIds, ...messageIdsByThreadId } = state.messageIdsByThreadId;
   const { [threadId]: _removedMessages, ...messageByThreadId } = state.messageByThreadId;
+  const { [threadId]: _removedMessagePageInfo, ...messagePageInfoByThreadId } =
+    state.messagePageInfoByThreadId;
   const { [threadId]: _removedActivityIds, ...activityIdsByThreadId } = state.activityIdsByThreadId;
   const { [threadId]: _removedActivities, ...activityByThreadId } = state.activityByThreadId;
   const { [threadId]: _removedPlanIds, ...proposedPlanIdsByThreadId } =
@@ -863,6 +915,7 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
     threadTurnStateById,
     messageIdsByThreadId,
     messageByThreadId,
+    messagePageInfoByThreadId,
     activityIdsByThreadId,
     activityByThreadId,
     proposedPlanIdsByThreadId,
@@ -1234,6 +1287,10 @@ function syncEnvironmentShellSnapshot(
     sidebarThreadSummaryById: {},
     messageIdsByThreadId: retainThreadScopedRecord(state.messageIdsByThreadId, nextThreadIds),
     messageByThreadId: retainThreadScopedRecord(state.messageByThreadId, nextThreadIds),
+    messagePageInfoByThreadId: retainThreadScopedRecord(
+      state.messagePageInfoByThreadId,
+      nextThreadIds,
+    ),
     activityIdsByThreadId: retainThreadScopedRecord(state.activityIdsByThreadId, nextThreadIds),
     activityByThreadId: retainThreadScopedRecord(state.activityByThreadId, nextThreadIds),
     proposedPlanIdsByThreadId: retainThreadScopedRecord(
@@ -1277,14 +1334,55 @@ export function syncServerThreadDetail(
   state: AppState,
   thread: OrchestrationThread,
   environmentId: EnvironmentId,
+  messagePageInfo?: OrchestrationThreadMessagePageInfo | undefined,
 ): AppState {
   const environmentState = getStoredEnvironmentState(state, environmentId);
   const previousThread = getThreadFromEnvironmentState(environmentState, thread.id);
-  return commitEnvironmentState(
-    state,
-    environmentId,
-    writeThreadState(environmentState, mapThread(thread, environmentId), previousThread),
-  );
+  const nextThread = mapThread(thread, environmentId);
+  const nextEnvironmentState = writeThreadState(environmentState, nextThread, previousThread);
+  const nextMessagePageInfo =
+    messagePageInfo ??
+    messagePageInfoForLoadedMessages({
+      messages: nextThread.messages,
+      hasOlderMessages: false,
+    });
+  return commitEnvironmentState(state, environmentId, {
+    ...nextEnvironmentState,
+    messagePageInfoByThreadId: {
+      ...nextEnvironmentState.messagePageInfoByThreadId,
+      [thread.id]: nextMessagePageInfo,
+    },
+  });
+}
+
+export function prependServerThreadMessagesPage(
+  state: AppState,
+  page: OrchestrationGetThreadMessagesPageResult,
+  environmentId: EnvironmentId,
+): AppState {
+  const environmentState = getStoredEnvironmentState(state, environmentId);
+  const currentThread = getThreadFromEnvironmentState(environmentState, page.threadId);
+  if (!currentThread) {
+    return state;
+  }
+
+  const pageMessages = page.messages.map((message) => mapMessage(environmentId, message));
+  const messages = mergeThreadMessages(pageMessages, currentThread.messages);
+  const nextThread = {
+    ...currentThread,
+    messages,
+  };
+  const nextEnvironmentState = writeThreadState(environmentState, nextThread, currentThread);
+  return commitEnvironmentState(state, environmentId, {
+    ...nextEnvironmentState,
+    messagePageInfoByThreadId: {
+      ...nextEnvironmentState.messagePageInfoByThreadId,
+      [page.threadId]: messagePageInfoForLoadedMessages({
+        messages,
+        hasOlderMessages: page.pageInfo.hasOlderMessages,
+      }),
+    },
+  });
 }
 
 function applyEnvironmentOrchestrationEvent(
@@ -2016,6 +2114,15 @@ export function selectSidebarThreadSummaryByRef(
     : undefined;
 }
 
+export function selectThreadMessagePageInfoByRef(
+  state: AppState,
+  ref: ScopedThreadRef | null | undefined,
+): OrchestrationThreadMessagePageInfo | undefined {
+  return ref
+    ? selectEnvironmentState(state, ref.environmentId).messagePageInfoByThreadId[ref.threadId]
+    : undefined;
+}
+
 export function selectThreadIdsByProjectRef(
   state: AppState,
   ref: ScopedProjectRef | null | undefined,
@@ -2129,7 +2236,15 @@ interface AppStore extends AppState {
     snapshot: OrchestrationShellSnapshot,
     environmentId: EnvironmentId,
   ) => void;
-  syncServerThreadDetail: (thread: OrchestrationThread, environmentId: EnvironmentId) => void;
+  syncServerThreadDetail: (
+    thread: OrchestrationThread,
+    environmentId: EnvironmentId,
+    messagePageInfo?: OrchestrationThreadMessagePageInfo | undefined,
+  ) => void;
+  prependServerThreadMessagesPage: (
+    page: OrchestrationGetThreadMessagesPageResult,
+    environmentId: EnvironmentId,
+  ) => void;
   applyOrchestrationEvent: (event: OrchestrationEvent, environmentId: EnvironmentId) => void;
   applyOrchestrationEvents: (
     events: ReadonlyArray<OrchestrationEvent>,
@@ -2152,8 +2267,10 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => removeEnvironmentState(state, environmentId)),
   syncServerShellSnapshot: (snapshot, environmentId) =>
     set((state) => syncServerShellSnapshot(state, snapshot, environmentId)),
-  syncServerThreadDetail: (thread, environmentId) =>
-    set((state) => syncServerThreadDetail(state, thread, environmentId)),
+  syncServerThreadDetail: (thread, environmentId, messagePageInfo) =>
+    set((state) => syncServerThreadDetail(state, thread, environmentId, messagePageInfo)),
+  prependServerThreadMessagesPage: (page, environmentId) =>
+    set((state) => prependServerThreadMessagesPage(state, page, environmentId)),
   applyOrchestrationEvent: (event, environmentId) =>
     set((state) => applyOrchestrationEvent(state, event, environmentId)),
   applyOrchestrationEvents: (events, environmentId) =>

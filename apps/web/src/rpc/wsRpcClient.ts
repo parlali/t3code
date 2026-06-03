@@ -192,6 +192,9 @@ export interface WsRpcClient {
     readonly getCheckpointFileRestoreAvailability: RpcUnaryMethod<
       typeof ORCHESTRATION_WS_METHODS.getCheckpointFileRestoreAvailability
     >;
+    readonly getThreadMessagesPage: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.getThreadMessagesPage
+    >;
     readonly getArchivedShellSnapshot: RpcUnaryNoArgMethod<
       typeof ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot
     >;
@@ -476,6 +479,10 @@ export function createWsRpcClient(
       getCheckpointFileRestoreAvailability: (input) =>
         transport.request((client) =>
           client[ORCHESTRATION_WS_METHODS.getCheckpointFileRestoreAvailability](input),
+        ),
+      getThreadMessagesPage: (input) =>
+        transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.getThreadMessagesPage](input),
         ),
       getArchivedShellSnapshot: () =>
         transport.request((client) =>

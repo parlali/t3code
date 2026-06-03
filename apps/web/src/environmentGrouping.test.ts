@@ -88,6 +88,7 @@ function makeEmptyEnvironmentState(): EnvironmentState {
     threadTurnStateById: {},
     messageIdsByThreadId: {},
     messageByThreadId: {},
+    messagePageInfoByThreadId: {},
     activityIdsByThreadId: {},
     activityByThreadId: {},
     proposedPlanIdsByThreadId: {},

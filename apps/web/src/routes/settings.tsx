@@ -2,7 +2,6 @@ import { RotateCcwIcon } from "lucide-react";
 import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 
-import { SettingsSidebarNav } from "../components/settings/SettingsSidebarNav";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { useShellStore } from "../components/shell/shellStore";
 import { useNavigateToShellWorkspace } from "../components/shell/useShellNavigation";
@@ -56,7 +55,7 @@ function SettingsContentLayout() {
     <SidebarInset className="h-full min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         {!isElectron && (
-          <header className="border-b border-border px-3 py-2 sm:px-5">
+          <header className="shrink-0 border-b border-border px-3 py-2 sm:px-5">
             <div className="flex min-h-7 items-center gap-2 sm:min-h-6">
               <span className="text-sm font-medium text-foreground">Settings</span>
               {showRestoreDefaults ? (
@@ -81,11 +80,8 @@ function SettingsContentLayout() {
           </div>
         )}
 
-        <div key={restoreSignal} className="min-h-0 flex flex-1">
-          <aside className="hidden w-56 shrink-0 border-r border-border bg-card/35 md:block">
-            <SettingsSidebarNav pathname={location.pathname} />
-          </aside>
-          <div className="min-h-0 min-w-0 flex-1">
+        <div key={restoreSignal} className="flex min-h-0 flex-1 overflow-hidden">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <Outlet />
           </div>
         </div>
