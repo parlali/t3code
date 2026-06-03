@@ -48,19 +48,20 @@ import { startResizeInteraction, type ResizeInteractionHandle } from "../ui/resi
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkspaceWorkbench } from "../WorkspaceWorkbench";
 import { resolveWorkbenchRelativePath } from "../workbench";
+import {
+  clampRightWorkspacePanelWidth,
+  RIGHT_WORKSPACE_PANEL_DEFAULT_WIDTH,
+  RIGHT_WORKSPACE_PANEL_MIN_WIDTH,
+  shouldHideRightWorkspaceCenter,
+} from "./rightWorkspacePanelLayout";
 import { SidePanelWorkbenchMode } from "./SidePanelWorkbenchMode";
 import { useShellStore } from "./shellStore";
 import { useActiveShellContext } from "./useActiveShellContext";
-
-const RAIL_WIDTH = 48;
-const CENTER_MIN_WIDTH = 13 * 16;
 
 const LazyPlanSidebar = lazy(() => import("../PlanSidebar"));
 
 const RIGHT_PANEL_WIDTH_STORAGE_KEY = "t3code:right-workspace-panel-width:v1";
 const NESTED_PANEL_WIDTH_STORAGE_KEY = "t3code:right-workspace-nested-width:v1";
-const RIGHT_PANEL_DEFAULT_WIDTH = 56 * 16;
-const RIGHT_PANEL_MIN_WIDTH = 28 * 16;
 const NESTED_PANEL_DEFAULT_WIDTH = 20 * 16;
 const NESTED_PANEL_MIN_WIDTH = 16 * 16;
 const NESTED_PANEL_MAX_WIDTH = 30 * 16;
@@ -78,7 +79,7 @@ const RIGHT_RAIL_ITEMS: readonly RightRailItem[] = [
 ];
 
 function normalizePanelWidth(width: number): number {
-  return Math.max(width, RIGHT_PANEL_MIN_WIDTH);
+  return Math.max(width, RIGHT_WORKSPACE_PANEL_MIN_WIDTH);
 }
 
 function clampNestedPanelWidth(width: number): number {
@@ -507,7 +508,11 @@ export function RightWorkspaceShell() {
   const activeSession = activeThread?.session ?? null;
   const autoOpenedPlanTurnRef = useRef<string | null>(null);
   const [panelWidth, setPanelWidth] = useState(() =>
-    readStoredNumber(RIGHT_PANEL_WIDTH_STORAGE_KEY, RIGHT_PANEL_DEFAULT_WIDTH, normalizePanelWidth),
+    readStoredNumber(
+      RIGHT_PANEL_WIDTH_STORAGE_KEY,
+      RIGHT_WORKSPACE_PANEL_DEFAULT_WIDTH,
+      normalizePanelWidth,
+    ),
   );
   const [nestedPanelWidth, setNestedPanelWidth] = useState(() =>
     readStoredNumber(
@@ -533,14 +538,15 @@ export function RightWorkspaceShell() {
   }));
   const viewportRef = useRef(viewport);
 
-  // Caps the panel so sidebar + panel + rail never exceed the viewport (the
-  // center can shrink to zero, at which point the chat is hidden — see below).
+  // Cap the panel so a usable chat column survives whenever the viewport can
+  // fit both the minimum chat and the minimum right panel.
   const clampPanelWidthForViewport = useCallback((width: number) => {
     const v = viewportRef.current;
-    const lower = Math.max(width, RIGHT_PANEL_MIN_WIDTH);
-    if (v.width <= 0) return lower;
-    const upper = Math.max(RIGHT_PANEL_MIN_WIDTH, v.width - v.sidebar - RAIL_WIDTH);
-    return Math.min(lower, upper);
+    return clampRightWorkspacePanelWidth({
+      panelWidth: width,
+      sidebarWidth: v.sidebar,
+      viewportWidth: v.width,
+    });
   }, []);
 
   const patchState = useCallback(
@@ -760,15 +766,18 @@ export function RightWorkspaceShell() {
   }, [workbenchMode, nestedOpen, patchState]);
 
   const effectivePanelWidth = clampPanelWidthForViewport(panelWidth);
-  // The open workbench has squeezed the center chat below a usable width: hide
-  // the chat entirely and let the panel fill (see AppSidebarLayout). Suspended
-  // mid-drag so the outer resize rail does not vanish under the pointer.
+  // If the viewport cannot fit both minimum columns, hide the chat entirely and
+  // let the panel fill (see AppSidebarLayout). Suspended mid-drag so the outer
+  // resize rail does not vanish under the pointer.
   const centerHidden =
     Boolean(state?.panelOpen) &&
     workbenchMode !== null &&
     !outerDragActive &&
-    viewport.width > 0 &&
-    viewport.width - viewport.sidebar - RAIL_WIDTH - effectivePanelWidth < CENTER_MIN_WIDTH;
+    shouldHideRightWorkspaceCenter({
+      panelWidth: effectivePanelWidth,
+      sidebarWidth: viewport.sidebar,
+      viewportWidth: viewport.width,
+    });
 
   const setCenterHidden = useShellStore((store) => store.setCenterHidden);
   useEffect(() => {
