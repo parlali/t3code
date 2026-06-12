@@ -1,14 +1,14 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 
-import type { ServerConfigShape } from "../../config.ts";
-import { ServerConfig } from "../../config.ts";
-import { ServerAuthPolicy } from "../Services/ServerAuthPolicy.ts";
-import { ServerAuthPolicyLive } from "./ServerAuthPolicy.ts";
+import type { ServerConfigShape } from "../config.ts";
+import { ServerConfig } from "../config.ts";
+import * as EnvironmentAuthPolicy from "./EnvironmentAuthPolicy.ts";
 
-const makeServerAuthPolicyLayer = (overrides?: Partial<ServerConfigShape>) =>
-  ServerAuthPolicyLive.pipe(
+const makeEnvironmentAuthPolicyLayer = (overrides?: Partial<ServerConfigShape>) =>
+  EnvironmentAuthPolicy.layer.pipe(
     Layer.provide(
       Layer.effect(
         ServerConfig,
@@ -25,10 +25,10 @@ const makeServerAuthPolicyLayer = (overrides?: Partial<ServerConfigShape>) =>
     ),
   );
 
-it.layer(NodeServices.layer)("ServerAuthPolicyLive", (it) => {
+it.layer(NodeServices.layer)("EnvironmentAuthPolicy.layer", (it) => {
   it.effect("uses desktop-managed-local policy for desktop mode", () =>
     Effect.gen(function* () {
-      const policy = yield* ServerAuthPolicy;
+      const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
       const descriptor = yield* policy.getDescriptor();
 
       expect(descriptor.policy).toBe("desktop-managed-local");
@@ -36,7 +36,7 @@ it.layer(NodeServices.layer)("ServerAuthPolicyLive", (it) => {
       expect(descriptor.sessionCookieName).toBe("t3_session_3773");
     }).pipe(
       Effect.provide(
-        makeServerAuthPolicyLayer({
+        makeEnvironmentAuthPolicyLayer({
           mode: "desktop",
           port: 3773,
         }),
@@ -46,14 +46,14 @@ it.layer(NodeServices.layer)("ServerAuthPolicyLive", (it) => {
 
   it.effect("uses remote-reachable policy for desktop mode when bound beyond loopback", () =>
     Effect.gen(function* () {
-      const policy = yield* ServerAuthPolicy;
+      const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
       const descriptor = yield* policy.getDescriptor();
 
       expect(descriptor.policy).toBe("remote-reachable");
       expect(descriptor.bootstrapMethods).toEqual(["desktop-bootstrap", "one-time-token"]);
     }).pipe(
       Effect.provide(
-        makeServerAuthPolicyLayer({
+        makeEnvironmentAuthPolicyLayer({
           mode: "desktop",
           host: "0.0.0.0",
         }),
@@ -63,7 +63,7 @@ it.layer(NodeServices.layer)("ServerAuthPolicyLive", (it) => {
 
   it.effect("uses loopback-browser policy for loopback web hosts", () =>
     Effect.gen(function* () {
-      const policy = yield* ServerAuthPolicy;
+      const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
       const descriptor = yield* policy.getDescriptor();
 
       expect(descriptor.policy).toBe("loopback-browser");
@@ -71,7 +71,7 @@ it.layer(NodeServices.layer)("ServerAuthPolicyLive", (it) => {
       expect(descriptor.sessionCookieName).toBe("t3_session");
     }).pipe(
       Effect.provide(
-        makeServerAuthPolicyLayer({
+        makeEnvironmentAuthPolicyLayer({
           mode: "web",
           host: "127.0.0.1",
         }),
@@ -81,14 +81,14 @@ it.layer(NodeServices.layer)("ServerAuthPolicyLive", (it) => {
 
   it.effect("uses remote-reachable policy for wildcard web hosts", () =>
     Effect.gen(function* () {
-      const policy = yield* ServerAuthPolicy;
+      const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
       const descriptor = yield* policy.getDescriptor();
 
       expect(descriptor.policy).toBe("remote-reachable");
       expect(descriptor.bootstrapMethods).toEqual(["one-time-token"]);
     }).pipe(
       Effect.provide(
-        makeServerAuthPolicyLayer({
+        makeEnvironmentAuthPolicyLayer({
           mode: "web",
           host: "0.0.0.0",
         }),
@@ -98,13 +98,13 @@ it.layer(NodeServices.layer)("ServerAuthPolicyLive", (it) => {
 
   it.effect("uses remote-reachable policy for non-loopback web hosts", () =>
     Effect.gen(function* () {
-      const policy = yield* ServerAuthPolicy;
+      const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
       const descriptor = yield* policy.getDescriptor();
 
       expect(descriptor.policy).toBe("remote-reachable");
     }).pipe(
       Effect.provide(
-        makeServerAuthPolicyLayer({
+        makeEnvironmentAuthPolicyLayer({
           mode: "web",
           host: "192.168.1.50",
         }),
@@ -112,20 +112,19 @@ it.layer(NodeServices.layer)("ServerAuthPolicyLive", (it) => {
     ),
   );
 
-  it.effect("uses unsafe-no-auth policy when explicitly disabled", () =>
+  it.effect("uses unsafe-no-auth policy when explicit no-auth mode is enabled", () =>
     Effect.gen(function* () {
-      const policy = yield* ServerAuthPolicy;
+      const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
       const descriptor = yield* policy.getDescriptor();
 
       expect(descriptor.policy).toBe("unsafe-no-auth");
       expect(descriptor.bootstrapMethods).toEqual([]);
-      expect(descriptor.sessionMethods).toEqual([]);
     }).pipe(
       Effect.provide(
-        makeServerAuthPolicyLayer({
+        makeEnvironmentAuthPolicyLayer({
+          unsafeNoAuth: true,
           mode: "web",
           host: "0.0.0.0",
-          unsafeNoAuth: true,
         }),
       ),
     ),

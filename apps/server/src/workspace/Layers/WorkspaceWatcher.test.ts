@@ -19,6 +19,7 @@ import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { WorkspaceEntries } from "../Services/WorkspaceEntries.ts";
 import { WorkspaceWatcher } from "../Services/WorkspaceWatcher.ts";
+import { isPathIgnoredByWorkspaceWatcher } from "../ignoredPaths.ts";
 import { WorkspaceEntriesLive } from "./WorkspaceEntries.ts";
 import { WorkspacePathsLive } from "./WorkspacePaths.ts";
 import { WorkspaceWatcherLive } from "./WorkspaceWatcher.ts";
@@ -144,13 +145,25 @@ it.layer(TestLayer)("WorkspaceWatcherLive", (it) => {
         yield* writeTextFile(cwd, ".env", "TOKEN=local\n");
 
         const event = yield* waitForEvent(subscription.changed);
-        expect(event).toEqual({ type: "entries-changed", cwd });
+        expect(event).toMatchObject({ type: "entries-changed", cwd });
+        if (event.type !== "entries-changed") {
+          throw new Error(`Expected entries-changed event, received ${event.type}`);
+        }
+        expect(event.changedPaths).toContain(".env");
 
         const workspaceEntries = yield* WorkspaceEntries;
         const listed = yield* workspaceEntries.list({ cwd, limit: 100 });
         expect(listed.entries.map((entry) => entry.path)).toContain(".env");
 
         yield* Fiber.interrupt(subscription.fiber);
+      }),
+    );
+
+    it.effect("classifies noisy log file changes as ignored", () =>
+      Effect.sync(() => {
+        expect(isPathIgnoredByWorkspaceWatcher("tmp/issue90-logs/debug.log")).toBe(true);
+        expect(isPathIgnoredByWorkspaceWatcher("logs/server.trace")).toBe(true);
+        expect(isPathIgnoredByWorkspaceWatcher("src/log.ts")).toBe(false);
       }),
     );
 

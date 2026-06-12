@@ -12,9 +12,10 @@ import {
   type WorkspaceWatcherShape,
 } from "../Services/WorkspaceWatcher.ts";
 import { WorkspacePaths } from "../Services/WorkspacePaths.ts";
-import { IGNORED_WORKSPACE_DIRECTORY_NAMES } from "../ignoredPaths.ts";
+import { isPathIgnoredByWorkspaceWatcher } from "../ignoredPaths.ts";
 
-const WORKSPACE_WATCH_DEBOUNCE_MS = 75;
+const WORKSPACE_WATCH_DEBOUNCE_MS = 750;
+const WORKSPACE_WATCH_CHANGED_PATH_LIMIT = 100;
 
 const WORKSPACE_WATCH_EVENTS = new Set(["add", "addDir", "change", "unlink", "unlinkDir"]);
 
@@ -30,14 +31,19 @@ function toPosixPath(input: string): string {
   return input.replaceAll("\\", "/");
 }
 
-function isIgnoredWatchPath(cwd: string, candidatePath: string): boolean {
+function toRelativeWatchPath(cwd: string, candidatePath: string): string | null {
   const absolutePath = nodePath.isAbsolute(candidatePath)
     ? candidatePath
     : nodePath.join(cwd, candidatePath);
   const relativePath = toPosixPath(nodePath.relative(cwd, absolutePath));
-  if (!relativePath || relativePath === "." || relativePath === "..") return false;
-  if (relativePath.startsWith("../")) return false;
-  return relativePath.split("/").some((segment) => IGNORED_WORKSPACE_DIRECTORY_NAMES.has(segment));
+  if (!relativePath || relativePath === "." || relativePath === "..") return null;
+  if (relativePath.startsWith("../")) return null;
+  return relativePath;
+}
+
+function isIgnoredWatchPath(cwd: string, candidatePath: string): boolean {
+  const relativePath = toRelativeWatchPath(cwd, candidatePath);
+  return relativePath !== null && isPathIgnoredByWorkspaceWatcher(relativePath);
 }
 
 function watcherError(cwd: string, operation: string, cause: unknown): WorkspaceWatcherError {
@@ -66,12 +72,19 @@ export const makeWorkspaceWatcher = Effect.gen(function* () {
           let closed = false;
           let settled = false;
           let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+          const changedPaths = new Set<string>();
 
           const publishChange = () => {
             debounceTimer = null;
             if (closed) return;
 
-            const event: ProjectEntriesStreamEvent = { type: "entries-changed", cwd };
+            const paths = Array.from(changedPaths).slice(0, WORKSPACE_WATCH_CHANGED_PATH_LIMIT);
+            changedPaths.clear();
+            const event: ProjectEntriesStreamEvent = {
+              type: "entries-changed",
+              cwd,
+              ...(paths.length > 0 ? { changedPaths: paths } : {}),
+            };
             runFork(
               workspaceEntries
                 .invalidate(cwd)
@@ -79,8 +92,14 @@ export const makeWorkspaceWatcher = Effect.gen(function* () {
             );
           };
 
-          const scheduleChange = () => {
+          const scheduleChange = (changedPath: string | undefined) => {
             if (!ready || closed) return;
+            if (changedPath) {
+              const relativePath = toRelativeWatchPath(cwd, changedPath);
+              if (relativePath !== null && !isPathIgnoredByWorkspaceWatcher(relativePath)) {
+                changedPaths.add(relativePath);
+              }
+            }
             if (debounceTimer !== null) {
               clearTimeout(debounceTimer);
             }
@@ -112,9 +131,9 @@ export const makeWorkspaceWatcher = Effect.gen(function* () {
             subscriberCount: 1,
           };
 
-          watcher.on("all", (eventName) => {
+          watcher.on("all", (eventName, changedPath) => {
             if (WORKSPACE_WATCH_EVENTS.has(eventName)) {
-              scheduleChange();
+              scheduleChange(changedPath);
             }
           });
           watcher.once("ready", () => {

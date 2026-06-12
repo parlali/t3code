@@ -247,12 +247,7 @@ export function SidePanelWorkbenchMode({
     },
     [refreshWorkspace],
   );
-  const handleEntriesResubscribe = useCallback(() => void refreshWorkspace(), [refreshWorkspace]);
-  useProjectEntriesSubscription(
-    { environmentId, cwd },
-    handleEntriesChanged,
-    handleEntriesResubscribe,
-  );
+  useProjectEntriesSubscription({ environmentId, cwd }, handleEntriesChanged);
 
   const expandCreateParent = useCallback((entryParentPath: string | null) => {
     if (!entryParentPath) return;

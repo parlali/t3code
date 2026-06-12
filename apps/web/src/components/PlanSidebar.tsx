@@ -35,7 +35,7 @@ function stepStatusIcon(
 ): React.ReactNode {
   if (status === "completed") {
     return (
-      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500">
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-success/10 text-success-foreground">
         <CheckIcon className="size-3" />
       </span>
     );
@@ -49,7 +49,7 @@ function stepStatusIcon(
       );
     }
     return (
-      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-blue-400">
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
         <LoaderIcon className="size-3 animate-spin" />
       </span>
     );
@@ -166,13 +166,14 @@ const PlanSidebar = memo(function PlanSidebar({
         title={
           <span className="flex min-w-0 items-center gap-2">
             <Badge
-              variant="secondary"
-              className="shrink-0 rounded-md bg-blue-500/10 px-1.5 py-0 text-[10px] font-semibold tracking-wide text-blue-400 uppercase"
+              variant="info"
+              size="sm"
+              className="shrink-0 rounded-md px-1.5 py-0 font-semibold tracking-wide uppercase"
             >
               {label}
             </Badge>
             {activePlan ? (
-              <span className="shrink-0 text-[11px] text-muted-foreground/60">
+              <span className="shrink-0 text-[11px] text-muted-foreground/60 tabular-nums">
                 {formatTimestamp(activePlan.updatedAt, timestampFormat)}
               </span>
             ) : null}
@@ -252,14 +253,14 @@ const PlanSidebar = memo(function PlanSidebar({
                 <div
                   key={`${step.status}:${step.step}`}
                   className={cn(
-                    "flex items-start gap-2.5 rounded-lg px-2.5 py-2 transition-colors duration-200",
+                    "flex items-center gap-2.5 rounded-lg px-2.5 py-2 transition-colors duration-200",
                     step.status === "inProgress" &&
                       activePlan.status === "active" &&
                       "bg-blue-500/5",
                     step.status === "completed" && "bg-emerald-500/5",
                   )}
                 >
-                  <div className="mt-0.5">{stepStatusIcon(step.status, activePlan.status)}</div>
+                  {stepStatusIcon(step.status, activePlan.status)}
                   <p
                     className={cn(
                       "text-[13px] leading-snug",

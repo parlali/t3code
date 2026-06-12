@@ -36,6 +36,7 @@ import { makeSqlitePersistenceLive } from "../src/persistence/Layers/Sqlite.ts";
 import { ProjectionCheckpointRepository } from "../src/persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionPendingApprovalRepository } from "../src/persistence/Services/ProjectionPendingApprovals.ts";
 import { makeAdapterRegistryMock } from "../src/provider/testUtils/providerAdapterRegistryMock.ts";
+import { makeProviderRegistryLayer } from "../src/provider/testUtils/providerRegistryMock.ts";
 import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapterRegistry.ts";
 import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSessionDirectory.ts";
 import { ServerSettingsService } from "../src/serverSettings.ts";
@@ -376,6 +377,7 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(orchestrationReactorLayer),
       Layer.provide(persistenceLayer),
       Layer.provideMerge(RepositoryIdentityResolverLive),
+      Layer.provideMerge(makeProviderRegistryLayer()),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),
       Layer.provideMerge(NodeServices.layer),

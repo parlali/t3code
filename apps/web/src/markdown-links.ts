@@ -78,6 +78,10 @@ export function rewriteMarkdownFileUriHref(href: string | undefined): string | n
   return `${target.path}${target.hash}`;
 }
 
+export function normalizeMarkdownLinkDestination(href: string): string {
+  return href.trim().replaceAll("&amp;", "&");
+}
+
 function looksLikePosixFilesystemPath(path: string): boolean {
   if (!path.startsWith("/")) return false;
   if (POSIX_FILE_ROOT_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;

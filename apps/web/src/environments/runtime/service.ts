@@ -151,7 +151,7 @@ let lastBrowserReconnectRequestAt = Number.NEGATIVE_INFINITY;
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
 const THREAD_DETAIL_INITIAL_MESSAGE_LIMIT = 6;
-const BROWSER_RECONNECT_REQUEST_COOLDOWN_MS = 2_000;
+const BROWSER_RECONNECT_REQUEST_COOLDOWN_MS = 10_000;
 const BROWSER_CONNECTION_HEALTH_CHECK_INTERVAL_MS = 30_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
 const NOOP = () => undefined;
@@ -1685,7 +1685,7 @@ function subscribeBrowserResumeReconnects(): () => void {
     if (document.visibilityState === "visible") {
       requestEnvironmentReconnect({
         reason: "visibilitychange",
-        selection: "all",
+        selection: "stale",
       });
     }
   };
@@ -1696,7 +1696,7 @@ function subscribeBrowserResumeReconnects(): () => void {
     }
     requestEnvironmentReconnect({
       reason: "pageshow",
-      selection: "all",
+      selection: "stale",
     });
   };
 
@@ -1706,7 +1706,7 @@ function subscribeBrowserResumeReconnects(): () => void {
     }
     requestEnvironmentReconnect({
       reason: "focus",
-      selection: "all",
+      selection: "stale",
     });
   };
 
@@ -1714,7 +1714,7 @@ function subscribeBrowserResumeReconnects(): () => void {
     setBrowserOnlineStatus(true);
     requestEnvironmentReconnect({
       reason: "online",
-      selection: "all",
+      selection: "stale",
     });
   };
 
@@ -1922,7 +1922,7 @@ export async function addSavedEnvironment(input: {
   await removeConnection(environmentId).catch(() => false);
   await ensureSavedEnvironmentConnection(record, {
     bearerToken: bearerSession.sessionToken,
-    role: bearerSession.role,
+    role: bearerSession.role ?? null,
   });
   return record;
 }

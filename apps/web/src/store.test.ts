@@ -6,21 +6,18 @@ import {
   EventId,
   MessageId,
   ProjectId,
-  ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
   TurnId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyOrchestrationEvent,
   applyOrchestrationEvents,
-  prependServerThreadMessagesPage,
   removeEnvironmentState,
   selectEnvironmentState,
-  selectThreadMessagePageInfoByRef,
   selectProjectsAcrossEnvironments,
   selectThreadByRef,
   selectThreadExistsByRef,
@@ -80,7 +77,6 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     turnDiffSummaries: [],
     activities: [],
     proposedPlans: [],
-    latestTaskPlan: null,
     error: null,
     createdAt: "2026-02-13T00:00:00.000Z",
     archivedAt: null,
@@ -153,17 +149,7 @@ function makeState(thread: Thread): AppState {
         thread.messages.map((message) => [message.id, message] as const),
       ) as EnvironmentState["messageByThreadId"][ThreadId],
     },
-    messagePageInfoByThreadId: {
-      [thread.id]: {
-        oldestCursor: thread.messages[0]
-          ? {
-              createdAt: thread.messages[0].createdAt,
-              messageId: thread.messages[0].id,
-            }
-          : null,
-        hasOlderMessages: false,
-      },
-    },
+    messagePageInfoByThreadId: {},
     activityIdsByThreadId: {
       [thread.id]: thread.activities.map((activity) => activity.id),
     },
@@ -180,9 +166,7 @@ function makeState(thread: Thread): AppState {
         thread.proposedPlans.map((plan) => [plan.id, plan] as const),
       ) as EnvironmentState["proposedPlanByThreadId"][ThreadId],
     },
-    taskPlanByThreadId: {
-      [thread.id]: thread.latestTaskPlan ?? null,
-    },
+    taskPlanByThreadId: {},
     turnDiffIdsByThreadId: {
       [thread.id]: thread.turnDiffSummaries.map((summary) => summary.turnId),
     },
@@ -404,60 +388,6 @@ describe("thread selection memoization", () => {
     expect(second).not.toBe(first);
     expect(second?.messages).toHaveLength(1);
     expect(second?.messages[0]?.text).toBe("new");
-  });
-
-  it("prepends paginated thread messages and updates the loaded-window cursor", () => {
-    const thread = makeThread({
-      messages: [
-        {
-          id: MessageId.make("message-2"),
-          role: "assistant",
-          text: "latest",
-          createdAt: "2026-02-13T00:02:00.000Z",
-          streaming: false,
-        },
-      ],
-    });
-    const ref = scopeThreadRef(thread.environmentId, thread.id);
-    const state = makeState(thread);
-
-    const next = prependServerThreadMessagesPage(
-      state,
-      {
-        threadId: thread.id,
-        messages: [
-          {
-            id: MessageId.make("message-1"),
-            role: "user",
-            text: "older",
-            turnId: null,
-            streaming: false,
-            createdAt: "2026-02-13T00:01:00.000Z",
-            updatedAt: "2026-02-13T00:01:00.000Z",
-          },
-        ],
-        pageInfo: {
-          oldestCursor: {
-            createdAt: "2026-02-13T00:01:00.000Z",
-            messageId: MessageId.make("message-1"),
-          },
-          hasOlderMessages: true,
-        },
-      },
-      thread.environmentId,
-    );
-
-    expect(selectThreadByRef(next, ref)?.messages.map((message) => message.id)).toEqual([
-      MessageId.make("message-1"),
-      MessageId.make("message-2"),
-    ]);
-    expect(selectThreadMessagePageInfoByRef(next, ref)).toEqual({
-      oldestCursor: {
-        createdAt: "2026-02-13T00:01:00.000Z",
-        messageId: MessageId.make("message-1"),
-      },
-      hasOlderMessages: true,
-    });
   });
 
   it("checks thread existence without materializing the full thread", () => {
@@ -850,9 +780,40 @@ describe("incremental orchestration updates", () => {
       localEnvironmentId,
     );
 
+    // A completed assistant message must not settle the turn while the
+    // session is still running it — providers emit interim assistant
+    // messages between tool calls.
     expect(threadsOf(next)[0]?.session?.status).toBe("running");
-    expect(threadsOf(next)[0]?.latestTurn?.state).toBe("completed");
+    expect(threadsOf(next)[0]?.latestTurn?.state).toBe("running");
+    expect(threadsOf(next)[0]?.latestTurn?.completedAt).toBeNull();
     expect(threadsOf(next)[0]?.messages).toHaveLength(1);
+
+    const settled = applyOrchestrationEvents(
+      next,
+      [
+        makeEvent(
+          "thread.session-set",
+          {
+            threadId: thread.id,
+            session: {
+              threadId: thread.id,
+              status: "ready",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: "2026-02-27T00:00:04.000Z",
+            },
+          },
+          { sequence: 4 },
+        ),
+      ],
+      localEnvironmentId,
+    );
+
+    // Leaving the running session status is the turn-end signal.
+    expect(threadsOf(settled)[0]?.latestTurn?.state).toBe("completed");
+    expect(threadsOf(settled)[0]?.latestTurn?.completedAt).toBe("2026-02-27T00:00:04.000Z");
   });
 
   it("does not regress latestTurn when an older turn diff completes late", () => {
@@ -886,179 +847,6 @@ describe("incremental orchestration updates", () => {
 
     expect(threadsOf(next)[0]?.turnDiffSummaries).toHaveLength(1);
     expect(threadsOf(next)[0]?.latestTurn).toEqual(threadsOf(state)[0]?.latestTurn);
-  });
-
-  it("updates live task plans from plan activities and settles them on turn completion", () => {
-    const turnId = TurnId.make("turn-1");
-    const state = makeState(
-      makeThread({
-        latestTurn: {
-          turnId,
-          state: "running",
-          requestedAt: "2026-02-27T00:00:00.000Z",
-          startedAt: "2026-02-27T00:00:01.000Z",
-          completedAt: null,
-          assistantMessageId: null,
-        },
-      }),
-    );
-
-    const withPlan = applyOrchestrationEvent(
-      state,
-      makeEvent("thread.activity-appended", {
-        threadId: ThreadId.make("thread-1"),
-        activity: {
-          id: EventId.make("plan-activity-1"),
-          tone: "info",
-          kind: "turn.plan.updated",
-          summary: "Plan updated",
-          payload: {
-            explanation: "  Fix task state  ",
-            plan: [
-              { content: "Find source", status: "completed" },
-              { content: "Patch projection", status: "in_progress" },
-            ],
-          },
-          turnId,
-          createdAt: "2026-02-27T00:00:02.000Z",
-        },
-      }),
-      localEnvironmentId,
-    );
-
-    expect(threadsOf(withPlan)[0]?.latestTaskPlan).toMatchObject({
-      status: "active",
-      explanation: "Fix task state",
-      steps: [
-        { step: "Find source", status: "completed" },
-        { step: "Patch projection", status: "inProgress" },
-      ],
-    });
-
-    const provisional = applyOrchestrationEvent(
-      withPlan,
-      makeEvent("thread.turn-diff-completed", {
-        threadId: ThreadId.make("thread-1"),
-        turnId,
-        checkpointTurnCount: 1,
-        checkpointRef: CheckpointRef.make("provider-diff:checkpoint-1"),
-        status: "missing",
-        files: [],
-        assistantMessageId: MessageId.make("assistant-1"),
-        completedAt: "2026-02-27T00:00:03.000Z",
-      }),
-      localEnvironmentId,
-    );
-
-    expect(threadsOf(provisional)[0]?.latestTaskPlan).toMatchObject({
-      status: "active",
-      settledAt: null,
-      steps: [
-        { step: "Find source", status: "completed" },
-        { step: "Patch projection", status: "inProgress" },
-      ],
-    });
-
-    const afterReadySession = applyOrchestrationEvent(
-      provisional,
-      makeEvent("thread.session-set", {
-        threadId: ThreadId.make("thread-1"),
-        session: {
-          threadId: ThreadId.make("thread-1"),
-          status: "ready",
-          providerName: "codex",
-          runtimeMode: "full-access",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: "2026-02-27T00:00:03.500Z",
-        },
-      }),
-      localEnvironmentId,
-    );
-
-    expect(threadsOf(afterReadySession)[0]?.latestTaskPlan).toMatchObject({
-      status: "active",
-      settledAt: null,
-    });
-
-    const completed = applyOrchestrationEvent(
-      afterReadySession,
-      makeEvent("thread.turn-diff-completed", {
-        threadId: ThreadId.make("thread-1"),
-        turnId,
-        checkpointTurnCount: 1,
-        checkpointRef: CheckpointRef.make("checkpoint-1"),
-        status: "ready",
-        files: [],
-        assistantMessageId: MessageId.make("assistant-1"),
-        completedAt: "2026-02-27T00:00:04.000Z",
-      }),
-      localEnvironmentId,
-    );
-
-    expect(threadsOf(completed)[0]?.latestTaskPlan).toMatchObject({
-      status: "completed",
-      settledAt: "2026-02-27T00:00:04.000Z",
-      steps: [
-        { step: "Find source", status: "completed" },
-        { step: "Patch projection", status: "completed" },
-      ],
-    });
-  });
-
-  it("initializes late task plan activities from settled turn state", () => {
-    const turnId = TurnId.make("turn-1");
-    const state = makeState(
-      makeThread({
-        latestTurn: {
-          turnId,
-          state: "completed",
-          requestedAt: "2026-02-27T00:00:00.000Z",
-          startedAt: "2026-02-27T00:00:01.000Z",
-          completedAt: "2026-02-27T00:00:03.000Z",
-          assistantMessageId: MessageId.make("assistant-1"),
-        },
-        session: {
-          provider: ProviderDriverKind.make("codex"),
-          status: "ready",
-          orchestrationStatus: "ready",
-          createdAt: "2026-02-27T00:00:03.000Z",
-          updatedAt: "2026-02-27T00:00:03.000Z",
-        },
-      }),
-    );
-
-    const next = applyOrchestrationEvent(
-      state,
-      makeEvent("thread.activity-appended", {
-        threadId: ThreadId.make("thread-1"),
-        activity: {
-          id: EventId.make("plan-activity-late"),
-          tone: "info",
-          kind: "turn.plan.updated",
-          summary: "Plan updated",
-          payload: {
-            plan: [
-              { content: "Inspect late event", status: "completed" },
-              { content: "Patch late event", status: "in_progress" },
-            ],
-          },
-          turnId,
-          createdAt: "2026-02-27T00:00:02.000Z",
-        },
-      }),
-      localEnvironmentId,
-    );
-
-    expect(threadsOf(next)[0]?.latestTaskPlan).toMatchObject({
-      status: "completed",
-      settledAt: "2026-02-27T00:00:03.000Z",
-      updatedAt: "2026-02-27T00:00:03.000Z",
-      steps: [
-        { step: "Inspect late event", status: "completed" },
-        { step: "Patch late event", status: "completed" },
-      ],
-    });
   });
 
   it("rebinds live turn diffs to the authoritative assistant message when it arrives later", () => {
@@ -1182,17 +970,6 @@ describe("incremental orchestration updates", () => {
             createdAt: "2026-02-27T00:00:02.000Z",
           },
         ],
-        latestTaskPlan: {
-          threadId: ThreadId.make("thread-1"),
-          turnId: TurnId.make("turn-2"),
-          status: "active",
-          explanation: null,
-          steps: [{ step: "Turn 2 task", status: "inProgress" }],
-          sourceActivityId: EventId.make("plan-activity-2"),
-          createdAt: "2026-02-27T00:00:02.000Z",
-          updatedAt: "2026-02-27T00:00:02.000Z",
-          settledAt: null,
-        },
         turnDiffSummaries: [
           {
             turnId: TurnId.make("turn-1"),
@@ -1219,8 +996,8 @@ describe("incremental orchestration updates", () => {
       makeEvent("thread.reverted", {
         threadId: ThreadId.make("thread-1"),
         turnCount: 1,
-        restoreFiles: false,
-        restoredFiles: false,
+        restoreFiles: true,
+        restoredFiles: true,
       }),
       localEnvironmentId,
     );
@@ -1233,7 +1010,6 @@ describe("incremental orchestration updates", () => {
     expect(threadsOf(next)[0]?.activities.map((activity) => activity.id)).toEqual([
       EventId.make("activity-1"),
     ]);
-    expect(threadsOf(next)[0]?.latestTaskPlan).toBeNull();
     expect(threadsOf(next)[0]?.turnDiffSummaries.map((summary) => summary.turnId)).toEqual([
       TurnId.make("turn-1"),
     ]);
@@ -1281,8 +1057,8 @@ describe("incremental orchestration updates", () => {
       makeEvent("thread.reverted", {
         threadId: thread.id,
         turnCount: 1,
-        restoreFiles: false,
-        restoredFiles: false,
+        restoreFiles: true,
+        restoredFiles: true,
       }),
       localEnvironmentId,
     );

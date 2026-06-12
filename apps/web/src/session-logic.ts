@@ -1,3 +1,5 @@
+import * as Option from "effect/Option";
+import * as Arr from "effect/Array";
 import {
   ApprovalRequestId,
   isToolLifecycleItemType,
@@ -43,11 +45,25 @@ export const PROVIDER_OPTIONS: Array<{
     available: true,
     pickerSidebarBadge: "new",
   },
+  {
+    value: ProviderDriverKind.make("grok"),
+    label: "Grok",
+    available: true,
+    pickerSidebarBadge: "new",
+  },
 ];
+
+export type WorkLogToolLifecycleStatus =
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined"
+  | "stopped";
 
 export interface WorkLogEntry {
   id: string;
   createdAt: string;
+  turnId?: TurnId | null;
   label: string;
   detail?: string;
   command?: string;
@@ -57,6 +73,10 @@ export interface WorkLogEntry {
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
+  /** From runtime item / task payload `status` when present (e.g. tool.updated). */
+  toolLifecycleStatus?: WorkLogToolLifecycleStatus;
+  /** Originating orchestration activity kind (e.g. `user-input.requested`) for row chrome. */
+  sourceActivityKind?: OrchestrationThreadActivity["kind"];
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -76,6 +96,16 @@ export interface PendingUserInput {
   requestId: ApprovalRequestId;
   createdAt: string;
   questions: ReadonlyArray<UserInputQuestion>;
+}
+
+export interface ActivePlanState {
+  createdAt: string;
+  turnId: TurnId | null;
+  explanation?: string | null;
+  steps: Array<{
+    step: string;
+    status: "pending" | "inProgress" | "completed";
+  }>;
 }
 
 export interface LatestProposedPlanState {
@@ -108,10 +138,137 @@ export type TimelineEntry =
       entry: WorkLogEntry;
     };
 
+export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean {
+  if (entry.tone === "tool" || entry.tone === "thinking" || entry.tone === "error") {
+    return true;
+  }
+  if (entry.command !== undefined && entry.command.trim().length > 0) {
+    return true;
+  }
+  if (entry.requestKind !== undefined) {
+    return true;
+  }
+  return entry.itemType !== undefined && isToolLifecycleItemType(entry.itemType);
+}
+
+/** Heuristic: providers often emit successful lifecycle status while error text lives in `detail` / `command`. */
+function toolDetailTextLooksLikeFailure(text: string): boolean {
+  const t = text.toLowerCase();
+  if (t.includes("file not found")) {
+    return true;
+  }
+  if (t.includes("no files found")) {
+    return true;
+  }
+  if (
+    t.includes("enoent") ||
+    t.includes("no such file or directory") ||
+    t.includes("no such file")
+  ) {
+    return true;
+  }
+  if (t.includes("cannot find path") && t.includes("because it does not exist")) {
+    return true;
+  }
+  if (t.includes("commandnotfoundexception")) {
+    return true;
+  }
+  if (t.includes("is not recognized as the name of a cmdlet")) {
+    return true;
+  }
+  if (t.includes("is not recognized") && t.includes("the term '")) {
+    return true;
+  }
+  if (t.includes("a parameter cannot be found that matches parameter name")) {
+    return true;
+  }
+  if (t.includes("command not found")) {
+    return true;
+  }
+  if (/<exited with exit code\s+[1-9]\d*\s*>/i.test(text)) {
+    return true;
+  }
+  if (/exit(?:ed)? with exit code\s+[1-9]\d*/i.test(text)) {
+    return true;
+  }
+  if (/exit code\s*[:\s]\s*[1-9]\d*\b/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+/** True when the row should show a failure affordance (explicit status/tone or error-shaped tool output). */
+export function workEntryIndicatesToolFailure(entry: WorkLogEntry): boolean {
+  if (entry.tone === "error") {
+    return true;
+  }
+  const ls = entry.toolLifecycleStatus;
+  if (ls === "failed" || ls === "declined") {
+    return true;
+  }
+  if (!workLogEntryIsToolLike(entry)) {
+    return false;
+  }
+  const parts: string[] = [];
+  if (entry.detail) {
+    parts.push(entry.detail);
+  }
+  if (entry.command) {
+    parts.push(entry.command);
+  }
+  const blob = parts.join("\n");
+  if (blob.length === 0) {
+    return false;
+  }
+  return toolDetailTextLooksLikeFailure(blob);
+}
+
+/** Tool/command row completed without failure (blue check affordance). */
+export function workEntryIndicatesToolSuccess(entry: WorkLogEntry): boolean {
+  if (!workLogEntryIsToolLike(entry)) {
+    return false;
+  }
+  if (workEntryIndicatesToolFailure(entry)) {
+    return false;
+  }
+  if (entry.tone === "thinking") {
+    return false;
+  }
+  const ls = entry.toolLifecycleStatus;
+  if (ls === "failed" || ls === "declined") {
+    return false;
+  }
+  if (ls === "inProgress") {
+    return false;
+  }
+  if (ls === "stopped") {
+    return false;
+  }
+  return true;
+}
+
+/** Tool-like row with neither clear success nor failure (empty, incomplete, in progress, etc.). */
+export function workEntryIndicatesToolNeutralStatus(entry: WorkLogEntry): boolean {
+  if (!workLogEntryIsToolLike(entry)) {
+    return false;
+  }
+  if (workEntryIndicatesToolFailure(entry)) {
+    return false;
+  }
+  if (workEntryIndicatesToolSuccess(entry)) {
+    return false;
+  }
+  return true;
+}
+
 export function formatDuration(durationMs: number): string {
   if (!Number.isFinite(durationMs) || durationMs < 0) return "0ms";
   if (durationMs < 1_000) return `${Math.max(1, Math.round(durationMs))}ms`;
-  if (durationMs < 10_000) return `${(durationMs / 1_000).toFixed(1)}s`;
+  if (durationMs < 10_000) {
+    const tenths = Math.round(durationMs / 100) / 10;
+    // 9.95s+ rounds up to the next bucket — render "10s", not "10.0s".
+    return tenths >= 10 ? "10s" : `${tenths.toFixed(1)}s`;
+  }
   if (durationMs < 60_000) return `${Math.round(durationMs / 1_000)}s`;
   const minutes = Math.floor(durationMs / 60_000);
   const seconds = Math.round((durationMs % 60_000) / 1_000);
@@ -348,6 +505,63 @@ export function derivePendingUserInputs(
   );
 }
 
+export function deriveActivePlanState(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  latestTurnId: TurnId | undefined,
+): ActivePlanState | null {
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const allPlanActivities = ordered.filter((activity) => activity.kind === "turn.plan.updated");
+  // Prefer plan from the current turn; fall back to the most recent plan from any turn
+  // so that TodoWrite tasks persist across follow-up messages.
+  const latest = Option.firstSomeOf([
+    ...(latestTurnId
+      ? Arr.findLast(allPlanActivities, (activity) => activity.turnId === latestTurnId)
+      : Option.none()),
+    Arr.last(allPlanActivities),
+  ]).pipe(Option.getOrNull);
+  if (!latest) {
+    return null;
+  }
+  const payload =
+    latest.payload && typeof latest.payload === "object"
+      ? (latest.payload as Record<string, unknown>)
+      : null;
+  const rawPlan = payload?.plan;
+  if (!Array.isArray(rawPlan)) {
+    return null;
+  }
+  const steps: Array<{
+    step: string;
+    status: "pending" | "inProgress" | "completed";
+  }> = [];
+  for (const entry of rawPlan) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    if (typeof record.step !== "string") {
+      continue;
+    }
+    const status =
+      record.status === "completed" || record.status === "inProgress" ? record.status : "pending";
+    steps.push({
+      step: record.step,
+      status,
+    });
+  }
+  if (steps.length === 0) {
+    return null;
+  }
+  return {
+    createdAt: latest.createdAt,
+    turnId: latest.turnId,
+    ...(payload && "explanation" in payload
+      ? { explanation: payload.explanation as string | null }
+      : {}),
+    steps,
+  };
+}
+
 export function findLatestProposedPlan(
   proposedPlans: ReadonlyArray<ProposedPlan>,
   latestTurnId: TurnId | string | null | undefined,
@@ -410,12 +624,12 @@ export function hasActionableProposedPlan(
 
 export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
-  latestTurnId: TurnId | undefined,
+  latestTurnId?: TurnId | null,
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const entries: DerivedWorkLogEntry[] = [];
   for (const activity of ordered) {
-    if (latestTurnId && activity.turnId !== latestTurnId) continue;
+    if (latestTurnId && activity.turnId && activity.turnId !== latestTurnId) continue;
     if (activity.kind === "tool.started") continue;
     if (activity.kind === "task.started") continue;
     if (activity.kind === "context-window.updated") continue;
@@ -423,9 +637,29 @@ export function deriveWorkLogEntries(
     if (isPlanBoundaryToolActivity(activity)) continue;
     entries.push(toDerivedWorkLogEntry(activity));
   }
-  return collapseDerivedWorkLogEntries(entries).map(
-    ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
-  );
+  return collapseDerivedWorkLogEntries(entries).map((entry) => {
+    const { activityKind, collapseKey: _collapseKey, ...rest } = entry;
+    return Object.assign(rest, { sourceActivityKind: activityKind });
+  });
+}
+
+export function hasToolActivityForTurn(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  turnId: TurnId | null | undefined,
+): boolean {
+  return activities.some((activity) => {
+    if (turnId && activity.turnId && activity.turnId !== turnId) {
+      return false;
+    }
+    if (
+      activity.kind === "tool.started" ||
+      activity.kind === "tool.updated" ||
+      activity.kind === "tool.completed"
+    ) {
+      return true;
+    }
+    return activity.kind === "task.progress" || activity.kind === "task.completed";
+  });
 }
 
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {
@@ -438,6 +672,25 @@ function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): bool
       ? (activity.payload as Record<string, unknown>)
       : null;
   return typeof payload?.detail === "string" && payload.detail.startsWith("ExitPlanMode:");
+}
+
+function extractWorkLogToolLifecycleStatus(
+  payload: Record<string, unknown> | null,
+): WorkLogToolLifecycleStatus | undefined {
+  if (!payload) {
+    return undefined;
+  }
+  const s = payload.status;
+  if (
+    s === "inProgress" ||
+    s === "completed" ||
+    s === "failed" ||
+    s === "declined" ||
+    s === "stopped"
+  ) {
+    return s;
+  }
+  return undefined;
 }
 
 function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
@@ -473,6 +726,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
+    turnId: activity.turnId,
     label: taskLabel || activity.summary,
     tone:
       activity.kind === "task.progress"
@@ -507,6 +761,13 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (toolCallId) {
     entry.toolCallId = toolCallId;
+  }
+  let toolLifecycleStatus = extractWorkLogToolLifecycleStatus(payload);
+  if (!toolLifecycleStatus && activity.kind === "tool.completed") {
+    toolLifecycleStatus = "completed";
+  }
+  if (toolLifecycleStatus) {
+    entry.toolLifecycleStatus = toolLifecycleStatus;
   }
   const collapseKey = deriveToolLifecycleCollapseKey(entry);
   if (collapseKey) {
@@ -568,6 +829,7 @@ function mergeDerivedWorkLogEntries(
   const requestKind = next.requestKind ?? previous.requestKind;
   const collapseKey = next.collapseKey ?? previous.collapseKey;
   const toolCallId = next.toolCallId ?? previous.toolCallId;
+  const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
   return {
     ...previous,
     ...next,
@@ -580,6 +842,7 @@ function mergeDerivedWorkLogEntries(
     ...(requestKind ? { requestKind } : {}),
     ...(collapseKey ? { collapseKey } : {}),
     ...(toolCallId ? { toolCallId } : {}),
+    ...(toolLifecycleStatus !== undefined ? { toolLifecycleStatus } : {}),
   };
 }
 
@@ -1085,14 +1348,6 @@ function compareActivityLifecycleRank(kind: string): number {
   return 1;
 }
 
-export function hasToolActivityForTurn(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
-  turnId: TurnId | null | undefined,
-): boolean {
-  if (!turnId) return false;
-  return activities.some((activity) => activity.turnId === turnId && activity.tone === "tool");
-}
-
 export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
@@ -1123,49 +1378,30 @@ export function deriveTimelineEntries(
 
 export function deriveCompletionDividerBeforeEntryId(
   timelineEntries: ReadonlyArray<TimelineEntry>,
-  latestTurn: Pick<
-    OrchestrationLatestTurn,
-    "assistantMessageId" | "startedAt" | "completedAt"
-  > | null,
+  latestTurn: Pick<OrchestrationLatestTurn, "turnId" | "assistantMessageId"> | null,
 ): string | null {
-  if (!latestTurn?.startedAt || !latestTurn.completedAt) {
+  if (!latestTurn?.turnId) {
     return null;
   }
 
-  if (latestTurn.assistantMessageId) {
-    const exactMatch = timelineEntries.find(
-      (timelineEntry) =>
-        timelineEntry.kind === "message" &&
-        timelineEntry.message.role === "assistant" &&
-        timelineEntry.message.id === latestTurn.assistantMessageId,
-    );
-    if (exactMatch) {
-      return exactMatch.id;
-    }
+  const firstWorkEntry = timelineEntries.find(
+    (entry) =>
+      entry.kind === "work" &&
+      entry.entry.turnId !== undefined &&
+      entry.entry.turnId === latestTurn.turnId,
+  );
+  if (firstWorkEntry) {
+    return firstWorkEntry.id;
   }
 
-  const turnStartedAt = Date.parse(latestTurn.startedAt);
-  const turnCompletedAt = Date.parse(latestTurn.completedAt);
-  if (Number.isNaN(turnStartedAt) || Number.isNaN(turnCompletedAt)) {
+  if (!latestTurn.assistantMessageId) {
     return null;
   }
-
-  let inRangeMatch: string | null = null;
-  let fallbackMatch: string | null = null;
-  for (const timelineEntry of timelineEntries) {
-    if (timelineEntry.kind !== "message" || timelineEntry.message.role !== "assistant") {
-      continue;
-    }
-    const messageAt = Date.parse(timelineEntry.message.createdAt);
-    if (Number.isNaN(messageAt) || messageAt < turnStartedAt) {
-      continue;
-    }
-    fallbackMatch = timelineEntry.id;
-    if (messageAt <= turnCompletedAt) {
-      inRangeMatch = timelineEntry.id;
-    }
-  }
-  return inRangeMatch ?? fallbackMatch;
+  return (
+    timelineEntries.find(
+      (entry) => entry.kind === "message" && entry.message.id === latestTurn.assistantMessageId,
+    )?.id ?? null
+  );
 }
 
 export function inferCheckpointTurnCountByTurnId(

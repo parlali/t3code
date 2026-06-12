@@ -146,7 +146,8 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
-        initialSnapshot: (settings) => stampIdentity(makePendingOpenCodeProvider(settings)),
+        initialSnapshot: (settings) =>
+          Effect.succeed(stampIdentity(makePendingOpenCodeProvider(settings))),
         checkProvider,
         enrichSnapshot: ({ snapshot, publishSnapshot }) =>
           enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities).pipe(

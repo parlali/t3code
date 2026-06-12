@@ -169,7 +169,8 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
-        initialSnapshot: (settings) => stampIdentity(makePendingCodexProvider(settings)),
+        initialSnapshot: (settings) =>
+          Effect.succeed(stampIdentity(makePendingCodexProvider(settings))),
         checkProvider,
         enrichSnapshot: ({ snapshot, publishSnapshot }) =>
           enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities).pipe(

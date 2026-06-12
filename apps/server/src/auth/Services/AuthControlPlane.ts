@@ -1,33 +1,20 @@
-import type {
-  AuthClientMetadata,
-  AuthClientSession,
-  AuthPairingLink,
-  AuthSessionId,
+import {
+  AuthAdministrativeScopes,
+  AuthStandardClientScopes,
+  type AuthClientSession,
+  type AuthEnvironmentScope,
+  type AuthPairingLink,
+  type AuthSessionId,
 } from "@t3tools/contracts";
-import { Data, DateTime, Duration, Effect, Context } from "effect";
-import type { SessionRole } from "./SessionCredentialService.ts";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
+import type * as Effect from "effect/Effect";
+
+import type { IssuedBearerSession, IssuedPairingLink } from "../EnvironmentAuth.ts";
 
 export const DEFAULT_SESSION_SUBJECT = "cli-issued-session";
-
-export interface IssuedPairingLink {
-  readonly id: string;
-  readonly credential: string;
-  readonly role: SessionRole;
-  readonly subject: string;
-  readonly label?: string;
-  readonly createdAt: DateTime.Utc;
-  readonly expiresAt: DateTime.Utc;
-}
-
-export interface IssuedBearerSession {
-  readonly sessionId: AuthSessionId;
-  readonly token: string;
-  readonly method: "bearer-session-token";
-  readonly role: SessionRole;
-  readonly subject: string;
-  readonly client: AuthClientMetadata;
-  readonly expiresAt: DateTime.Utc;
-}
+export type SessionRole = "owner" | "client";
 
 export class AuthControlPlaneError extends Data.TaggedError("AuthControlPlaneError")<{
   readonly message: string;
@@ -40,6 +27,7 @@ export interface AuthControlPlaneShape {
     readonly label?: string;
     readonly role?: SessionRole;
     readonly subject?: string;
+    readonly scopes?: ReadonlyArray<AuthEnvironmentScope>;
   }) => Effect.Effect<IssuedPairingLink, AuthControlPlaneError>;
   readonly listPairingLinks: (input?: {
     readonly role?: SessionRole;
@@ -67,3 +55,7 @@ export interface AuthControlPlaneShape {
 export class AuthControlPlane extends Context.Service<AuthControlPlane, AuthControlPlaneShape>()(
   "t3/auth/Services/AuthControlPlane",
 ) {}
+
+export function scopesForRole(role: SessionRole | undefined): ReadonlyArray<AuthEnvironmentScope> {
+  return role === "client" ? AuthStandardClientScopes : AuthAdministrativeScopes;
+}

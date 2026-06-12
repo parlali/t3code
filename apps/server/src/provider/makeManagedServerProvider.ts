@@ -17,7 +17,9 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   readonly getSettings: Effect.Effect<Settings>;
   readonly streamSettings: Stream.Stream<Settings>;
   readonly haveSettingsChanged: (previous: Settings, next: Settings) => boolean;
-  readonly initialSnapshot: (settings: Settings) => ServerProvider;
+  readonly initialSnapshot: (
+    settings: Settings,
+  ) => Effect.Effect<ServerProvider, ServerSettingsError>;
   readonly checkProvider: Effect.Effect<ServerProvider, ServerSettingsError>;
   readonly enrichSnapshot?: (input: {
     readonly settings: Settings;
@@ -37,7 +39,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     PubSub.shutdown,
   );
   const initialSettings = yield* input.getSettings;
-  const initialSnapshot = input.initialSnapshot(initialSettings);
+  const initialSnapshot = yield* input.initialSnapshot(initialSettings);
   const snapshotStateRef = yield* Ref.make<ProviderSnapshotState>({
     snapshot: initialSnapshot,
     enrichmentGeneration: 0,
@@ -152,11 +154,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
 
   return {
     maintenanceCapabilities: input.maintenanceCapabilities,
-    getSnapshot: input.getSettings.pipe(
-      Effect.flatMap(applySnapshot),
-      Effect.tapError(Effect.logError),
-      Effect.orDie,
-    ),
+    getSnapshot: Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot)),
     refresh: refreshSnapshot().pipe(Effect.tapError(Effect.logError), Effect.orDie),
     get streamChanges() {
       return Stream.fromPubSub(changesPubSub);

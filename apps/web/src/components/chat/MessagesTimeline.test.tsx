@@ -1,7 +1,7 @@
 import { EnvironmentId, MessageId } from "@t3tools/contracts";
 import { createRef, type ReactNode, type Ref } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import type { LegendListRef } from "@legendapp/list/react";
 
 vi.mock("@legendapp/list/react", async () => {
@@ -25,6 +25,25 @@ vi.mock("@legendapp/list/react", async () => {
   );
 
   return { LegendList };
+});
+
+function MockFileDiff(props: {
+  fileDiff: { name?: string | null; prevName?: string | null };
+  renderCustomHeader?: (fileDiff: {
+    name?: string | null;
+    prevName?: string | null;
+  }) => React.ReactNode;
+}) {
+  return (
+    <div data-testid="file-diff">
+      {props.renderCustomHeader?.(props.fileDiff)}
+      {props.fileDiff.name ?? props.fileDiff.prevName ?? "diff"}
+    </div>
+  );
+}
+
+vi.mock("@pierre/diffs/react", () => {
+  return { FileDiff: MockFileDiff };
 });
 
 function matchMedia() {
@@ -69,67 +88,120 @@ beforeAll(() => {
 });
 
 const ACTIVE_THREAD_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
+const MESSAGE_CREATED_AT = "2026-03-17T19:12:28.000Z";
 
 function buildProps() {
   return {
     isWorking: false,
     activeTurnInProgress: false,
-    activeTurnId: null,
     activeTurnStartedAt: null,
     listRef: createRef<LegendListRef | null>(),
-    completionDividerBeforeEntryId: null,
-    completionSummary: null,
+    latestTurn: null,
+    turnDiffSummaryByAssistantMessageId: new Map(),
     revertTurnCountByUserMessageId: new Map(),
     onRevertUserMessage: () => {},
-    onEditUserMessage: () => {},
     isRevertingCheckpoint: false,
     onImageExpand: () => {},
     activeThreadEnvironmentId: ACTIVE_THREAD_ENVIRONMENT_ID,
     markdownCwd: undefined,
+    resolvedTheme: "light" as const,
     timestampFormat: "locale" as const,
     workspaceRoot: undefined,
     onIsAtEndChange: () => {},
-    hasOlderMessages: false,
-    isLoadingOlderMessages: false,
-    onLoadOlderMessages: () => {},
+  };
+}
+
+function buildLongUserMessageText(tail = "deep hidden detail only after expand") {
+  return Array.from({ length: 9 }, (_, index) =>
+    index === 8 ? tail : `Line ${index + 1}: ${"verbose prompt content ".repeat(8).trim()}`,
+  ).join("\n");
+}
+
+function buildUserTimelineEntry(text: string) {
+  return {
+    id: "entry-1",
+    kind: "message" as const,
+    createdAt: MESSAGE_CREATED_AT,
+    message: {
+      id: MessageId.make("message-1"),
+      role: "user" as const,
+      text,
+      createdAt: MESSAGE_CREATED_AT,
+      streaming: false,
+    },
   };
 }
 
 describe("MessagesTimeline", () => {
+  it("renders collapse controls for long user messages", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildUserTimelineEntry(buildLongUserMessageText())]}
+      />,
+    );
+
+    expect(markup).toContain("Show full message");
+    expect(markup).toContain('data-user-message-collapsed="true"');
+    expect(markup).toContain('data-user-message-fade="true"');
+    expect(markup).toContain('data-user-message-footer="true"');
+  });
+
+  it("does not render collapse controls for short user messages", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildUserTimelineEntry("Short prompt.")]}
+      />,
+    );
+
+    expect(markup).not.toContain("Show full message");
+    expect(markup).toContain('data-user-message-collapsible="false"');
+  });
+
   it("renders inline terminal labels with the composer chip UI", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
         timelineEntries={[
-          {
-            id: "entry-1",
-            kind: "message",
-            createdAt: "2026-03-17T19:12:28.000Z",
-            message: {
-              id: MessageId.make("message-2"),
-              role: "user",
-              text: [
-                "yoo what's @terminal-1:1-5 mean",
-                "",
-                "<terminal_context>",
-                "- Terminal 1 lines 1-5:",
-                "  1 | julius@mac effect-http-ws-cli % bun i",
-                "  2 | bun install v1.3.9 (cf6cdbbb)",
-                "</terminal_context>",
-              ].join("\n"),
-              createdAt: "2026-03-17T19:12:28.000Z",
-              streaming: false,
-            },
-          },
+          buildUserTimelineEntry(
+            [
+              buildLongUserMessageText("yoo what's @terminal-1:1-5 mean"),
+              "",
+              "<terminal_context>",
+              "- Terminal 1 lines 1-5:",
+              "  1 | julius@mac effect-http-ws-cli % bun i",
+              "  2 | bun install v1.3.9 (cf6cdbbb)",
+              "</terminal_context>",
+            ].join("\n"),
+          ),
         ]}
       />,
     );
 
     expect(markup).toContain("Terminal 1 lines 1-5");
     expect(markup).toContain("lucide-terminal");
-    expect(markup).toContain("yoo what&#x27;s ");
+    expect(markup).toContain("yoo what&#x27;s</p>");
+    expect(markup).toContain('<span aria-hidden="true"> </span>');
+    expect(markup).toContain("Show full message");
   }, 20_000);
+
+  it("keeps the copy button for collapsed long user messages", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildUserTimelineEntry(buildLongUserMessageText())]}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Copy link"');
+    expect(markup).toContain('data-user-message-collapsed="true"');
+    expect(markup).toContain('data-user-message-footer="true"');
+  });
 
   it("renders context compaction entries in the normal work log", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
@@ -153,7 +225,7 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("Context compacted");
-    expect(markup).toContain("Work log");
+    expect(markup).toContain("work log");
   });
 
   it("formats changed file paths from the workspace root", async () => {
@@ -181,5 +253,71 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("t3code/apps/web/src/session-logic.ts");
     expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
+  });
+
+  it("renders review comment contexts as structured cards instead of raw tags", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            message: {
+              id: MessageId.make("message-2"),
+              role: "user",
+              text: [
+                '<review_comment sectionId="turn:2" sectionTitle="Turn 2" filePath="apps/web/src/lib/contextWindow.test.ts" startIndex="3" endIndex="14" rangeLabel="+47 to +58">',
+                "Wadduo",
+                "```diff",
+                "@@ -0,0 +47,2 @@",
+                '+  it("keeps valid zero-usage snapshots", () => {',
+                "+    expect(snapshot).not.toBeNull();",
+                "```",
+                "</review_comment>",
+              ].join("\n"),
+              createdAt: "2026-03-17T19:12:28.000Z",
+              streaming: false,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("contextWindow.test.ts");
+    expect(markup).toContain("Wadduo");
+    expect(markup).toContain('data-testid="file-diff"');
+    expect(markup).not.toContain(">Review comment<");
+    expect(markup).not.toContain("&lt;review_comment");
+    expect(markup).not.toContain("&lt;/review_comment&gt;");
+  });
+
+  it("renders a failure marker for failed tool lifecycle entries", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Glob",
+              tone: "tool",
+              toolLifecycleStatus: "failed",
+              detail: "No files found",
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("lucide-x");
+    expect(markup).toContain('aria-label="Tool call failed"');
   });
 });

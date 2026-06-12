@@ -3,7 +3,8 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NetService } from "@t3tools/shared/Net";
 import { Duration, Effect, Fiber, Layer, Result, Sink, Stream } from "effect";
 import { TestClock } from "effect/testing";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { SshPasswordPrompt } from "./auth.ts";

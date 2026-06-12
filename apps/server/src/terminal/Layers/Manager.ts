@@ -269,7 +269,8 @@ function disposeSessionReplayState(session: TerminalSessionState): void {
 
 function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
   flushReplayState(session);
-  const history = materializeSessionHistory(session);
+  const screen = serializeTerminalReplayState(session.replay, session.historyLineLimit);
+  const history = screen ? "" : materializeSessionHistory(session);
   return {
     threadId: session.threadId,
     terminalId: session.terminalId,
@@ -277,7 +278,7 @@ function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
     worktreePath: session.worktreePath,
     status: session.status,
     pid: session.pid,
-    screen: serializeTerminalReplayState(session.replay, session.historyLineLimit),
+    screen,
     history,
     sequence: session.sequence,
     exitCode: session.exitCode,
@@ -548,7 +549,6 @@ function checkWindowsSubprocessActivity(
       timeout: "1500 millis",
       maxOutputBytes: 32_768,
       outputMode: "truncate",
-      shell: process.platform === "win32",
       timeoutBehavior: "timedOutResult",
     });
   }).pipe(
@@ -1346,6 +1346,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
     const stopProcess = Effect.fn("terminal.stopProcess")(function* (
       session: TerminalSessionState,
+      options?: { waitForKill?: boolean },
     ) {
       const process = session.process;
       if (!process) return;
@@ -1364,7 +1365,11 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       });
 
       yield* clearKillFiber(process);
-      yield* startKillEscalation(process, session.threadId, session.terminalId);
+      if (options?.waitForKill === true) {
+        yield* runKillEscalation(process, session.threadId, session.terminalId);
+      } else {
+        yield* startKillEscalation(process, session.threadId, session.terminalId);
+      }
       yield* evictInactiveSessionsIfNeeded();
     });
 
@@ -1599,7 +1604,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       const session = yield* getSession(threadId, terminalId);
 
       if (Option.isSome(session)) {
-        yield* stopProcess(session.value);
+        yield* stopProcess(session.value, { waitForKill: true });
         yield* persistHistory(threadId, terminalId, materializeSessionHistory(session.value));
         yield* Effect.sync(() => disposeSessionReplayState(session.value));
       }

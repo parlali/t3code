@@ -55,6 +55,7 @@ import Migration0039 from "./Migrations/039_ThreadWorkbenchChangeSource.ts";
 import Migration0040 from "./Migrations/040_ProjectionThreadTaskPlans.ts";
 import Migration0041 from "./Migrations/041_WorkspaceRightPanelState.ts";
 import Migration0042 from "./Migrations/042_TaskPlanProjectionRepair.ts";
+import Migration0043 from "./Migrations/043_AuthAuthorizationScopes.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -109,6 +110,7 @@ export const migrationEntries = [
   [40, "ProjectionThreadTaskPlans", Migration0040],
   [41, "WorkspaceRightPanelState", Migration0041],
   [42, "TaskPlanProjectionRepair", Migration0042],
+  [43, "AuthAuthorizationScopes", Migration0043],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

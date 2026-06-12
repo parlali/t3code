@@ -156,6 +156,21 @@ function resolveFileDefinition(pathValue: string, theme: "light" | "dark"): stri
   return theme === "light" ? defaultLightFileIconDefinition : defaultDarkFileIconDefinition;
 }
 
+export function syntheticFileNameForLanguageId(languageId: string): string {
+  const normalizedLanguageId = languageId.trim().toLowerCase();
+  return normalizedLanguageId.length > 0 ? `index.${normalizedLanguageId}` : "index.txt";
+}
+
+export function hasSpecificVscodeIconForFileName(
+  fileName: string,
+  theme: "light" | "dark",
+): boolean {
+  const definitionKey = resolveFileDefinition(fileName, theme);
+  const defaultDefinition =
+    theme === "light" ? defaultLightFileIconDefinition : defaultDarkFileIconDefinition;
+  return definitionKey !== defaultDefinition;
+}
+
 function resolveFolderDefinition(pathValue: string, theme: "light" | "dark"): string {
   const basename = basenameOfPath(pathValue).toLowerCase();
   const folderNames = theme === "light" ? lightFolderNames : darkFolderNames;

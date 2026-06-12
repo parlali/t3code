@@ -148,6 +148,7 @@ import {
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
+  getStartedThreadModelChangeBlockReason,
   deriveRevertTurnCountByUserMessageId,
   hasServerAcknowledgedLocalDispatch,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
@@ -462,6 +463,19 @@ function writeThreadTerminalOpenStatus(threadRef: ScopedThreadRef, terminal: boo
     })
     .catch((error: unknown) => {
       console.warn("Failed to update thread terminal status", error);
+    });
+}
+
+function closeThreadTerminals(threadRef: ScopedThreadRef): void {
+  const api = readEnvironmentApi(threadRef.environmentId);
+  if (!api) {
+    return;
+  }
+
+  void api.terminal
+    .close({ threadId: threadRef.threadId, deleteHistory: true })
+    .catch((error: unknown) => {
+      console.warn("Failed to close thread terminals", error);
     });
 }
 
@@ -2061,6 +2075,9 @@ export default function ChatView(props: ChatViewProps) {
   const setTerminalOpen = useCallback(
     (open: boolean) => {
       if (!activeThreadRef) return;
+      if (!open) {
+        closeThreadTerminals(activeThreadRef);
+      }
       storeSetTerminalOpen(activeThreadRef, open);
       if (isServerThread) {
         writeThreadTerminalOpenStatus(activeThreadRef, open);
@@ -2693,18 +2710,25 @@ export default function ChatView(props: ChatViewProps) {
         : null;
       const canRestoreFiles = hasCodeChanges && availability?.canRestoreFiles === true;
       let restoreFiles = false;
-      if (canRestoreFiles) {
+      if (hasCodeChanges) {
         const isEdit = options?.action === "edit";
+        const checkpointAvailabilityDetail = canRestoreFiles
+          ? `A valid file checkpoint is available for checkpoint ${turnCount}.`
+          : (availability?.reason ??
+            `File checkpoint restore is unavailable for checkpoint ${turnCount}.`);
         const choice = await requestRevertConfirmation({
           title: isEdit ? "Edit this message?" : `Revert to checkpoint ${turnCount}?`,
-          description:
-            "Chat rollback is required. File restore is optional and will only run if you choose it.",
+          description: canRestoreFiles
+            ? "Chat rollback is required. File restore is optional and will only run if you choose it."
+            : "Chat rollback is available, but files cannot be restored from this checkpoint.",
           details: [
             isEdit
               ? "The selected message contents will be put back in the composer."
               : "Newer messages and turn diffs will be removed from this thread.",
-            `A valid file checkpoint is available for checkpoint ${turnCount}.`,
-            `Restoring files will discard file changes made after checkpoint ${turnCount}.`,
+            checkpointAvailabilityDetail,
+            canRestoreFiles
+              ? `Restoring files will discard file changes made after checkpoint ${turnCount}.`
+              : "Choose chat-only to leave the working tree unchanged.",
             "This action cannot be undone.",
           ],
           canRestoreFiles,
@@ -3515,6 +3539,23 @@ export default function ChatView(props: ChatViewProps) {
     getComposer,
   ]);
 
+  const getModelDisabledReason = useCallback(
+    (instanceId: ProviderInstanceId, model: string): string | null => {
+      if (!activeThread) {
+        return null;
+      }
+      const reason = getStartedThreadModelChangeBlockReason({
+        providers: providerStatuses,
+        hasStartedSession: activeThread.session !== null,
+        currentModelSelection: activeThread.modelSelection,
+        currentProviderInstanceId: activeThread.session?.providerInstanceId ?? null,
+        nextModelSelection: { instanceId, model },
+      });
+      return reason ? `${reason.description} Start a new thread to use this model.` : null;
+    },
+    [activeThread, providerStatuses],
+  );
+
   const onProviderModelSelect = useCallback(
     (instanceId: ProviderInstanceId, model: string) => {
       if (!activeThread) return;
@@ -3558,6 +3599,22 @@ export default function ChatView(props: ChatViewProps) {
         instanceId,
         model: resolvedModel,
       };
+      const modelChangeBlockReason = getStartedThreadModelChangeBlockReason({
+        providers: providerStatuses,
+        hasStartedSession: activeThread.session !== null,
+        currentModelSelection: activeThread.modelSelection,
+        currentProviderInstanceId: activeThread.session?.providerInstanceId ?? null,
+        nextModelSelection,
+      });
+      if (modelChangeBlockReason) {
+        toastManager.add({
+          type: "warning",
+          title: modelChangeBlockReason.title,
+          description: modelChangeBlockReason.description,
+        });
+        scheduleComposerFocus();
+        return;
+      }
       setComposerDraftModelSelection(
         scopeThreadRef(activeThread.environmentId, activeThread.id),
         nextModelSelection,
@@ -3734,6 +3791,8 @@ export default function ChatView(props: ChatViewProps) {
               activeTurnStartedAt={activeWorkStartedAt}
               listRef={legendListRef}
               timelineEntries={timelineEntries}
+              latestTurn={activeLatestTurn}
+              turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
               completionDividerBeforeEntryId={completionDividerBeforeEntryId}
               completionSummary={completionSummary}
               activeThreadEnvironmentId={activeThread.environmentId}
@@ -3743,8 +3802,10 @@ export default function ChatView(props: ChatViewProps) {
               isRevertingCheckpoint={isRevertingCheckpoint}
               onImageExpand={onExpandTimelineImage}
               markdownCwd={gitCwd ?? undefined}
+              resolvedTheme={resolvedTheme}
               timestampFormat={timestampFormat}
               workspaceRoot={activeWorkspaceRoot}
+              skills={activeProviderStatus?.skills ?? []}
               onIsAtEndChange={onIsAtEndChange}
               hasOlderMessages={hasOlderMessages}
               isLoadingOlderMessages={isLoadingOlderMessages}
@@ -3843,6 +3904,7 @@ export default function ChatView(props: ChatViewProps) {
                     onChangeActivePendingUserInputCustomAnswer
                   }
                   onProviderModelSelect={onProviderModelSelect}
+                  getModelDisabledReason={getModelDisabledReason}
                   toggleInteractionMode={toggleInteractionMode}
                   handleRuntimeModeChange={handleRuntimeModeChange}
                   handleInteractionModeChange={handleInteractionModeChange}

@@ -320,7 +320,8 @@ export function TerminalViewport({
       scrollback: 5_000,
       drawBoldTextInBrightColors: true,
       minimumContrastRatio: 1,
-      fontFamily: '"SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
+      fontFamily:
+        '"SF Mono", "SFMono-Regular", "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace',
       theme: terminalThemeFromApp(mount),
     });
     terminal.loadAddon(fitAddon);

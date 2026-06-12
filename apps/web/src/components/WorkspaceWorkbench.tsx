@@ -579,12 +579,7 @@ export function WorkspaceWorkbench(props: WorkspaceWorkbenchProps) {
     },
     [refreshWorkspace],
   );
-  const handleEntriesResubscribe = useCallback(() => void refreshWorkspace(), [refreshWorkspace]);
-  useProjectEntriesSubscription(
-    { environmentId: props.environmentId, cwd },
-    handleEntriesChanged,
-    handleEntriesResubscribe,
-  );
+  useProjectEntriesSubscription({ environmentId: props.environmentId, cwd }, handleEntriesChanged);
 
   const saveActive = useCallback(async () => {
     if (!activeTab || !cwd) return;

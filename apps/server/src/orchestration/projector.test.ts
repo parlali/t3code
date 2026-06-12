@@ -6,8 +6,8 @@ import {
   ThreadId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import * as Effect from "effect/Effect";
+import { describe, expect, it } from "vite-plus/test";
 
 import { createEmptyReadModel, projectEvent } from "./projector.ts";
 
@@ -40,7 +40,7 @@ function makeEvent(input: {
 
 describe("orchestration projector", () => {
   it("applies thread.created events", async () => {
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
     const model = createEmptyReadModel(now);
 
     const next = await Effect.runPromise(
@@ -100,7 +100,7 @@ describe("orchestration projector", () => {
   });
 
   it("fails when event payload cannot be decoded by runtime schema", async () => {
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
     const model = createEmptyReadModel(now);
 
     await expect(
@@ -134,8 +134,8 @@ describe("orchestration projector", () => {
   });
 
   it("applies thread.archived and thread.unarchived events", async () => {
-    const now = new Date().toISOString();
-    const later = new Date(Date.parse(now) + 1_000).toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
+    const later = "2026-01-01T00:00:01.000Z";
     const created = await Effect.runPromise(
       projectEvent(
         createEmptyReadModel(now),
@@ -206,7 +206,7 @@ describe("orchestration projector", () => {
   });
 
   it("keeps projector forward-compatible for unhandled event types", async () => {
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
     const model = createEmptyReadModel(now);
 
     const next = await Effect.runPromise(
@@ -267,37 +267,76 @@ describe("orchestration projector", () => {
       ),
     );
 
-    const afterRunning = await Effect.runPromise(
-      projectEvent(
-        afterCreate,
-        makeEvent({
-          sequence: 2,
-          type: "thread.session-set",
-          aggregateKind: "thread",
-          aggregateId: "thread-1",
-          occurredAt: startedAt,
-          commandId: "cmd-running",
-          payload: {
-            threadId: "thread-1",
-            session: {
+    const settledAt = "2026-02-23T08:01:00.000Z";
+    const [afterRunning, afterReady] = await Effect.runPromise(
+      Effect.flatMap(
+        projectEvent(
+          afterCreate,
+          makeEvent({
+            sequence: 2,
+            type: "thread.session-set",
+            aggregateKind: "thread",
+            aggregateId: "thread-1",
+            occurredAt: startedAt,
+            commandId: "cmd-running",
+            payload: {
               threadId: "thread-1",
-              status: "running",
-              providerName: "codex",
-              providerSessionId: "session-1",
-              providerThreadId: "provider-thread-1",
-              runtimeMode: "approval-required",
-              activeTurnId: "turn-1",
-              lastError: null,
-              updatedAt: startedAt,
+              session: {
+                threadId: "thread-1",
+                status: "running",
+                providerName: "codex",
+                providerSessionId: "session-1",
+                providerThreadId: "provider-thread-1",
+                runtimeMode: "approval-required",
+                activeTurnId: "turn-1",
+                lastError: null,
+                updatedAt: startedAt,
+              },
             },
-          },
-        }),
+          }),
+        ),
+        (running) =>
+          Effect.map(
+            projectEvent(
+              running,
+              makeEvent({
+                sequence: 3,
+                type: "thread.session-set",
+                aggregateKind: "thread",
+                aggregateId: "thread-1",
+                occurredAt: settledAt,
+                commandId: "cmd-ready",
+                payload: {
+                  threadId: "thread-1",
+                  session: {
+                    threadId: "thread-1",
+                    status: "ready",
+                    providerName: "codex",
+                    providerSessionId: "session-1",
+                    providerThreadId: "provider-thread-1",
+                    runtimeMode: "approval-required",
+                    activeTurnId: null,
+                    lastError: null,
+                    updatedAt: settledAt,
+                  },
+                },
+              }),
+            ),
+            (ready) => [running, ready] as const,
+          ),
       ),
     );
 
     const thread = afterRunning.threads[0];
     expect(thread?.latestTurn?.turnId).toBe("turn-1");
     expect(thread?.session?.status).toBe("running");
+
+    // Leaving the "running" session status settles the running turn with the
+    // session timestamp as the turn end.
+    const settledThread = afterReady.threads[0];
+    expect(settledThread?.latestTurn?.turnId).toBe("turn-1");
+    expect(settledThread?.latestTurn?.state).toBe("completed");
+    expect(settledThread?.latestTurn?.completedAt).toBe(settledAt);
   });
 
   it("updates canonical thread runtime mode from thread.runtime-mode-set", async () => {
@@ -628,26 +667,6 @@ describe("orchestration projector", () => {
       }),
       makeEvent({
         sequence: 10,
-        type: "thread.activity-appended",
-        aggregateKind: "thread",
-        aggregateId: "thread-1",
-        occurredAt: "2026-02-23T10:00:04.800Z",
-        commandId: "cmd-runtime-warning-null-turn",
-        payload: {
-          threadId: "thread-1",
-          activity: {
-            id: "activity-runtime-warning-null-turn",
-            tone: "info",
-            kind: "runtime.warning",
-            summary: "Runtime warning",
-            payload: { message: "stale warning" },
-            turnId: null,
-            createdAt: "2026-02-23T10:00:04.800Z",
-          },
-        },
-      }),
-      makeEvent({
-        sequence: 11,
         type: "thread.reverted",
         aggregateKind: "thread",
         aggregateId: "thread-1",
@@ -656,8 +675,6 @@ describe("orchestration projector", () => {
         payload: {
           threadId: "thread-1",
           turnCount: 1,
-          restoreFiles: false,
-          restoredFiles: false,
         },
       }),
     ];
@@ -815,8 +832,6 @@ describe("orchestration projector", () => {
         payload: {
           threadId: "thread-revert",
           turnCount: 1,
-          restoreFiles: false,
-          restoredFiles: false,
         },
       }),
     ];

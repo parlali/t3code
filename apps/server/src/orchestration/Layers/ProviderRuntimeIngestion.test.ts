@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -21,8 +22,15 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import * as Clock from "effect/Clock";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as PubSub from "effect/PubSub";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -165,17 +173,17 @@ async function waitForThread(
   timeoutMs = 2000,
   threadId: ThreadId = asThreadId("thread-1"),
 ) {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = (await Effect.runPromise(Clock.currentTimeMillis)) + timeoutMs;
   const poll = async (): Promise<ProviderRuntimeTestThread> => {
     const snapshot = await readModel();
     const thread = snapshot.threads.find((entry) => entry.id === threadId);
     if (thread && predicate(thread)) {
       return thread;
     }
-    if (Date.now() >= deadline) {
+    if ((await Effect.runPromise(Clock.currentTimeMillis)) >= deadline) {
       throw new Error("Timed out waiting for thread state");
     }
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await Effect.runPromise(Effect.yieldNow);
     return poll();
   };
   return poll();
@@ -242,7 +250,7 @@ describe("ProviderRuntimeIngestion", () => {
     await Effect.runPromise(ingestion.start().pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(ingestion.drain);
 
-    const createdAt = new Date().toISOString();
+    const createdAt = "2026-01-01T00:00:00.000Z";
     await Effect.runPromise(
       engine.dispatch({
         type: "project.create",
@@ -312,7 +320,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("maps turn started/completed events into thread session updates", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "turn.started",
@@ -333,7 +341,7 @@ describe("ProviderRuntimeIngestion", () => {
       eventId: asEventId("evt-turn-completed"),
       provider: ProviderDriverKind.make("codex"),
       threadId: asThreadId("thread-1"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       turnId: asTurnId("turn-1"),
       payload: {
         state: "failed",
@@ -352,47 +360,9 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.lastError).toBe("turn failed");
   });
 
-  it("maps aborted turns into interrupted-ready session updates", async () => {
-    const harness = await createHarness();
-    const turnId = asTurnId("turn-aborted");
-
-    harness.emit({
-      type: "turn.started",
-      eventId: asEventId("evt-turn-aborted-started"),
-      provider: ProviderDriverKind.make("codex"),
-      threadId: asThreadId("thread-1"),
-      createdAt: "2026-04-15T10:00:00.000Z",
-      turnId,
-    });
-
-    await waitForThread(
-      harness.readModel,
-      (thread) =>
-        thread.session?.status === "running" && thread.session.activeTurnId === "turn-aborted",
-    );
-
-    harness.emit({
-      type: "turn.aborted",
-      eventId: asEventId("evt-turn-aborted"),
-      provider: ProviderDriverKind.make("codex"),
-      threadId: asThreadId("thread-1"),
-      createdAt: "2026-04-15T10:00:03.000Z",
-      turnId,
-      payload: {
-        reason: "Turn aborted",
-      },
-    });
-
-    const thread = await waitForThread(
-      harness.readModel,
-      (entry) => entry.session?.status === "ready" && entry.session.activeTurnId === null,
-    );
-    expect(thread.session?.lastError).toBeNull();
-  });
-
   it("applies provider session.state.changed transitions directly", async () => {
     const harness = await createHarness();
-    const waitingAt = new Date().toISOString();
+    const waitingAt = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "session.state.changed",
@@ -418,7 +388,7 @@ describe("ProviderRuntimeIngestion", () => {
       eventId: asEventId("evt-session-state-error"),
       provider: ProviderDriverKind.make("codex"),
       threadId: asThreadId("thread-1"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       payload: {
         state: "error",
         reason: "provider crashed",
@@ -440,7 +410,7 @@ describe("ProviderRuntimeIngestion", () => {
       eventId: asEventId("evt-session-state-stopped"),
       provider: ProviderDriverKind.make("codex"),
       threadId: asThreadId("thread-1"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       payload: {
         state: "stopped",
       },
@@ -461,7 +431,7 @@ describe("ProviderRuntimeIngestion", () => {
       eventId: asEventId("evt-session-state-ready"),
       provider: ProviderDriverKind.make("codex"),
       threadId: asThreadId("thread-1"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       payload: {
         state: "ready",
       },
@@ -480,7 +450,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("does not clear active turn when session/thread started arrives mid-turn", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "turn.started",
@@ -502,14 +472,14 @@ describe("ProviderRuntimeIngestion", () => {
       type: "thread.started",
       eventId: asEventId("evt-thread-started-midturn-lifecycle"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: asThreadId("thread-1"),
     });
     harness.emit({
       type: "session.started",
       eventId: asEventId("evt-session-started-midturn-lifecycle"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: asThreadId("thread-1"),
     });
 
@@ -523,7 +493,7 @@ describe("ProviderRuntimeIngestion", () => {
       type: "turn.completed",
       eventId: asEventId("evt-turn-completed-midturn-lifecycle"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: asThreadId("thread-1"),
       turnId: asTurnId("turn-midturn-lifecycle"),
       status: "completed",
@@ -537,7 +507,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("accepts claude turn lifecycle when seeded thread id is a synthetic placeholder", async () => {
     const harness = await createHarness();
-    const seededAt = new Date().toISOString();
+    const seededAt = "2026-01-01T00:00:00.000Z";
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -561,7 +531,7 @@ describe("ProviderRuntimeIngestion", () => {
       type: "turn.started",
       eventId: asEventId("evt-turn-started-claude-placeholder"),
       provider: ProviderDriverKind.make("claudeAgent"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: asThreadId("thread-1"),
       turnId: asTurnId("turn-claude-placeholder"),
     });
@@ -577,7 +547,7 @@ describe("ProviderRuntimeIngestion", () => {
       type: "turn.completed",
       eventId: asEventId("evt-turn-completed-claude-placeholder"),
       provider: ProviderDriverKind.make("claudeAgent"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: asThreadId("thread-1"),
       turnId: asTurnId("turn-claude-placeholder"),
       status: "completed",
@@ -591,7 +561,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("ignores auxiliary turn completions from a different provider thread", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "turn.started",
@@ -612,7 +582,7 @@ describe("ProviderRuntimeIngestion", () => {
       type: "turn.completed",
       eventId: asEventId("evt-turn-completed-aux"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: asThreadId("thread-1"),
       turnId: asTurnId("turn-aux"),
       status: "completed",
@@ -628,7 +598,7 @@ describe("ProviderRuntimeIngestion", () => {
       type: "turn.completed",
       eventId: asEventId("evt-turn-completed-primary"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: asThreadId("thread-1"),
       turnId: asTurnId("turn-primary"),
       status: "completed",
@@ -642,7 +612,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("ignores non-active turn completion when runtime omits thread id", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "turn.started",
@@ -664,7 +634,7 @@ describe("ProviderRuntimeIngestion", () => {
       type: "turn.completed",
       eventId: asEventId("evt-turn-completed-guarded-other"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: asThreadId("thread-1"),
       turnId: asTurnId("turn-guarded-other"),
       status: "completed",
@@ -680,7 +650,7 @@ describe("ProviderRuntimeIngestion", () => {
       type: "turn.completed",
       eventId: asEventId("evt-turn-completed-guarded-main"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: asThreadId("thread-1"),
       turnId: asTurnId("turn-guarded-main"),
       status: "completed",
@@ -694,7 +664,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("maps canonical content delta/item completed into finalized assistant messages", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "content.delta",
@@ -749,9 +719,86 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.streaming).toBe(false);
   });
 
+  it("keeps cursor assistant message ids unique when the provider item id is reused", async () => {
+    const harness = await createHarness();
+    const itemId = asItemId("cursor-session-id");
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-cursor-message-delta-first"),
+      provider: ProviderDriverKind.make("cursor"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-cursor-first"),
+      itemId,
+      payload: {
+        streamKind: "assistant_text",
+        delta: "first reply",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-cursor-message-completed-first"),
+      provider: ProviderDriverKind.make("cursor"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-cursor-first"),
+      itemId,
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-cursor-message-delta-second"),
+      provider: ProviderDriverKind.make("cursor"),
+      createdAt: "2026-01-01T00:00:02.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-cursor-second"),
+      itemId,
+      payload: {
+        streamKind: "assistant_text",
+        delta: "second reply",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-cursor-message-completed-second"),
+      provider: ProviderDriverKind.make("cursor"),
+      createdAt: "2026-01-01T00:00:03.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-cursor-second"),
+      itemId,
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    const firstMessageId = "assistant:turn:turn-cursor-first:item:cursor-session-id";
+    const secondMessageId = "assistant:turn:turn-cursor-second:item:cursor-session-id";
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === secondMessageId && message.text === "second reply" && !message.streaming,
+      ),
+    );
+    const firstMessage = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === firstMessageId,
+    );
+    const secondMessage = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === secondMessageId,
+    );
+    expect(firstMessage?.text).toBe("first reply");
+    expect(firstMessage?.turnId).toBe("turn-cursor-first");
+    expect(secondMessage?.text).toBe("second reply");
+    expect(secondMessage?.turnId).toBe("turn-cursor-second");
+  });
+
   it("uses assistant item completion detail when no assistant deltas were streamed", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "item.completed",
@@ -783,7 +830,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("preserves completed tool metadata on projected tool activities", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "item.completed",
@@ -839,7 +886,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("normalizes command execution activities to ran-command summaries", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "item.completed",
@@ -881,7 +928,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("uses structured read-file paths when available", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "item.completed",
@@ -923,7 +970,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("projects completed plan items into first-class proposed plans", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "turn.proposed.completed",
@@ -957,7 +1004,7 @@ describe("ProviderRuntimeIngestion", () => {
     const targetThreadId = asThreadId("thread-implement");
     const sourceTurnId = asTurnId("turn-plan-source");
     const targetTurnId = asTurnId("turn-plan-implement");
-    const createdAt = new Date().toISOString();
+    const createdAt = "2026-01-01T00:00:00.000Z";
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -1088,7 +1135,7 @@ describe("ProviderRuntimeIngestion", () => {
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
-        createdAt: new Date().toISOString(),
+        createdAt: "2026-01-01T00:00:00.000Z",
       }),
     );
 
@@ -1113,7 +1160,7 @@ describe("ProviderRuntimeIngestion", () => {
       type: "turn.started",
       eventId: asEventId("evt-plan-target-started"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: targetThreadId,
       turnId: targetTurnId,
     });
@@ -1144,42 +1191,42 @@ describe("ProviderRuntimeIngestion", () => {
     const sourceTurnId = asTurnId("turn-plan-source");
     const activeTurnId = asTurnId("turn-already-running");
     const staleTurnId = asTurnId("turn-stale-start");
-    const createdAt = new Date().toISOString();
+    const createdAt = "2026-01-01T00:00:00.000Z";
 
     await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.create",
-        commandId: CommandId.make("cmd-thread-create-plan-source-guarded"),
-        threadId: sourceThreadId,
-        projectId: asProjectId("project-1"),
-        title: "Plan Source",
-        modelSelection: {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: "gpt-5-codex",
-        },
-        interactionMode: "plan",
-        runtimeMode: "approval-required",
-        branch: null,
-        worktreePath: null,
-        createdAt,
-      }),
-    );
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-set-plan-source-guarded"),
-        threadId: sourceThreadId,
-        session: {
+      Effect.andThen(
+        harness.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("cmd-thread-create-plan-source-guarded"),
           threadId: sourceThreadId,
-          status: "ready",
-          providerName: "codex",
+          projectId: asProjectId("project-1"),
+          title: "Plan Source",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          interactionMode: "plan",
           runtimeMode: "approval-required",
-          activeTurnId: null,
-          updatedAt: createdAt,
-          lastError: null,
-        },
-        createdAt,
-      }),
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        }),
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("cmd-session-set-plan-source-guarded"),
+          threadId: sourceThreadId,
+          session: {
+            threadId: sourceThreadId,
+            status: "ready",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            updatedAt: createdAt,
+            lastError: null,
+          },
+          createdAt,
+        }),
+      ),
     );
     harness.setProviderSession({
       provider: ProviderDriverKind.make("codex"),
@@ -1257,7 +1304,7 @@ describe("ProviderRuntimeIngestion", () => {
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
-        createdAt: new Date().toISOString(),
+        createdAt: "2026-01-01T00:00:00.000Z",
       }),
     );
 
@@ -1265,7 +1312,7 @@ describe("ProviderRuntimeIngestion", () => {
       type: "turn.started",
       eventId: asEventId("evt-turn-started-stale-plan-implementation"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: targetThreadId,
       turnId: staleTurnId,
     });
@@ -1290,6 +1337,92 @@ describe("ProviderRuntimeIngestion", () => {
     expect(targetThreadAfterRejectedStart?.session?.activeTurnId).toBe(activeTurnId);
   });
 
+  it("accepts a conflicting turn.started for a pending turn start when the provider expects that turn", async () => {
+    // Steering a running turn: the server requests a new turn while the old
+    // one is still active, and providers like opencode open the new turn
+    // without ever completing the superseded one. The new turn.started must
+    // replace the active turn instead of being rejected as stale.
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const oldTurnId = asTurnId("turn-steered-over");
+    const newTurnId = asTurnId("turn-from-steer");
+    const createdAt = "2026-01-01T00:00:00.000Z";
+
+    harness.setProviderSession({
+      provider: ProviderDriverKind.make("codex"),
+      status: "running",
+      runtimeMode: "approval-required",
+      threadId,
+      createdAt,
+      updatedAt: createdAt,
+      activeTurnId: oldTurnId,
+    });
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-steered-over"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt,
+      threadId,
+      turnId: oldTurnId,
+    });
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" && thread.session?.activeTurnId === oldTurnId,
+      2_000,
+      threadId,
+    );
+
+    // The steer: a user-requested turn start while the old turn still runs.
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-steer"),
+        threadId,
+        message: {
+          messageId: asMessageId("msg-steer"),
+          role: "user",
+          text: "actually, do 15 instead",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt,
+      }),
+    );
+
+    // The provider session tracks the new turn before emitting turn.started
+    // (sendTurn updates the session first).
+    harness.setProviderSession({
+      provider: ProviderDriverKind.make("codex"),
+      status: "running",
+      runtimeMode: "approval-required",
+      threadId,
+      createdAt,
+      updatedAt: createdAt,
+      activeTurnId: newTurnId,
+    });
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-from-steer"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt,
+      threadId,
+      turnId: newTurnId,
+    });
+
+    const threadAfterSteer = await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" && thread.session?.activeTurnId === newTurnId,
+      2_000,
+      threadId,
+    );
+    expect(threadAfterSteer.session?.activeTurnId).toBe(newTurnId);
+    expect(threadAfterSteer.latestTurn?.turnId).toBe(newTurnId);
+    expect(threadAfterSteer.latestTurn?.state).toBe("running");
+  });
+
   it("does not mark the source proposed plan implemented for an unrelated turn.started when no thread active turn is tracked", async () => {
     const harness = await createHarness();
     const sourceThreadId = asThreadId("thread-plan");
@@ -1297,7 +1430,7 @@ describe("ProviderRuntimeIngestion", () => {
     const sourceTurnId = asTurnId("turn-plan-source");
     const expectedTurnId = asTurnId("turn-plan-implement");
     const replayedTurnId = asTurnId("turn-replayed");
-    const createdAt = new Date().toISOString();
+    const createdAt = "2026-01-01T00:00:00.000Z";
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -1419,7 +1552,7 @@ describe("ProviderRuntimeIngestion", () => {
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
-        createdAt: new Date().toISOString(),
+        createdAt: "2026-01-01T00:00:00.000Z",
       }),
     );
 
@@ -1437,7 +1570,7 @@ describe("ProviderRuntimeIngestion", () => {
       type: "turn.started",
       eventId: asEventId("evt-turn-started-unrelated-plan-implementation"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: targetThreadId,
       turnId: replayedTurnId,
     });
@@ -1458,7 +1591,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("finalizes buffered proposed-plan deltas into a first-class proposed plan on turn completion", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "turn.started",
@@ -1522,11 +1655,9 @@ describe("ProviderRuntimeIngestion", () => {
     expect(proposedPlan?.planMarkdown).toBe("## Buffered plan\n\n- first\n- second");
   });
 
-  it("buffers assistant deltas when streaming is disabled until completion", async () => {
-    const harness = await createHarness({
-      serverSettings: { enableAssistantStreaming: false },
-    });
-    const now = new Date().toISOString();
+  it("buffers assistant deltas by default until completion", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "turn.started",
@@ -1593,10 +1724,8 @@ describe("ProviderRuntimeIngestion", () => {
   });
 
   it("flushes and completes buffered assistant text when an approval request opens", async () => {
-    const harness = await createHarness({
-      serverSettings: { enableAssistantStreaming: false },
-    });
-    const now = new Date().toISOString();
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "turn.started",
@@ -1655,10 +1784,8 @@ describe("ProviderRuntimeIngestion", () => {
   });
 
   it("flushes and completes buffered assistant text when user input is requested", async () => {
-    const harness = await createHarness({
-      serverSettings: { enableAssistantStreaming: false },
-    });
-    const now = new Date().toISOString();
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "turn.started",
@@ -1724,9 +1851,7 @@ describe("ProviderRuntimeIngestion", () => {
   });
 
   it("does not create assistant segments for whitespace-only buffered text at approval boundaries", async () => {
-    const harness = await createHarness({
-      serverSettings: { enableAssistantStreaming: false },
-    });
+    const harness = await createHarness();
     const startedAt = "2026-03-28T06:28:00.000Z";
     const pausedAt = "2026-03-28T06:28:01.000Z";
 
@@ -1786,9 +1911,7 @@ describe("ProviderRuntimeIngestion", () => {
   });
 
   it("starts a new buffered assistant message segment after approval and completes without duplication", async () => {
-    const harness = await createHarness({
-      serverSettings: { enableAssistantStreaming: false },
-    });
+    const harness = await createHarness();
     const startedAt = "2026-03-28T06:07:00.000Z";
     const pausedAt = "2026-03-28T06:07:01.000Z";
     const resumedAt = "2026-03-28T06:07:02.000Z";
@@ -2026,9 +2149,9 @@ describe("ProviderRuntimeIngestion", () => {
     ).toBe(" after approval");
   });
 
-  it("streams assistant deltas when enabled while a turn is running", async () => {
+  it("streams assistant deltas when thread.turn.start requests streaming mode", async () => {
     const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -2118,123 +2241,9 @@ describe("ProviderRuntimeIngestion", () => {
     expect(finalMessage?.streaming).toBe(false);
   });
 
-  it("coalesces rapid streaming assistant deltas before completion", async () => {
-    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
-    const now = new Date().toISOString();
-
-    harness.emit({
-      type: "turn.started",
-      eventId: asEventId("evt-turn-started-streaming-coalesced"),
-      provider: ProviderDriverKind.make("codex"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      turnId: asTurnId("turn-streaming-coalesced"),
-    });
-    await waitForThread(
-      harness.readModel,
-      (thread) =>
-        thread.session?.status === "running" &&
-        thread.session?.activeTurnId === "turn-streaming-coalesced",
-    );
-
-    const fixedNowMs = Date.now();
-    const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(fixedNowMs);
-    try {
-      for (const [index, delta] of ["a", "b", "c"].entries()) {
-        harness.emit({
-          type: "content.delta",
-          eventId: asEventId(`evt-message-delta-streaming-coalesced-${index}`),
-          provider: ProviderDriverKind.make("codex"),
-          createdAt: now,
-          threadId: asThreadId("thread-1"),
-          turnId: asTurnId("turn-streaming-coalesced"),
-          itemId: asItemId("item-streaming-coalesced"),
-          payload: {
-            streamKind: "assistant_text",
-            delta,
-          },
-        });
-      }
-      await harness.drain();
-    } finally {
-      dateNowSpy.mockRestore();
-    }
-
-    const midThread = (await harness.readModel()).threads.find(
-      (entry) => entry.id === ThreadId.make("thread-1"),
-    );
-    const midMessage = midThread?.messages.find(
-      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-streaming-coalesced",
-    );
-    expect(midMessage?.text).toBe("a");
-    expect(midMessage?.streaming).toBe(true);
-
-    const midEvents = await Effect.runPromise(
-      Stream.runCollect(harness.engine.readEvents(0)).pipe(
-        Effect.map((chunk) => Array.from(chunk)),
-      ),
-    );
-    const midAssistantEvents = midEvents.filter(
-      (event): event is Extract<(typeof midEvents)[number], { type: "thread.message-sent" }> =>
-        event.type === "thread.message-sent" &&
-        event.payload.messageId === "assistant:item-streaming-coalesced",
-    );
-    expect(midAssistantEvents).toHaveLength(1);
-    expect(midAssistantEvents[0]?.payload.text).toBe("a");
-    expect(midAssistantEvents[0]?.payload.streaming).toBe(true);
-
-    harness.emit({
-      type: "item.completed",
-      eventId: asEventId("evt-message-completed-streaming-coalesced"),
-      provider: ProviderDriverKind.make("codex"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      turnId: asTurnId("turn-streaming-coalesced"),
-      itemId: asItemId("item-streaming-coalesced"),
-      payload: {
-        itemType: "assistant_message",
-        status: "completed",
-      },
-    });
-
-    const finalThread = await waitForThread(harness.readModel, (entry) =>
-      entry.messages.some(
-        (message: ProviderRuntimeTestMessage) =>
-          message.id === "assistant:item-streaming-coalesced" &&
-          !message.streaming &&
-          message.text === "abc",
-      ),
-    );
-    const finalMessage = finalThread.messages.find(
-      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-streaming-coalesced",
-    );
-    expect(finalMessage?.text).toBe("abc");
-    expect(finalMessage?.streaming).toBe(false);
-
-    const finalEvents = await Effect.runPromise(
-      Stream.runCollect(harness.engine.readEvents(0)).pipe(
-        Effect.map((chunk) => Array.from(chunk)),
-      ),
-    );
-    const finalAssistantEvents = finalEvents.filter(
-      (event): event is Extract<(typeof finalEvents)[number], { type: "thread.message-sent" }> =>
-        event.type === "thread.message-sent" &&
-        event.payload.messageId === "assistant:item-streaming-coalesced",
-    );
-    expect(finalAssistantEvents).toHaveLength(3);
-    expect(finalAssistantEvents.map((event) => event.payload.text)).toEqual(["a", "bc", ""]);
-    expect(finalAssistantEvents.map((event) => event.payload.streaming)).toEqual([
-      true,
-      true,
-      false,
-    ]);
-  });
-
   it("spills oversized buffered deltas and still finalizes full assistant text", async () => {
-    const harness = await createHarness({
-      serverSettings: { enableAssistantStreaming: false },
-    });
-    const now = new Date().toISOString();
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
     const oversizedText = "x".repeat(40_000);
 
     harness.emit({
@@ -2295,7 +2304,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("does not duplicate assistant completion when item.completed is followed by turn.completed", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "turn.started",
@@ -2381,7 +2390,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("maps canonical request events into approval activities with requestKind", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "request.opened",
@@ -2447,7 +2456,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("maps runtime.error into errored session state", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "runtime.error",
@@ -2474,7 +2483,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("records runtime.error activities from the typed payload message", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "runtime.error",
@@ -2505,7 +2514,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("keeps the session running when a runtime.warning arrives during an active turn", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "turn.started",
@@ -2549,7 +2558,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("maps session/thread lifecycle and item.started into session/activity projections", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "session.started",
@@ -2601,7 +2610,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("consumes P1 runtime events into thread metadata, diff checkpoints, and activities", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "thread.metadata.updated",
@@ -2689,8 +2698,7 @@ describe("ProviderRuntimeIngestion", () => {
         ) &&
         entry.checkpoints.some(
           (checkpoint: ProviderRuntimeTestCheckpoint) => checkpoint.turnId === "turn-p1",
-        ) &&
-        entry.latestTaskPlan?.status === "active",
+        ),
     );
 
     expect(thread.title).toBe("Renamed by provider");
@@ -2704,14 +2712,6 @@ describe("ProviderRuntimeIngestion", () => {
         : undefined;
     expect(planActivity?.kind).toBe("turn.plan.updated");
     expect(Array.isArray(planPayload?.plan)).toBe(true);
-    expect(thread.latestTaskPlan).toMatchObject({
-      status: "active",
-      explanation: "Working through the plan",
-      steps: [
-        { step: "Inspect files", status: "completed" },
-        { step: "Apply patch", status: "inProgress" },
-      ],
-    });
 
     const toolUpdate = thread.activities.find(
       (activity: ProviderRuntimeTestActivity) => activity.id === "evt-item-updated",
@@ -2744,7 +2744,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("projects context window updates into normalized thread activities", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "thread.token-usage.updated",
@@ -2796,7 +2796,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("projects Codex camelCase token usage payloads into normalized thread activities", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "thread.token-usage.updated",
@@ -2849,7 +2849,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("projects Claude usage snapshots with context window into normalized thread activities", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "thread.token-usage.updated",
@@ -2893,7 +2893,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("projects compacted thread state into context compaction activities", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "thread.state.changed",
@@ -2923,7 +2923,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("projects Codex task lifecycle chunks into thread activities", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "task.started",
@@ -3026,7 +3026,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("projects structured user input request and resolution as thread activities", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "user-input.requested",
@@ -3057,7 +3057,7 @@ describe("ProviderRuntimeIngestion", () => {
       type: "user-input.resolved",
       eventId: asEventId("evt-user-input-resolved"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: asThreadId("thread-1"),
       turnId: asTurnId("turn-user-input"),
       requestId: ApprovalRequestId.make("req-user-input-1"),
@@ -3099,7 +3099,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("continues processing runtime events after a single event handler failure", async () => {
     const harness = await createHarness();
-    const now = new Date().toISOString();
+    const now = "2026-01-01T00:00:00.000Z";
 
     harness.emit({
       type: "content.delta",
@@ -3119,7 +3119,7 @@ describe("ProviderRuntimeIngestion", () => {
       type: "runtime.error",
       eventId: asEventId("evt-runtime-error-after-failure"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: new Date().toISOString(),
+      createdAt: "2026-01-01T00:00:00.000Z",
       threadId: asThreadId("thread-1"),
       turnId: asTurnId("turn-after-failure"),
       payload: {

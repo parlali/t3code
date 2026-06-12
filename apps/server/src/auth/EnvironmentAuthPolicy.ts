@@ -1,12 +1,22 @@
 import type { ServerAuthDescriptor } from "@t3tools/contracts";
-import { Effect, Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 
-import { ServerConfig } from "../../config.ts";
-import { ServerAuthPolicy, type ServerAuthPolicyShape } from "../Services/ServerAuthPolicy.ts";
-import { resolveSessionCookieName } from "../utils.ts";
-import { isLoopbackHost, isWildcardHost } from "../../startupAccess.ts";
+import { ServerConfig } from "../config.ts";
+import { resolveSessionCookieName } from "./utils.ts";
+import { isLoopbackHost, isWildcardHost } from "../startupAccess.ts";
 
-export const makeServerAuthPolicy = Effect.gen(function* () {
+export interface EnvironmentAuthPolicyShape {
+  readonly getDescriptor: () => Effect.Effect<ServerAuthDescriptor>;
+}
+
+export class EnvironmentAuthPolicy extends Context.Service<
+  EnvironmentAuthPolicy,
+  EnvironmentAuthPolicyShape
+>()("t3/auth/EnvironmentAuthPolicy") {}
+
+export const make = Effect.fn("makeEnvironmentAuthPolicy")(function* () {
   const config = yield* ServerConfig;
   const isRemoteReachable = isWildcardHost(config.host) || !isLoopbackHost(config.host);
 
@@ -32,8 +42,7 @@ export const makeServerAuthPolicy = Effect.gen(function* () {
   const descriptor: ServerAuthDescriptor = {
     policy,
     bootstrapMethods,
-    sessionMethods:
-      policy === "unsafe-no-auth" ? [] : ["browser-session-cookie", "bearer-session-token"],
+    sessionMethods: ["browser-session-cookie", "bearer-access-token"],
     sessionCookieName: resolveSessionCookieName({
       mode: config.mode,
       port: config.port,
@@ -41,8 +50,9 @@ export const makeServerAuthPolicy = Effect.gen(function* () {
   };
 
   return {
-    getDescriptor: () => Effect.succeed(descriptor),
-  } satisfies ServerAuthPolicyShape;
+    getDescriptor: () =>
+      Effect.succeed(descriptor).pipe(Effect.withSpan("EnvironmentAuthPolicy.getDescriptor")),
+  } satisfies EnvironmentAuthPolicyShape;
 });
 
-export const ServerAuthPolicyLive = Layer.effect(ServerAuthPolicy, makeServerAuthPolicy);
+export const layer = Layer.effect(EnvironmentAuthPolicy, make());

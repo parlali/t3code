@@ -17,6 +17,7 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
+import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import {
   memo,
@@ -452,6 +453,7 @@ export interface ChatComposerProps {
   ) => void;
 
   onProviderModelSelect: (instanceId: ProviderInstanceId, model: string) => void;
+  getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   toggleInteractionMode: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
@@ -521,6 +523,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onPreviousActivePendingUserInputQuestion,
     onChangeActivePendingUserInputCustomAnswer,
     onProviderModelSelect,
+    getModelDisabledReason,
     toggleInteractionMode,
     handleRuntimeModeChange,
     handleInteractionModeChange,
@@ -1468,7 +1471,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
       if (item.type === "path") {
-        const replacement = `@${item.path} `;
+        const replacement = `${serializeComposerFileLink(item.path)} `;
         const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
           snapshot.value,
           trigger.rangeEnd,
@@ -2370,6 +2373,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   onOpenChange={(open) => {
                     setIsComposerModelPickerOpen(open);
                   }}
+                  getModelDisabledReason={getModelDisabledReason}
                   onInstanceModelChange={onProviderModelSelect}
                 />
 

@@ -3,7 +3,6 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
 import { ensureEnvironmentApi } from "../environmentApi";
-import { invalidateGitQueries } from "./gitReactQuery";
 import { refreshGitStatus } from "./gitStatusState";
 import { invalidateProjectQueries } from "./projectReactQuery";
 
@@ -33,7 +32,9 @@ interface WorkspaceRefreshState {
 }
 
 const NOOP: () => void = () => undefined;
+const WORKSPACE_REFRESH_MIN_INTERVAL_MS = 2_500;
 const workspaceRefreshStates = new Map<string, WorkspaceRefreshState>();
+const workspaceRefreshLastStartedAt = new Map<string, number>();
 const watchedProjectEntries = new Map<string, WatchedProjectEntries>();
 
 function getWorkspaceTargetKey(target: WorkspaceTarget): string | null {
@@ -143,18 +144,21 @@ export function refreshWorkspaceTarget(input: RefreshWorkspaceTargetInput): Prom
         environmentId: input.environmentId,
         cwd: input.cwd,
       }),
-      invalidateGitQueries(input.queryClient, {
-        environmentId: input.environmentId,
-        cwd: input.cwd,
-      }),
-      refreshGitStatus({ environmentId: input.environmentId, cwd: input.cwd }, { force: true }),
+      refreshGitStatus({ environmentId: input.environmentId, cwd: input.cwd }),
     ]).then(() => undefined);
 
   state.promise = Promise.resolve()
     .then(async () => {
+      const lastStartedAt = workspaceRefreshLastStartedAt.get(targetKey) ?? 0;
+      const waitMs = Math.max(0, WORKSPACE_REFRESH_MIN_INTERVAL_MS - (Date.now() - lastStartedAt));
+      if (waitMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+
       state.started = true;
       do {
         state.pending = false;
+        workspaceRefreshLastStartedAt.set(targetKey, Date.now());
         await runRefresh();
       } while (state.pending);
     })

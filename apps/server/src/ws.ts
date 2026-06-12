@@ -10,6 +10,8 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL_MS,
+  EnvironmentAuthInvalidError,
+  EnvironmentInternalError,
   type AuthAccessStreamEvent,
   AuthSessionId,
   CommandId,
@@ -40,7 +42,7 @@ import {
   WsRpcGroup,
 } from "@t3tools/contracts";
 import { clamp } from "effect/Number";
-import { HttpRouter, HttpServerRequest } from "effect/unstable/http";
+import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery.ts";
@@ -78,7 +80,7 @@ import { GitWorkflowService } from "./git/GitWorkflowService.ts";
 import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptRunner.ts";
 import { RepositoryIdentityResolver } from "./project/Services/RepositoryIdentityResolver.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
-import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as SourceControlDiscoveryLayer from "./sourceControl/SourceControlDiscovery.ts";
 import { SourceControlRepositoryService } from "./sourceControl/SourceControlRepositoryService.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
@@ -90,15 +92,9 @@ import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as VcsProcess from "./vcs/VcsProcess.ts";
-import {
-  BootstrapCredentialService,
-  type BootstrapCredentialChange,
-} from "./auth/Services/BootstrapCredentialService.ts";
-import {
-  SessionCredentialService,
-  type SessionCredentialChange,
-} from "./auth/Services/SessionCredentialService.ts";
-import { respondToAuthError } from "./auth/http.ts";
+import { PairingGrantStore, type BootstrapCredentialChange } from "./auth/PairingGrantStore.ts";
+import { SessionStore, type SessionCredentialChange } from "./auth/SessionStore.ts";
+import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import { loadProviderUsageSnapshot } from "./provider/providerUsage.ts";
 
 function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
@@ -256,7 +252,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
       const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
       const serverEnvironment = yield* ServerEnvironment;
-      const serverAuth = yield* ServerAuth;
+      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
       const sourceControlDiscovery = yield* SourceControlDiscoveryLayer.SourceControlDiscovery;
       const automaticGitFetchInterval = serverSettings.getSettings.pipe(
         Effect.map((settings) => Duration.millis(settings.automaticGitFetchInterval)),
@@ -267,8 +263,8 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         ),
       );
       const sourceControlRepositories = yield* SourceControlRepositoryService;
-      const bootstrapCredentials = yield* BootstrapCredentialService;
-      const sessions = yield* SessionCredentialService;
+      const bootstrapCredentials = yield* PairingGrantStore;
+      const sessions = yield* SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const toDispatchCommandError = (cause: unknown, fallbackMessage: string) =>
@@ -1618,9 +1614,14 @@ export const websocketRpcRouteLayer = Layer.unwrap(
       "/ws",
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
-        const serverAuth = yield* ServerAuth;
-        const sessions = yield* SessionCredentialService;
-        const session = yield* serverAuth.authenticateWebSocketUpgrade(request);
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore;
+        const session = yield* serverAuth.authenticateWebSocketUpgrade(request).pipe(
+          Effect.catchTags({
+            ServerAuthInvalidCredentialError: (error) => failEnvironmentAuthInvalid(error.reason),
+            ServerAuthInternalError: (error) => failEnvironmentInternal("internal_error", error),
+          }),
+        );
         const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
           spanPrefix: "ws.rpc",
           spanAttributes: {
@@ -1661,7 +1662,12 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           () => rpcWebSocketHttpEffect,
           () => sessions.markDisconnected(session.sessionId),
         );
-      }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+      }).pipe(
+        Effect.catchTags({
+          EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+          EnvironmentInternalError: HttpServerRespondable.toResponse,
+        }),
+      ),
     ),
   ),
 );

@@ -1,3 +1,4 @@
+import { httpHeaderRedactionLayer } from "@t3tools/shared/httpObservability";
 import { Effect, Layer, References, Tracer } from "effect";
 import { OtlpMetrics, OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 
@@ -16,6 +17,7 @@ export const ObservabilityLive = Layer.unwrap(
     const traceReferencesLayer = Layer.mergeAll(
       Layer.succeed(Tracer.MinimumTraceLevel, config.traceMinLevel),
       Layer.succeed(References.TracerTimingEnabled, config.traceTimingEnabled),
+      httpHeaderRedactionLayer,
     );
 
     const tracerLayer = Layer.unwrap(

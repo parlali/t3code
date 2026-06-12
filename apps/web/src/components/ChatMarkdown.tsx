@@ -1,14 +1,24 @@
 import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  Maximize2Icon,
+  Minimize2Icon,
+  WrapTextIcon,
+} from "lucide-react";
+import type { ServerProviderSkill } from "@t3tools/contracts";
 import React, {
   Children,
   Suspense,
+  type ClipboardEvent as ReactClipboardEvent,
   type MouseEvent as ReactMouseEvent,
   isValidElement,
   use,
   useCallback,
   memo,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -17,18 +27,40 @@ import React, {
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
+import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
+import {
+  getVscodeIconUrlForEntry,
+  hasSpecificVscodeIconForFileName,
+  syntheticFileNameForLanguageId,
+} from "../vscode-icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { Button } from "./ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
+import { ScrollArea } from "./ui/scroll-area";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { openInPreferredEditor } from "../editorPreferences";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
-import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "../markdown-links";
+import {
+  chatMarkdownClipboardPayload,
+  serializeTableElementToCsv,
+  serializeTableElementToMarkdown,
+} from "../markdown-clipboard";
+import {
+  normalizeMarkdownLinkDestination,
+  resolveMarkdownFileLinkMeta,
+  rewriteMarkdownFileUriHref,
+} from "../markdown-links";
 import { readLocalApi } from "../localApi";
-import { requestWorkbenchOpen } from "../workbenchEvents";
 import { cn } from "../lib/utils";
 
 class CodeHighlightErrorBoundary extends React.Component<
@@ -56,7 +88,13 @@ interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
+  skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  className?: string;
+  /** Treat single newlines as hard breaks — chat-style user input. */
+  lineBreaks?: boolean;
 }
+
+const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
@@ -66,12 +104,83 @@ const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
+const MERMAID_RENDER_PREFIX = "chat-markdown-mermaid";
+const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    "*": (defaultSchema.attributes?.["*"] ?? []).filter((attribute) => attribute !== "title"),
+    code: [...(defaultSchema.attributes?.code ?? []), "dataCodeMeta"],
+  },
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), "file"],
+  },
+} satisfies Parameters<typeof rehypeSanitize>[0];
 
 function extractFenceLanguage(className: string | undefined): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
   const raw = match?.[1] ?? "text";
   // Shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
   return raw === "gitignore" ? "ini" : raw;
+}
+
+const FENCE_TITLE_ATTR_REGEX = /(?:^|\s)(?:title|file(?:name)?)=(?:"([^"]+)"|'([^']+)'|(\S+))/i;
+const FENCE_FILENAME_TOKEN_REGEX = /^[\w@][\w@./-]*\.[A-Za-z0-9]+$/;
+
+/** Pulls a filename out of fence meta: ```ts title="x.ts" / ```ts src/main.ts */
+function extractFenceTitle(meta: string | undefined): string | null {
+  if (!meta) return null;
+  const attrMatch = FENCE_TITLE_ATTR_REGEX.exec(meta);
+  const attrTitle = attrMatch?.[1] ?? attrMatch?.[2] ?? attrMatch?.[3];
+  if (attrTitle) return attrTitle;
+  return meta.split(/\s+/).find((candidate) => FENCE_FILENAME_TOKEN_REGEX.test(candidate)) ?? null;
+}
+
+function extractPreCodeMeta(node: unknown): string | undefined {
+  const children = (
+    node as
+      | {
+          children?: Array<{
+            type?: string;
+            tagName?: string;
+            data?: { meta?: unknown };
+            properties?: { dataCodeMeta?: unknown };
+          }>;
+        }
+      | undefined
+  )?.children;
+  const codeNode = children?.find((child) => child?.type === "element" && child.tagName === "code");
+  const meta = codeNode?.properties?.dataCodeMeta ?? codeNode?.data?.meta;
+  return typeof meta === "string" && meta.trim().length > 0 ? meta.trim() : undefined;
+}
+
+type MarkdownAstNode = {
+  type?: string;
+  meta?: unknown;
+  data?: {
+    hProperties?: Record<string, unknown>;
+  };
+  children?: MarkdownAstNode[];
+};
+
+function remarkPreserveCodeMeta() {
+  return (tree: MarkdownAstNode) => {
+    const visit = (node: MarkdownAstNode) => {
+      if (node.type === "code" && typeof node.meta === "string" && node.meta.trim().length > 0) {
+        node.data = {
+          ...node.data,
+          hProperties: {
+            ...node.data?.hProperties,
+            dataCodeMeta: node.meta.trim(),
+          },
+        };
+      }
+      node.children?.forEach(visit);
+    };
+
+    visit(tree);
+  };
 }
 
 function nodeToPlainText(node: ReactNode): string {
@@ -138,9 +247,324 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   return promise;
 }
 
-function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
+function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const tableRef = useRef<HTMLTableElement | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const expandLabel = expanded ? "Collapse table cells" : "Expand table cells";
+  const copyLabel = copied ? "Copied" : "Copy table";
+
+  function toggleExpanded() {
+    const table = tableRef.current;
+    if (!table) return;
+
+    if (!expanded) {
+      const rows = [...table.rows];
+      const columnWidths = rows.reduce<number[]>((widths, row) => {
+        [...row.cells].forEach((cell, columnIndex) => {
+          widths[columnIndex] = Math.max(
+            widths[columnIndex] ?? 0,
+            cell.getBoundingClientRect().width,
+          );
+        });
+        return widths;
+      }, []);
+
+      [...(table.tHead?.rows[0]?.cells ?? [])].forEach((cell, columnIndex) => {
+        cell.style.minWidth = `${columnWidths[columnIndex] ?? cell.getBoundingClientRect().width}px`;
+      });
+    }
+
+    setExpanded((value) => !value);
+  }
+
+  const handleCopy = useCallback((format: "markdown" | "csv") => {
+    const table = containerRef.current?.querySelector("table");
+    if (!table || typeof navigator === "undefined" || navigator.clipboard == null) {
+      return;
+    }
+    const text =
+      format === "markdown"
+        ? serializeTableElementToMarkdown(table)
+        : serializeTableElementToCsv(table);
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        if (copiedTimerRef.current != null) {
+          clearTimeout(copiedTimerRef.current);
+        }
+        setCopied(true);
+        copiedTimerRef.current = setTimeout(() => {
+          setCopied(false);
+          copiedTimerRef.current = null;
+        }, 1200);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (copiedTimerRef.current != null) {
+        clearTimeout(copiedTimerRef.current);
+        copiedTimerRef.current = null;
+      }
+    },
+    [],
+  );
+
+  return (
+    <div
+      ref={containerRef}
+      className="chat-markdown-table-container"
+      data-expanded={expanded ? "true" : "false"}
+    >
+      <ScrollArea
+        chainVerticalScroll
+        scrollFade
+        hideScrollbars
+        className="w-full max-w-full rounded-none"
+      >
+        <table ref={tableRef} {...props}>
+          {children}
+        </table>
+      </ScrollArea>
+      <div className="chat-markdown-table-footer select-none">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="chat-markdown-chrome-action"
+                aria-pressed={expanded}
+                onClick={toggleExpanded}
+                aria-label={expandLabel}
+              />
+            }
+          >
+            {expanded ? <Minimize2Icon className="size-3" /> : <Maximize2Icon className="size-3" />}
+          </TooltipTrigger>
+          <TooltipPopup side="top">{expandLabel}</TooltipPopup>
+        </Tooltip>
+        <Menu>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <MenuTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="chat-markdown-chrome-action"
+                      aria-label={copyLabel}
+                    />
+                  }
+                />
+              }
+            >
+              {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{copyLabel}</TooltipPopup>
+          </Tooltip>
+          <MenuPopup align="end">
+            <MenuItem onClick={() => handleCopy("markdown")}>Copy as Markdown</MenuItem>
+            <MenuItem onClick={() => handleCopy("csv")}>Copy as CSV</MenuItem>
+          </MenuPopup>
+        </Menu>
+      </div>
+    </div>
+  );
+}
+
+function MarkdownDetails({
+  children,
+  open = false,
+}: Pick<React.ComponentProps<"details">, "children" | "open">) {
+  const [isOpen, setIsOpen] = useState(open);
+  const childNodes = Children.toArray(children);
+  const summaryIndex = childNodes.findIndex(
+    (child) => isValidElement(child) && child.type === "summary",
+  );
+  const summaryNode = summaryIndex >= 0 ? childNodes[summaryIndex] : null;
+  const summary =
+    isValidElement<{ children?: ReactNode }>(summaryNode) && summaryNode.props.children
+      ? summaryNode.props.children
+      : "Details";
+  const content = childNodes.filter((_, index) => index !== summaryIndex);
+
+  return (
+    <Collapsible
+      defaultOpen={open}
+      onOpenChange={setIsOpen}
+      className="chat-markdown-details my-2 border-y border-border/60"
+      data-markdown-details=""
+      data-markdown-details-open={isOpen ? "true" : "false"}
+    >
+      <CollapsibleTrigger
+        className="flex w-full items-center gap-2 py-2 text-left text-sm font-medium text-foreground data-panel-open:[&_svg]:rotate-90"
+        data-markdown-details-summary=""
+      >
+        <ChevronRightIcon
+          className="size-4 shrink-0 text-muted-foreground transition-transform"
+          aria-hidden
+        />
+        <span>{summary}</span>
+      </CollapsibleTrigger>
+      <CollapsiblePanel>
+        <div className="pb-3 ps-6 text-foreground/80" data-markdown-details-content="">
+          {content}
+        </div>
+      </CollapsiblePanel>
+    </Collapsible>
+  );
+}
+
+/**
+ * Filename titles render icon + text; language-only titles render just the
+ * icon (redundant next to its own name) and fall back to the language text
+ * when no specific icon exists or it fails to load.
+ */
+function MarkdownCodeBlockTitleContent({
+  fenceTitle,
+  language,
+  theme,
+}: {
+  fenceTitle: string | null;
+  language: string;
+  theme: "light" | "dark";
+}) {
+  const [failedIconUrl, setFailedIconUrl] = useState<string | null>(null);
+
+  if (fenceTitle) {
+    return (
+      <>
+        <VscodeEntryIcon pathValue={fenceTitle} kind="file" theme={theme} className="size-3.5" />
+        <span className="truncate">{fenceTitle}</span>
+      </>
+    );
+  }
+
+  const fileName = syntheticFileNameForLanguageId(language);
+  const iconUrl = hasSpecificVscodeIconForFileName(fileName, theme)
+    ? getVscodeIconUrlForEntry(fileName, "file", theme)
+    : null;
+  if (!iconUrl || failedIconUrl === iconUrl) {
+    return <span className="truncate">{language}</span>;
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className="inline-flex shrink-0 rounded-sm" aria-label={`Language: ${language}`} />
+        }
+      >
+        <img
+          src={iconUrl}
+          alt=""
+          aria-hidden
+          className="size-3.5 shrink-0"
+          loading="lazy"
+          draggable={false}
+          onError={() => setFailedIconUrl(iconUrl)}
+        />
+      </TooltipTrigger>
+      <TooltipPopup side="top">{language}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function MarkdownMermaidDiagram({ code, theme }: { code: string; theme: "light" | "dark" }) {
+  const reactId = useId();
+  const renderId = useMemo(
+    () => `${MERMAID_RENDER_PREFIX}-${reactId.replace(/[^A-Za-z0-9_-]/g, "")}`,
+    [reactId],
+  );
+  const [renderedSvg, setRenderedSvg] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRenderedSvg(null);
+    setRenderError(null);
+
+    void import("mermaid")
+      .then(async ({ default: mermaid }) => {
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          theme: theme === "dark" ? "dark" : "default",
+          flowchart: { htmlLabels: false, useMaxWidth: true },
+          sequence: { useMaxWidth: true },
+          gantt: { useMaxWidth: true },
+        });
+        const { svg } = await mermaid.render(renderId, code);
+        if (!cancelled) {
+          setRenderedSvg(svg);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setRenderError(
+            error instanceof Error ? error.message : "Unable to render Mermaid diagram.",
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [code, renderId, theme]);
+
+  if (renderError) {
+    return (
+      <div className="chat-markdown-mermaid" data-render-state="error">
+        <p className="text-xs text-destructive">{renderError}</p>
+        <pre>
+          <code>{code}</code>
+        </pre>
+      </div>
+    );
+  }
+
+  if (renderedSvg) {
+    return (
+      <div
+        className="chat-markdown-mermaid"
+        data-render-state="rendered"
+        dangerouslySetInnerHTML={{ __html: renderedSvg }}
+      />
+    );
+  }
+
+  return (
+    <div className="chat-markdown-mermaid" data-render-state="loading">
+      <p className="text-xs text-muted-foreground">Rendering diagram...</p>
+    </div>
+  );
+}
+
+function MarkdownCodeBlock({
+  code,
+  language,
+  fenceTitle,
+  theme,
+  children,
+}: {
+  code: string;
+  language: string;
+  fenceTitle: string | null;
+  theme: "light" | "dark";
+  children: ReactNode;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [wrapped, setWrapped] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wrapLabel = wrapped ? "Disable line wrap" : "Wrap lines";
+  const copyLabel = copied ? "Copied" : "Copy code";
   const handleCopy = useCallback(() => {
     if (typeof navigator === "undefined" || navigator.clipboard == null) {
       return;
@@ -171,16 +595,57 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
   );
 
   return (
-    <div className="chat-markdown-codeblock leading-snug">
-      <button
-        type="button"
-        className="chat-markdown-copy-button"
-        onClick={handleCopy}
-        title={copied ? "Copied" : "Copy code"}
-        aria-label={copied ? "Copied" : "Copy code"}
-      >
-        {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
-      </button>
+    <div
+      className="chat-markdown-codeblock leading-snug"
+      data-language={language}
+      data-wrap={wrapped ? "true" : "false"}
+    >
+      <div className="chat-markdown-codeblock-header select-none">
+        <span className="chat-markdown-codeblock-title">
+          <MarkdownCodeBlockTitleContent
+            fenceTitle={fenceTitle}
+            language={language}
+            theme={theme}
+          />
+        </span>
+        <span className="flex items-center gap-0.5">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="chat-markdown-chrome-action"
+                  aria-pressed={wrapped}
+                  onClick={() => setWrapped((value) => !value)}
+                  aria-label={wrapLabel}
+                />
+              }
+            >
+              <WrapTextIcon className="size-3" />
+            </TooltipTrigger>
+            <TooltipPopup side="top">{wrapLabel}</TooltipPopup>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="chat-markdown-chrome-action"
+                  onClick={handleCopy}
+                  aria-label={copyLabel}
+                />
+              }
+            >
+              {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{copyLabel}</TooltipPopup>
+          </Tooltip>
+        </span>
+      </div>
       {children}
     </div>
   );
@@ -271,20 +736,17 @@ function UncachedShikiCodeBlock({
 interface MarkdownFileLinkProps {
   href: string;
   targetPath: string;
+  iconPath: string;
   displayPath: string;
-  filePath: string;
   label: string;
-  line?: number;
-  column?: number;
+  copyMarkdown: string;
   theme: "light" | "dark";
   className?: string | undefined;
 }
 
 const MARKDOWN_LINK_HREF_PATTERN = /\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
 const MARKDOWN_FILE_LINK_CLASS_NAME =
-  "chat-markdown-file-link relative top-[2px] max-w-full no-underline";
-const MARKDOWN_FILE_LINK_ICON_CLASS_NAME = "chat-markdown-file-link-icon size-3.5 shrink-0";
-const MARKDOWN_FILE_LINK_LABEL_CLASS_NAME = "chat-markdown-file-link-label truncate";
+  "chat-markdown-file-link cursor-pointer transition-colors hover:bg-accent/70";
 
 function pathParentSegments(path: string): string[] {
   const normalized = path.replaceAll("\\", "/");
@@ -357,29 +819,80 @@ function extractMarkdownLinkHrefs(text: string): string[] {
 }
 
 function normalizeMarkdownLinkHrefKey(href: string): string {
-  return rewriteMarkdownFileUriHref(href.trim()) ?? href.trim();
+  const normalizedHref = normalizeMarkdownLinkDestination(href);
+  return rewriteMarkdownFileUriHref(normalizedHref) ?? normalizedHref;
+}
+
+const SANITIZED_FRAGMENT_PREFIX = "user-content-";
+
+function decodeMarkdownFragmentId(href: string): string {
+  const encodedId = href.slice(1);
+  try {
+    return decodeURIComponent(encodedId);
+  } catch {
+    return encodedId;
+  }
+}
+
+function normalizeSanitizedFragmentId(id: string): string {
+  let normalizedId = id;
+  while (normalizedId.startsWith(SANITIZED_FRAGMENT_PREFIX)) {
+    normalizedId = normalizedId.slice(SANITIZED_FRAGMENT_PREFIX.length);
+  }
+  return normalizedId;
+}
+
+function findMarkdownFragmentTarget(anchor: HTMLAnchorElement, href: string): HTMLElement | null {
+  const decodedId = decodeMarkdownFragmentId(href);
+  const normalizedId = normalizeSanitizedFragmentId(decodedId);
+  const matchesFragment = (element: HTMLElement) =>
+    element.id === decodedId || normalizeSanitizedFragmentId(element.id) === normalizedId;
+  const markdownRoot = anchor.closest<HTMLElement>(".chat-markdown");
+  if (markdownRoot) {
+    const localTargets = Array.from(markdownRoot.querySelectorAll<HTMLElement>("[id]"));
+    const localTarget = localTargets.find(matchesFragment);
+    if (localTarget) return localTarget;
+  }
+
+  return (
+    document.getElementById(decodedId) ??
+    Array.from(document.querySelectorAll<HTMLElement>("[id]")).find(matchesFragment) ??
+    null
+  );
+}
+
+function handleMarkdownFragmentClick(event: ReactMouseEvent<HTMLAnchorElement>, href: string) {
+  if (
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  ) {
+    return;
+  }
+
+  const target = findMarkdownFragmentTarget(event.currentTarget, href);
+  if (!target) return;
+
+  event.preventDefault();
+  const nextUrl = new URL(window.location.href);
+  nextUrl.hash = href.slice(1);
+  window.history.pushState(window.history.state, "", nextUrl);
+  target.scrollIntoView({ block: "nearest" });
 }
 
 const MarkdownFileLink = memo(function MarkdownFileLink({
   href,
   targetPath,
+  iconPath,
   displayPath,
-  filePath,
   label,
-  line,
-  column,
+  copyMarkdown,
   theme,
   className,
 }: MarkdownFileLinkProps) {
-  const handleOpenInWorkbench = useCallback(() => {
-    requestWorkbenchOpen({
-      mode: "files",
-      path: filePath,
-      ...(line !== undefined ? { line } : {}),
-      ...(column !== undefined ? { column } : {}),
-    });
-  }, [column, filePath, line]);
-
   const handleOpen = useCallback(() => {
     const api = readLocalApi();
     if (!api) {
@@ -471,21 +984,16 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         render={
           <a
             href={href}
-            className={cn(MARKDOWN_FILE_LINK_CLASS_NAME, className)}
+            className={cn(CHAT_FILE_TAG_CHIP_CLASS_NAME, MARKDOWN_FILE_LINK_CLASS_NAME, className)}
+            data-markdown-copy={copyMarkdown}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              handleOpenInWorkbench();
+              handleOpen();
             }}
             onContextMenu={handleContextMenu}
           >
-            <VscodeEntryIcon
-              pathValue={filePath}
-              kind="file"
-              theme={theme}
-              className={cn(MARKDOWN_FILE_LINK_ICON_CLASS_NAME, "text-current")}
-            />
-            <span className={MARKDOWN_FILE_LINK_LABEL_CLASS_NAME}>{label}</span>
+            <FileTagChipContent path={iconPath} label={label} theme={theme} selectable />
           </a>
         }
       />
@@ -508,17 +1016,23 @@ function areMarkdownFileLinkPropsEqual(
   return (
     previous.href === next.href &&
     previous.targetPath === next.targetPath &&
+    previous.iconPath === next.iconPath &&
     previous.displayPath === next.displayPath &&
-    previous.filePath === next.filePath &&
     previous.label === next.label &&
-    previous.line === next.line &&
-    previous.column === next.column &&
+    previous.copyMarkdown === next.copyMarkdown &&
     previous.theme === next.theme &&
     previous.className === next.className
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+function ChatMarkdown({
+  text,
+  cwd,
+  isStreaming = false,
+  skills = EMPTY_MARKDOWN_SKILLS,
+  className,
+  lineBreaks = false,
+}: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownFileLinkMetaByHref = useMemo(() => {
@@ -543,13 +1057,47 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
   const markdownUrlTransform = useCallback((href: string) => {
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
   }, []);
+  // Re-emit highlighted content as markdown so copying out of the rendered
+  // view keeps links, emphasis, lists, and code fences intact.
+  const handleCopy = useCallback((event: ReactClipboardEvent<HTMLDivElement>) => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !event.clipboardData) return;
+    const payload = chatMarkdownClipboardPayload(selection);
+    if (!payload) return;
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", payload.text);
+    event.clipboardData.setData("text/html", payload.html);
+  }, []);
   const markdownComponents = useMemo<Components>(
     () => ({
-      a({ node: _node, href, ...props }) {
+      p({ node: _node, children, ...props }) {
+        return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
+      },
+      li({ node: _node, children, ...props }) {
+        return <li {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</li>;
+      },
+      a({ node: _node, href, children, ...props }) {
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
         const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;
         if (!fileLinkMeta) {
-          return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
+          const isSameDocumentLink = href?.startsWith("#") ?? false;
+          const onClick = props.onClick;
+          return (
+            <a
+              {...props}
+              href={href}
+              target={isSameDocumentLink ? undefined : "_blank"}
+              rel={isSameDocumentLink ? undefined : "noopener noreferrer"}
+              onClick={(event) => {
+                onClick?.(event);
+                if (isSameDocumentLink && href) {
+                  handleMarkdownFragmentClick(event, href);
+                }
+              }}
+            >
+              {children}
+            </a>
+          );
         }
 
         const parentSuffix = fileLinkParentSuffixByPath.get(fileLinkMeta.filePath);
@@ -565,26 +1113,41 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
 
         return (
           <MarkdownFileLink
-            href={href ?? fileLinkMeta.targetPath}
+            href={fileLinkMeta.targetPath}
             targetPath={fileLinkMeta.targetPath}
+            iconPath={fileLinkMeta.filePath}
             displayPath={fileLinkMeta.displayPath}
-            filePath={fileLinkMeta.filePath}
             label={labelParts.join(" · ")}
-            {...(fileLinkMeta.line !== undefined ? { line: fileLinkMeta.line } : {})}
-            {...(fileLinkMeta.column !== undefined ? { column: fileLinkMeta.column } : {})}
+            copyMarkdown={`[${fileLinkMeta.basename}](${normalizedHref})`}
             theme={resolvedTheme}
             className={props.className}
           />
         );
       },
-      pre({ node: _node, children, ...props }) {
+      table({ node: _node, ...props }) {
+        return <MarkdownTable {...props} />;
+      },
+      details({ node: _node, children, open: detailsOpen }) {
+        return <MarkdownDetails open={detailsOpen}>{children}</MarkdownDetails>;
+      },
+      pre({ node, children, ...props }) {
         const codeBlock = extractCodeBlock(children);
         if (!codeBlock) {
           return <pre {...props}>{children}</pre>;
         }
 
+        const language = extractFenceLanguage(codeBlock.className);
+        const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
+        if (language === "mermaid" && !isStreaming) {
+          return <MarkdownMermaidDiagram code={codeBlock.code.trimEnd()} theme={resolvedTheme} />;
+        }
         return (
-          <MarkdownCodeBlock code={codeBlock.code}>
+          <MarkdownCodeBlock
+            code={codeBlock.code}
+            language={language}
+            fenceTitle={fenceTitle}
+            theme={resolvedTheme}
+          >
             <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
               <Suspense fallback={<pre {...props}>{children}</pre>}>
                 <SuspenseShikiCodeBlock
@@ -605,13 +1168,25 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
       isStreaming,
       markdownFileLinkMetaByHref,
       resolvedTheme,
+      skills,
     ],
   );
 
   return (
-    <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
+    <div
+      className={cn(
+        "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80",
+        className,
+      )}
+      onCopy={handleCopy}
+    >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={
+          lineBreaks
+            ? [remarkGfm, remarkBreaks, remarkPreserveCodeMeta]
+            : [remarkGfm, remarkPreserveCodeMeta]
+        }
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA]]}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >

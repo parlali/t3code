@@ -1,3 +1,5 @@
+import { parsePatchFiles, type FileDiffMetadata } from "@pierre/diffs";
+
 export const DIFF_THEME_NAMES = {
   light: "pierre-light",
   dark: "pierre-dark",
@@ -36,4 +38,27 @@ export function buildPatchCacheKey(patch: string, scope = "diff-panel"): string 
     SECONDARY_HASH_MULTIPLIER,
   ).toString(36);
   return `${scope}:${normalizedPatch.length}:${primary}:${secondary}`;
+}
+
+export type RenderablePatch =
+  | { kind: "files"; files: FileDiffMetadata[] }
+  | { kind: "raw"; text: string };
+
+export function getRenderablePatch(patch: string, cacheKeyPrefix?: string): RenderablePatch | null {
+  const normalizedPatch = patch.trim();
+  if (normalizedPatch.length === 0) {
+    return null;
+  }
+
+  try {
+    const patches = parsePatchFiles(normalizedPatch, cacheKeyPrefix, false);
+    const files = patches.flatMap((parsedPatch) => parsedPatch.files);
+    return files.length > 0 ? { kind: "files", files } : { kind: "raw", text: normalizedPatch };
+  } catch {
+    return { kind: "raw", text: normalizedPatch };
+  }
+}
+
+export function resolveFileDiffPath(fileDiff: FileDiffMetadata): string {
+  return fileDiff.name || fileDiff.prevName || "diff";
 }

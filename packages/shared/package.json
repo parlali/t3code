@@ -11,6 +11,10 @@
       "types": "./src/advertisedEndpoint.ts",
       "import": "./src/advertisedEndpoint.ts"
     },
+    "./composerTrigger": {
+      "types": "./src/composerTrigger.ts",
+      "import": "./src/composerTrigger.ts"
+    },
     "./git": {
       "types": "./src/git.ts",
       "import": "./src/git.ts"
@@ -26,6 +30,14 @@
     "./observability": {
       "types": "./src/observability.ts",
       "import": "./src/observability.ts"
+    },
+    "./httpObservability": {
+      "types": "./src/httpObservability.ts",
+      "import": "./src/httpObservability.ts"
+    },
+    "./oauthScope": {
+      "types": "./src/oauthScope.ts",
+      "import": "./src/oauthScope.ts"
     },
     "./shell": {
       "types": "./src/shell.ts",

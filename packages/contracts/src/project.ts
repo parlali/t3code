@@ -66,6 +66,7 @@ export type ProjectEntriesReadyEvent = typeof ProjectEntriesReadyEvent.Type;
 export const ProjectEntriesChangedEvent = Schema.Struct({
   type: Schema.Literal("entries-changed"),
   cwd: TrimmedNonEmptyString,
+  changedPaths: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type ProjectEntriesChangedEvent = typeof ProjectEntriesChangedEvent.Type;
 

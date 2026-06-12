@@ -1,0 +1,19 @@
+{
+  "name": "vite-plus",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./test": {
+      "types": "./src/test.ts",
+      "import": "./src/test.ts"
+    },
+    "./test/browser": {
+      "types": "./src/test-browser.ts",
+      "import": "./src/test-browser.ts"
+    }
+  },
+  "dependencies": {
+    "vitest": "catalog:"
+  }
+}

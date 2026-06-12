@@ -131,6 +131,10 @@ export interface ContextMenuItem<T extends string = string> {
   label: string;
   destructive?: boolean;
   disabled?: boolean;
+  /** Renders as a non-interactive section header label. Web fallback only. */
+  header?: boolean;
+  /** Icon keyword resolved by the web fallback. */
+  icon?: string;
   children?: readonly ContextMenuItem<T>[];
 }
 

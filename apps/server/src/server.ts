@@ -1,5 +1,7 @@
+import { EnvironmentHttpApi } from "@t3tools/contracts";
 import { Effect, Layer } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
+import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import type * as NodeHttp from "node:http";
 
 import { ServerConfig } from "./config.ts";
@@ -10,7 +12,7 @@ import {
   attachmentsRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
-  serverEnvironmentRouteLayer,
+  serverEnvironmentHttpApiLayer,
   staticAndDevRouteLayer,
   browserApiCorsLayer,
 } from "./http.ts";
@@ -68,30 +70,15 @@ import * as SourceControlRepositoryService from "./sourceControl/SourceControlRe
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment.ts";
-import {
-  authBearerBootstrapRouteLayer,
-  authBootstrapRouteLayer,
-  authClientsRevokeOthersRouteLayer,
-  authClientsRevokeRouteLayer,
-  authClientsRouteLayer,
-  authPairingLinksRevokeRouteLayer,
-  authPairingLinksRouteLayer,
-  authPairingCredentialRouteLayer,
-  authSessionRouteLayer,
-  authWebSocketTokenRouteLayer,
-} from "./auth/http.ts";
-import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
-import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
+import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
+import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
-import {
-  orchestrationDispatchRouteLayer,
-  orchestrationSnapshotRouteLayer,
-} from "./orchestration/http.ts";
+import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import { NetService } from "@t3tools/shared/Net";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 
@@ -273,10 +260,7 @@ const WorkspaceLayerLive = Layer.mergeAll(
   WorkspaceWatcherLayerLive,
 );
 
-const AuthLayerLive = ServerAuthLive.pipe(
-  Layer.provideMerge(PersistenceLayerLive),
-  Layer.provide(ServerSecretStoreLive),
-);
+const AuthLayerLive = EnvironmentAuth.layer.pipe(Layer.provideMerge(EnvironmentAuth.storageLayer));
 
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(ProviderLayerLive),
@@ -341,22 +325,15 @@ const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
 );
 
 export const makeRoutesLayer = Layer.mergeAll(
-  authBearerBootstrapRouteLayer,
-  authBootstrapRouteLayer,
-  authClientsRevokeOthersRouteLayer,
-  authClientsRevokeRouteLayer,
-  authClientsRouteLayer,
-  authPairingLinksRevokeRouteLayer,
-  authPairingLinksRouteLayer,
-  authPairingCredentialRouteLayer,
-  authSessionRouteLayer,
-  authWebSocketTokenRouteLayer,
+  HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
+    Layer.provide(authHttpApiLayer),
+    Layer.provide(orchestrationHttpApiLayer),
+    Layer.provide(serverEnvironmentHttpApiLayer),
+    Layer.provide(environmentAuthenticatedAuthLayer),
+  ),
   attachmentsRouteLayer,
-  orchestrationDispatchRouteLayer,
-  orchestrationSnapshotRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
-  serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));

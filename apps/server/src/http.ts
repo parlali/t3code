@@ -1,4 +1,9 @@
 import Mime from "@effect/platform-node/Mime";
+import {
+  AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
+  EnvironmentHttpApi,
+} from "@t3tools/contracts";
 import { Data, Effect, FileSystem, Option, Path } from "effect";
 import { cast } from "effect/Function";
 import {
@@ -8,7 +13,9 @@ import {
   HttpRouter,
   HttpServerResponse,
   HttpServerRequest,
+  HttpServerRespondable,
 } from "effect/unstable/http";
+import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import { OtlpTracer } from "effect/unstable/observability";
 
 import {
@@ -21,8 +28,13 @@ import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
-import { ServerAuth } from "./auth/Services/ServerAuth.ts";
-import { respondToAuthError } from "./auth/http.ts";
+import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import {
+  annotateEnvironmentRequest,
+  failEnvironmentAuthInvalid,
+  failEnvironmentInternal,
+  failEnvironmentScopeRequired,
+} from "./auth/http.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import {
   browserApiCorsAllowedHeaders,
@@ -109,11 +121,37 @@ function staticResponseHeaders(
   };
 }
 
-const requireAuthenticatedRequest = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  const serverAuth = yield* ServerAuth;
-  yield* serverAuth.authenticateHttpRequest(request);
-});
+const authenticateRawRouteWithScope = (
+  scope: typeof AuthOrchestrationReadScope | typeof AuthOrchestrationOperateScope,
+) =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+    const session = yield* serverAuth.authenticateHttpRequest(request).pipe(
+      Effect.catchTags({
+        ServerAuthInvalidCredentialError: (error) => failEnvironmentAuthInvalid(error.reason),
+        ServerAuthInternalError: (error) => failEnvironmentInternal("internal_error", error),
+      }),
+    );
+    if (!session.scopes.includes(scope)) {
+      return yield* failEnvironmentScopeRequired(scope);
+    }
+  });
+
+export const serverEnvironmentHttpApiLayer = HttpApiBuilder.group(
+  EnvironmentHttpApi,
+  "metadata",
+  Effect.fnUntraced(function* (handlers) {
+    const serverEnvironment = yield* ServerEnvironment;
+    return handlers.handle(
+      "descriptor",
+      Effect.fn("environment.metadata.descriptor")(function* (args) {
+        yield* annotateEnvironmentRequest(args.endpoint.name);
+        return yield* serverEnvironment.getDescriptor;
+      }),
+    );
+  }),
+);
 
 export const serverEnvironmentRouteLayer = HttpRouter.add(
   "GET",
@@ -129,6 +167,17 @@ export const serverEnvironmentRouteLayer = HttpRouter.add(
   }),
 );
 
+const requireAuthenticatedRequest = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+  yield* serverAuth.authenticateHttpRequest(request).pipe(
+    Effect.catchTags({
+      ServerAuthInvalidCredentialError: (error) => failEnvironmentAuthInvalid(error.reason),
+      ServerAuthInternalError: (error) => failEnvironmentInternal("internal_error", error),
+    }),
+  );
+});
+
 class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{
   readonly cause: unknown;
   readonly bodyJson: OtlpTracer.TraceData;
@@ -138,7 +187,7 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
   "POST",
   OTLP_TRACES_PROXY_PATH,
   Effect.gen(function* () {
-    yield* requireAuthenticatedRequest;
+    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
     const request = yield* HttpServerRequest.HttpServerRequest;
     const config = yield* ServerConfig;
     const otlpTracesUrl = config.otlpTracesUrl;
@@ -180,14 +229,20 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
           Effect.succeed(HttpServerResponse.text("Trace export failed.", { status: 502 })),
         ),
       );
-  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
 );
 
 export const attachmentsRouteLayer = HttpRouter.add(
   "GET",
   `${ATTACHMENTS_ROUTE_PREFIX}/*`,
   Effect.gen(function* () {
-    yield* requireAuthenticatedRequest;
+    yield* authenticateRawRouteWithScope(AuthOrchestrationReadScope);
     const request = yield* HttpServerRequest.HttpServerRequest;
     const url = HttpServerRequest.toURL(request);
     if (Option.isNone(url)) {
@@ -236,14 +291,20 @@ export const attachmentsRouteLayer = HttpRouter.add(
         Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
       ),
     );
-  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
 );
 
 export const projectFaviconRouteLayer = HttpRouter.add(
   "GET",
   "/api/project-favicon",
   Effect.gen(function* () {
-    yield* requireAuthenticatedRequest;
+    yield* authenticateRawRouteWithScope(AuthOrchestrationReadScope);
     const request = yield* HttpServerRequest.HttpServerRequest;
     const url = HttpServerRequest.toURL(request);
     if (Option.isNone(url)) {
@@ -277,7 +338,13 @@ export const projectFaviconRouteLayer = HttpRouter.add(
         Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
       ),
     );
-  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
 );
 
 export const staticAndDevRouteLayer = HttpRouter.add(

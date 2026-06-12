@@ -13,6 +13,7 @@ import { reconnectAllEnvironmentConnections } from "../environments/runtime";
 
 const RECOVERED_TOAST_MIN_DISCONNECT_MS = 10_000;
 const RECOVERED_TOAST_THROTTLE_MS = 60_000;
+const RECONNECT_TOAST_GRACE_MS = 4_000;
 
 const connectionTimeFormatter = new Intl.DateTimeFormat(undefined, {
   day: "numeric",
@@ -139,9 +140,13 @@ export function WebSocketConnectionCoordinator() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const toastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
   const toastResetTimerRef = useRef<number | null>(null);
+  const reconnectToastGraceTimerRef = useRef<number | null>(null);
   const lastRecoveredToastAtRef = useRef(0);
   const previousUiStateRef = useRef<WsConnectionUiState>(getWsConnectionUiState(status));
   const previousDisconnectedAtRef = useRef<string | null>(status.disconnectedAt);
+  const [reconnectToastDisconnectedAt, setReconnectToastDisconnectedAt] = useState<string | null>(
+    null,
+  );
 
   const runReconnect = useEffectEvent((showFailureToast: boolean) => {
     if (toastResetTimerRef.current !== null) {
@@ -186,10 +191,54 @@ export function WebSocketConnectionCoordinator() {
   }, [status.nextRetryAt, status.reconnectPhase]);
 
   useEffect(() => {
+    const clearGraceTimer = () => {
+      if (reconnectToastGraceTimerRef.current === null) {
+        return;
+      }
+      window.clearTimeout(reconnectToastGraceTimerRef.current);
+      reconnectToastGraceTimerRef.current = null;
+    };
+
+    const uiState = getWsConnectionUiState(status);
+    const shouldArmGrace =
+      status.hasConnected &&
+      uiState === "reconnecting" &&
+      status.reconnectPhase !== "exhausted" &&
+      status.disconnectedAt !== null;
+
+    if (!shouldArmGrace) {
+      clearGraceTimer();
+      setReconnectToastDisconnectedAt(null);
+      return;
+    }
+
+    const disconnectedAt = status.disconnectedAt;
+    const disconnectedAtMs = new Date(disconnectedAt).getTime();
+    const elapsedMs = Number.isFinite(disconnectedAtMs) ? Date.now() - disconnectedAtMs : 0;
+
+    if (elapsedMs >= RECONNECT_TOAST_GRACE_MS) {
+      clearGraceTimer();
+      setReconnectToastDisconnectedAt(disconnectedAt);
+      return;
+    }
+
+    clearGraceTimer();
+    reconnectToastGraceTimerRef.current = window.setTimeout(() => {
+      reconnectToastGraceTimerRef.current = null;
+      setReconnectToastDisconnectedAt(disconnectedAt);
+    }, RECONNECT_TOAST_GRACE_MS - elapsedMs);
+
+    return clearGraceTimer;
+  }, [status]);
+
+  useEffect(() => {
     const uiState = getWsConnectionUiState(status);
     const previousUiState = previousUiStateRef.current;
     const previousDisconnectedAt = previousDisconnectedAtRef.current;
-    const shouldShowReconnectToast = status.hasConnected && uiState === "reconnecting";
+    const shouldShowReconnectToast =
+      status.hasConnected &&
+      uiState === "reconnecting" &&
+      reconnectToastDisconnectedAt === status.disconnectedAt;
     const shouldShowOfflineToast = uiState === "offline" && status.disconnectedAt !== null;
     const shouldShowExhaustedToast = status.hasConnected && status.reconnectPhase === "exhausted";
 
@@ -289,12 +338,15 @@ export function WebSocketConnectionCoordinator() {
 
     previousUiStateRef.current = uiState;
     previousDisconnectedAtRef.current = status.disconnectedAt;
-  }, [nowMs, status]);
+  }, [nowMs, reconnectToastDisconnectedAt, status]);
 
   useEffect(() => {
     return () => {
       if (toastResetTimerRef.current !== null) {
         window.clearTimeout(toastResetTimerRef.current);
+      }
+      if (reconnectToastGraceTimerRef.current !== null) {
+        window.clearTimeout(reconnectToastGraceTimerRef.current);
       }
     };
   }, []);

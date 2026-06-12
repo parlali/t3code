@@ -224,6 +224,7 @@ function makePairingLink(input: {
 }): AuthAccessSnapshot["pairingLinks"][number] {
   return {
     ...input,
+    scopes: input.role === "owner" ? ["access:read", "access:write"] : ["orchestration:read"],
     createdAt: makeUtc(input.createdAt),
     expiresAt: makeUtc(input.expiresAt),
   };
@@ -250,6 +251,7 @@ function makeClientSession(input: {
 }): AuthAccessSnapshot["clientSessions"][number] {
   return {
     ...input,
+    scopes: input.role === "owner" ? ["access:read", "access:write"] : ["orchestration:read"],
     client: {
       deviceType: "unknown",
       ...input.client,

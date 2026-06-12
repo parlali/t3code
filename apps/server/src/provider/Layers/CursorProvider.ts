@@ -11,7 +11,7 @@ import type {
 } from "@t3tools/contracts";
 import { ProviderDriverKind } from "@t3tools/contracts";
 import type * as EffectAcpSchema from "effect-acp/schema";
-import { Cause, Effect, Exit, FileSystem, Layer, Option, Path, Result } from "effect";
+import { Cause, Effect, Exit, FileSystem, Layer, Option, Path, Result, Schema } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import {
@@ -35,6 +35,7 @@ import {
   type ProviderMaintenanceCapabilities,
 } from "../providerMaintenance.ts";
 import { AcpSessionRuntime } from "../acp/AcpSessionRuntime.ts";
+import { CursorListAvailableModelsResponse } from "../acp/CursorAcpExtension.ts";
 
 const PROVIDER = ProviderDriverKind.make("cursor");
 const CURSOR_PRESENTATION = {
@@ -417,6 +418,28 @@ export function buildCursorDiscoveredModelsFromConfigOptions(
   );
 }
 
+function buildCursorDiscoveredModelsFromAvailableModelsResponse(
+  response: typeof CursorListAvailableModelsResponse.Type,
+): ReadonlyArray<ServerProviderModel> {
+  return buildCursorDiscoveredModels(
+    response.models.flatMap((model) => {
+      const slug = model.value.trim();
+      const name = model.name.trim();
+      if (!slug || !name) {
+        return [];
+      }
+
+      return [
+        {
+          slug,
+          name,
+          capabilities: buildCursorCapabilitiesFromConfigOptions(model.configOptions),
+        },
+      ];
+    }),
+  );
+}
+
 const makeCursorAcpProbeRuntime = (
   cursorSettings: CursorSettings,
   environment: NodeJS.ProcessEnv = process.env,
@@ -572,11 +595,20 @@ export const discoverCursorModelsViaAcp = (
   withCursorAcpProbeRuntime(
     cursorSettings,
     (acp) =>
-      Effect.map(acp.start(), (started) =>
-        buildCursorDiscoveredModelsFromConfigOptions(
-          started.sessionSetupResult.configOptions ?? [],
-        ),
-      ),
+      Effect.gen(function* () {
+        const started = yield* acp.start();
+        return yield* acp.request("cursor/list_available_models", {}).pipe(
+          Effect.flatMap((response) =>
+            Schema.decodeUnknownEffect(CursorListAvailableModelsResponse)(response),
+          ),
+          Effect.map(buildCursorDiscoveredModelsFromAvailableModelsResponse),
+          Effect.orElseSucceed(() =>
+            buildCursorDiscoveredModelsFromConfigOptions(
+              started.sessionSetupResult.configOptions ?? [],
+            ),
+          ),
+        );
+      }),
     environment,
   );
 
